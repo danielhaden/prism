@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Project status / working notes
+STATUS.md
+
+# Editors / OS
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+.idea/
+.DS_Store
