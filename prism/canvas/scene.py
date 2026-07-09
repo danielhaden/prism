@@ -13,10 +13,24 @@ from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsScene,
+    QMenu,
 )
 
 from prism.items import IntersectionPointItem, LineItem, PointItem
+from prism.items.label import LabelItem
 from prism.tools import Tool
+
+
+def _letters(index: int) -> str:
+    """Spreadsheet-style lowercase name for a 0-based index: a, b, .. z, aa .."""
+    name = ""
+    n = index
+    while True:
+        name = chr(ord("a") + n % 26) + name
+        n = n // 26 - 1
+        if n < 0:
+            break
+    return name
 
 
 class CanvasScene(QGraphicsScene):
@@ -41,6 +55,7 @@ class CanvasScene(QGraphicsScene):
         self._intersections: dict[tuple[int, int], IntersectionPointItem] = {}
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
+        self._seq_counter = 0
 
     # -- Tool management ---------------------------------------------------
 
@@ -157,13 +172,20 @@ class CanvasScene(QGraphicsScene):
 
     def add_point(self, pos: QPointF) -> PointItem:
         point = PointItem(pos)
+        self._tag(point)
         self.addItem(point)
         return point
 
     def add_line(self, start: QPointF, end: QPointF) -> LineItem:
         line = LineItem(start, end)
+        self._tag(line)
         self.addItem(line)
         return line
+
+    def _tag(self, item) -> None:
+        """Stamp a creation sequence number for stable auto-label ordering."""
+        self._seq_counter += 1
+        item._seq = self._seq_counter
 
     def _handle_line_click(self, pos: QPointF) -> None:
         if self._line_start is None:
@@ -264,6 +286,75 @@ class CanvasScene(QGraphicsScene):
                 if QLineF(point, item.center()).length() <= radius:
                     return None
         return point
+
+    # -- Context menu / labeling ------------------------------------------
+
+    def contextMenuEvent(self, event):
+        # Route to the topmost label / point / line under the cursor; a blank
+        # spot (or a derived point) shows the scene-level menu.
+        target = None
+        for item in self.items(event.scenePos()):
+            if isinstance(item, LabelItem):
+                target = item
+                break
+            if isinstance(item, (PointItem, LineItem)) and not getattr(
+                item, "is_derived", False
+            ):
+                target = item
+                break
+
+        if target is not None:
+            target.contextMenuEvent(event)
+            return
+
+        menu = QMenu()
+        auto_action = menu.addAction("Auto-label Scene")
+        clear_action = menu.addAction("Clear All Labels")
+        chosen = menu.exec(event.screenPos())
+        if chosen is auto_action:
+            self.auto_label()
+        elif chosen is clear_action:
+            self.clear_labels()
+        event.accept()
+
+    def auto_label(self) -> None:
+        """Label points A, B, C… (upright) and lines a, b, c… (italic)."""
+        points = sorted(
+            (
+                it
+                for it in self.items()
+                if isinstance(it, PointItem) and not it.is_derived
+            ),
+            key=lambda it: getattr(it, "_seq", 0),
+        )
+        lines = sorted(
+            (
+                it
+                for it in self.items()
+                if isinstance(it, LineItem) and it is not self._preview_line
+            ),
+            key=lambda it: getattr(it, "_seq", 0),
+        )
+        for i, point in enumerate(points):
+            point.set_label(_letters(i).upper())
+            self._set_label_italic(point, False)
+        for i, line in enumerate(lines):
+            line.set_label(_letters(i))
+            self._set_label_italic(line, True)
+
+    def clear_labels(self) -> None:
+        for item in self.items():
+            if isinstance(item, (PointItem, LineItem)):
+                item.set_label("")
+
+    @staticmethod
+    def _set_label_italic(item, italic: bool) -> None:
+        label = item.label_item()
+        if label is None:
+            return
+        font = label.font()
+        font.setItalic(italic)
+        label.apply_style(font, label.brush().color())
 
     # -- Editing -----------------------------------------------------------
 
