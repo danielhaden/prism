@@ -26,6 +26,11 @@ class LabelItem(QGraphicsSimpleTextItem):
     DEFAULT_OFFSET = QPointF(8, -8)  # pixels, relative to the anchor
 
     def __init__(self, text: str, parent: QGraphicsItem):
+        # Initialise state BEFORE any call that can trigger boundingRect()
+        # (e.g. setCursor / setFlag), which reads self._offset.
+        self._offset = QPointF(self.DEFAULT_OFFSET)
+        self._drag_last = None
+
         super().__init__(text, parent)
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
         self.setBrush(QColor("#222222"))
@@ -36,9 +41,6 @@ class LabelItem(QGraphicsSimpleTextItem):
         font = self.font()
         font.setPointSize(11)
         self.setFont(font)
-
-        self._offset = QPointF(self.DEFAULT_OFFSET)
-        self._drag_last = None
 
     # -- Geometry / painting ----------------------------------------------
 
