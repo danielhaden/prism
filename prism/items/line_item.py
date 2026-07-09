@@ -10,13 +10,17 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem
 
+from prism.items.label import Labelable
 
-class LineItem(QGraphicsLineItem):
+
+class LineItem(Labelable, QGraphicsLineItem):
     """A straight line segment between two scene points.
 
-    The whole segment can be selected and dragged. In addition, hovering near
-    either endpoint exposes a handle: dragging there moves just that endpoint,
-    leaving the other fixed.
+    The whole segment can be selected and dragged. Hovering near either
+    endpoint exposes a handle; dragging there moves just that endpoint. An
+    endpoint can also be *bound* to a :class:`PointItem` (via snapping): while
+    bound, the endpoint tracks that point when it moves, and dragging the line
+    body carries the bound point along.
 
     For now this is a finite segment. Projective geometry ultimately deals in
     infinite lines; extending/clipping this to the view bounds is a natural
@@ -39,20 +43,66 @@ class LineItem(QGraphicsLineItem):
         self.setPen(pen)
 
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        # Movement is handled manually (see _translate) so bound points and
+        # free endpoints stay consistent; ItemIsMovable is intentionally off.
         self.setZValue(0)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.OpenHandCursor)  # signal the body is draggable
 
-        # Which endpoint (1 or 2) is currently hovered / being dragged.
+        # Endpoint -> bound PointItem (or None if the endpoint is free).
+        self._bindings: dict[int, object] = {1: None, 2: None}
+
         self._hover_end: int | None = None
         self._drag_end: int | None = None
+        self._body_drag = False
+        self._last_scene = QPointF()
+        self._label = None
+
+    # -- Label -------------------------------------------------------------
+
+    def _label_anchor(self) -> QPointF:
+        line = self.line()
+        return (line.p1() + line.p2()) / 2
+
+    # -- Endpoint <-> point bindings --------------------------------------
+
+    def bind_endpoint(self, end: int, point) -> None:
+        """Bind endpoint 1 or 2 to a PointItem and snap it onto that point."""
+        self._bindings[end] = point
+        self.sync_from_point(point)
+
+    def unbind_endpoint(self, end: int) -> None:
+        self._bindings[end] = None
+
+    def bound_point(self, end: int):
+        return self._bindings[end]
+
+    def sync_from_point(self, point) -> None:
+        """Update any endpoint bound to ``point`` to that point's position."""
+        line = self.line()
+        changed = False
+        for end in (1, 2):
+            if self._bindings[end] is point:
+                local = self.mapFromScene(point.center())
+                if end == 1:
+                    line = QLineF(local, line.p2())
+                else:
+                    line = QLineF(line.p1(), local)
+                changed = True
+        if changed:
+            self.prepareGeometryChange()
+            self.setLine(line)
+            self._reposition_label()
+            self.update()
+
+    def scene_line(self) -> QLineF:
+        """The segment in scene coordinates."""
+        line = self.line()
+        return QLineF(self.mapToScene(line.p1()), self.mapToScene(line.p2()))
 
     # -- Zoom-aware sizing -------------------------------------------------
 
     def _view_scale(self) -> float:
-        """Approximate current view zoom (scene units per pixel = 1/scale)."""
         scene = self.scene()
         views = scene.views() if scene else []
         if views:
@@ -118,34 +168,100 @@ class LineItem(QGraphicsLineItem):
                 self.setCursor(Qt.ClosedHandCursor)
                 event.accept()
                 return
+        # Body: let the base handle selection, then we translate manually.
+        self._body_drag = True
+        self._last_scene = event.scenePos()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._drag_end is not None:
-            self._move_endpoint(self._drag_end, event.pos())
+            self._drag_endpoint(event.scenePos())
+            event.accept()
+            return
+        if self._body_drag and (event.buttons() & Qt.LeftButton):
+            cur = event.scenePos()
+            delta = cur - self._last_scene
+            self._last_scene = cur
+            self._translate(delta.x(), delta.y())
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self._drag_end is not None:
+            self._drag_endpoint(event.scenePos())
+            end_local = self.mapFromScene(event.scenePos())
             self._drag_end = None
-            self._hover_end = self._endpoint_at(event.pos())
+            scene = self.scene()
+            if scene is not None:
+                scene.hide_snap_indicator()
+            self._hover_end = self._endpoint_at(end_local)
             self.setCursor(
                 Qt.PointingHandCursor if self._hover_end else Qt.OpenHandCursor
             )
             self.update()
             event.accept()
             return
+        if self._body_drag:
+            self._body_drag = False
         super().mouseReleaseEvent(event)
 
-    def _move_endpoint(self, end: int, local_pos: QPointF) -> None:
+    # -- Movement ----------------------------------------------------------
+
+    def _drag_endpoint(self, scene_pos: QPointF) -> None:
+        """Move the active endpoint, snapping/binding to a nearby point."""
+        scene = self.scene()
+        target = None
+        if scene is not None and hasattr(scene, "snap_target"):
+            target = scene.snap_target(scene_pos, exclude=self._other_bound(self._drag_end))
+
+        if target is not None:
+            self._bindings[self._drag_end] = target
+            self._set_endpoint(self._drag_end, target.center())
+            scene.show_snap_indicator(target.center())
+        else:
+            self._bindings[self._drag_end] = None
+            self._set_endpoint(self._drag_end, scene_pos)
+            if scene is not None:
+                scene.hide_snap_indicator()
+
+        if scene is not None:
+            scene.on_line_changed(self)
+
+    def _translate(self, dx: float, dy: float) -> None:
+        line = self.line()
+        self.prepareGeometryChange()
+        self.setLine(
+            QLineF(
+                QPointF(line.x1() + dx, line.y1() + dy),
+                QPointF(line.x2() + dx, line.y2() + dy),
+            )
+        )
+        self._reposition_label()
+        # Carry bound points along; their move re-syncs the endpoint exactly.
+        for point in (self._bindings[1], self._bindings[2]):
+            if point is not None:
+                point.moveBy(dx, dy)
+        scene = self.scene()
+        if scene is not None:
+            scene.on_line_changed(self)
+
+    def _set_endpoint(self, end: int, scene_point: QPointF) -> None:
+        local = self.mapFromScene(scene_point)
         line = self.line()
         self.prepareGeometryChange()
         if end == 1:
-            self.setLine(QLineF(local_pos, line.p2()))
+            self.setLine(QLineF(local, line.p2()))
         else:
-            self.setLine(QLineF(line.p1(), local_pos))
+            self.setLine(QLineF(line.p1(), local))
+        self._reposition_label()
+        self.update()
+
+    def _other_bound(self, end: int):
+        """The point bound to the *other* endpoint (to exclude from snapping)."""
+        other = 2 if end == 1 else 1
+        point = self._bindings[other]
+        return (point,) if point is not None else ()
 
     # -- Painting ----------------------------------------------------------
 
@@ -158,7 +274,6 @@ class LineItem(QGraphicsLineItem):
             painter.setPen(pen)
             painter.drawLine(self.line())
 
-        # Show endpoint handles while selected or hovering an endpoint.
         if self.isSelected() or self._hover_end is not None:
             self._paint_handles(painter)
 
