@@ -10,8 +10,10 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem
 
+from prism.items.label import Labelable
 
-class LineItem(QGraphicsLineItem):
+
+class LineItem(Labelable, QGraphicsLineItem):
     """A straight line segment between two scene points.
 
     The whole segment can be selected and dragged. Hovering near either
@@ -54,6 +56,13 @@ class LineItem(QGraphicsLineItem):
         self._drag_end: int | None = None
         self._body_drag = False
         self._last_scene = QPointF()
+        self._label = None
+
+    # -- Label -------------------------------------------------------------
+
+    def _label_anchor(self) -> QPointF:
+        line = self.line()
+        return (line.p1() + line.p2()) / 2
 
     # -- Endpoint <-> point bindings --------------------------------------
 
@@ -83,6 +92,7 @@ class LineItem(QGraphicsLineItem):
         if changed:
             self.prepareGeometryChange()
             self.setLine(line)
+            self._reposition_label()
             self.update()
 
     def scene_line(self) -> QLineF:
@@ -227,6 +237,7 @@ class LineItem(QGraphicsLineItem):
                 QPointF(line.x2() + dx, line.y2() + dy),
             )
         )
+        self._reposition_label()
         # Carry bound points along; their move re-syncs the endpoint exactly.
         for point in (self._bindings[1], self._bindings[2]):
             if point is not None:
@@ -243,6 +254,7 @@ class LineItem(QGraphicsLineItem):
             self.setLine(QLineF(local, line.p2()))
         else:
             self.setLine(QLineF(line.p1(), local))
+        self._reposition_label()
         self.update()
 
     def _other_bound(self, end: int):

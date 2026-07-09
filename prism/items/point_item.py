@@ -4,8 +4,10 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem
 
+from prism.items.label import Labelable
 
-class PointItem(QGraphicsEllipseItem):
+
+class PointItem(Labelable, QGraphicsEllipseItem):
     """A point rendered as a small filled circle.
 
     The point is positioned by its center. It is drawn at a fixed on-screen
@@ -33,6 +35,7 @@ class PointItem(QGraphicsEllipseItem):
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
         self.setZValue(10)  # points sit above lines
         self.setCursor(Qt.OpenHandCursor)  # signal it's draggable
+        self._label = None
 
     def center(self) -> QPointF:
         """Return the point's center in scene coordinates."""
