@@ -21,6 +21,18 @@ from prism.items.label import LabelItem
 from prism.tools import Tool
 
 
+def _closest_on_segment(p: QPointF, seg: QLineF) -> QPointF:
+    """The point on segment ``seg`` nearest to ``p``."""
+    a, b = seg.p1(), seg.p2()
+    abx, aby = b.x() - a.x(), b.y() - a.y()
+    denom = abx * abx + aby * aby
+    if denom == 0:
+        return QPointF(a)
+    t = ((p.x() - a.x()) * abx + (p.y() - a.y()) * aby) / denom
+    t = max(0.0, min(1.0, t))
+    return QPointF(a.x() + t * abx, a.y() + t * aby)
+
+
 def _letters(index: int) -> str:
     """Spreadsheet-style lowercase name for a 0-based index: a, b, .. z, aa .."""
     name = ""
@@ -103,6 +115,47 @@ class CanvasScene(QGraphicsScene):
                     best = item
         return best
 
+    def snap_position(self, scene_pos: QPointF, exclude=None) -> QPointF | None:
+        """Snap position for a point: onto a nearby point, else onto a line.
+
+        Other user points take priority over lines. ``exclude`` is the point
+        being placed/moved, so it never snaps to itself or to a line it is
+        bound to. Returns the snapped position, or None if nothing is near.
+        """
+        radius = self.snap_radius()
+
+        # 1) Nearest other user point wins.
+        best = None
+        best_d = radius
+        for item in self.items():
+            if (
+                isinstance(item, PointItem)
+                and not item.is_derived
+                and item is not exclude
+            ):
+                d = QLineF(scene_pos, item.center()).length()
+                if d <= best_d:
+                    best_d = d
+                    best = item.center()
+        if best is not None:
+            return best
+
+        # 2) Otherwise, the nearest point on a line (skipping lines the moved
+        #    point is bound to, which would just snap it to itself).
+        best = None
+        best_d = radius
+        for line in self._lines():
+            if exclude is not None and (
+                line.bound_point(1) is exclude or line.bound_point(2) is exclude
+            ):
+                continue
+            proj = _closest_on_segment(scene_pos, line.scene_line())
+            d = QLineF(scene_pos, proj).length()
+            if d <= best_d:
+                best_d = d
+                best = proj
+        return best
+
     def show_snap_indicator(self, center: QPointF) -> None:
         if self._snap_indicator is None:
             r = 9.0
@@ -130,7 +183,9 @@ class CanvasScene(QGraphicsScene):
         pos = event.scenePos()
 
         if self._tool == Tool.POINT:
-            self.add_point(pos)
+            snapped = self.snap_position(pos)
+            self.add_point(snapped if snapped is not None else pos)
+            self.hide_snap_indicator()
             event.accept()
             return
 
@@ -160,6 +215,12 @@ class CanvasScene(QGraphicsScene):
                     target.x(),
                     target.y(),
                 )
+        elif self._tool == Tool.POINT:
+            snapped = self.snap_position(event.scenePos())
+            if snapped is not None:
+                self.show_snap_indicator(snapped)
+            else:
+                self.hide_snap_indicator()
         super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event):

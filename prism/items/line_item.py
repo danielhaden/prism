@@ -8,7 +8,7 @@ from PySide6.QtGui import (
     QPainterPathStroker,
     QPen,
 )
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem, QMenu
 
 from prism.items.label import Labelable
 
@@ -63,6 +63,37 @@ class LineItem(Labelable, QGraphicsLineItem):
     def _label_anchor(self) -> QPointF:
         line = self.line()
         return (line.p1() + line.p2()) / 2
+
+    # -- Context menu / line styling --------------------------------------
+
+    def contextMenuEvent(self, event):
+        menu = QMenu()
+        line_props_action = menu.addAction("Line Properties…")
+        menu.addSeparator()
+        label_actions = self.add_label_actions(menu)
+
+        chosen = menu.exec(event.screenPos())
+        if chosen is line_props_action:
+            self.open_line_style_dialog()
+        elif chosen is not None:
+            self.handle_label_action(chosen, label_actions)
+        event.accept()
+
+    def open_line_style_dialog(self) -> None:
+        from prism.line_dialog import LineStyleDialog
+
+        pen = self.pen()
+        scene = self.scene()
+        parent = scene.views()[0] if (scene and scene.views()) else None
+        color, width, style = LineStyleDialog.get_style(
+            pen.color(), pen.widthF(), pen.style(), parent
+        )
+        if color is not None:
+            new_pen = QPen(color, width)
+            new_pen.setStyle(style)
+            new_pen.setCosmetic(True)  # keep thickness constant on screen
+            self.setPen(new_pen)
+            self.update()
 
     # -- Endpoint <-> point bindings --------------------------------------
 

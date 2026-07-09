@@ -19,20 +19,18 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.view)
 
         self._tool_actions: dict[Tool, QAction] = {}
+        self._create_actions()
         self._build_toolbar()
         self._build_menu()
 
         self.scene.statusMessage.connect(self.statusBar().showMessage)
         self._select_tool(Tool.SELECT)
 
-    # -- UI construction ---------------------------------------------------
+    # -- Actions -----------------------------------------------------------
 
-    def _build_toolbar(self) -> None:
-        toolbar = self.addToolBar("Tools")
-        toolbar.setMovable(False)
-
-        group = QActionGroup(self)
-        group.setExclusive(True)
+    def _create_actions(self) -> None:
+        self._tool_group = QActionGroup(self)
+        self._tool_group.setExclusive(True)
 
         for tool, label, shortcut in (
             (Tool.SELECT, "Select", "V"),
@@ -44,32 +42,43 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(shortcut))
             action.setToolTip(f"{label} ({shortcut})")
             action.triggered.connect(lambda _=False, t=tool: self._select_tool(t))
-            group.addAction(action)
-            toolbar.addAction(action)
+            self._tool_group.addAction(action)
             self._tool_actions[tool] = action
 
+        # A single shared delete action, bound to both the forward-delete key
+        # and the Backspace-labeled key (the latter is what most keyboards,
+        # notably on macOS, produce as "delete").
+        self.delete_action = QAction("Delete", self)
+        self.delete_action.setShortcuts(
+            [QKeySequence(QKeySequence.Delete), QKeySequence(Qt.Key_Backspace)]
+        )
+        self.delete_action.setToolTip("Delete selected (Delete / Backspace)")
+        self.delete_action.triggered.connect(self.scene.delete_selected)
+        # Keep the shortcut live even when a child widget has focus.
+        self.delete_action.setShortcutContext(Qt.WindowShortcut)
+        self.addAction(self.delete_action)
+
+        self.clear_action = QAction("Clear", self)
+        self.clear_action.setToolTip("Clear the whole canvas")
+        self.clear_action.triggered.connect(self.scene.clear_all)
+
+    # -- UI construction ---------------------------------------------------
+
+    def _build_toolbar(self) -> None:
+        toolbar = self.addToolBar("Tools")
+        toolbar.setMovable(False)
+
+        for tool in (Tool.SELECT, Tool.POINT, Tool.LINE):
+            toolbar.addAction(self._tool_actions[tool])
+
         toolbar.addSeparator()
-
-        delete_action = QAction("Delete", self)
-        delete_action.setShortcut(QKeySequence.Delete)
-        delete_action.triggered.connect(self.scene.delete_selected)
-        toolbar.addAction(delete_action)
-
-        clear_action = QAction("Clear", self)
-        clear_action.triggered.connect(self.scene.clear_all)
-        toolbar.addAction(clear_action)
+        toolbar.addAction(self.delete_action)
+        toolbar.addAction(self.clear_action)
 
     def _build_menu(self) -> None:
         edit_menu = self.menuBar().addMenu("&Edit")
-
-        delete_action = QAction("Delete Selected", self)
-        delete_action.setShortcut(QKeySequence.Delete)
-        delete_action.triggered.connect(self.scene.delete_selected)
-        edit_menu.addAction(delete_action)
-
-        clear_action = QAction("Clear Canvas", self)
-        clear_action.triggered.connect(self.scene.clear_all)
-        edit_menu.addAction(clear_action)
+        edit_menu.addAction(self.delete_action)
+        edit_menu.addAction(self.clear_action)
 
     # -- Tool switching ----------------------------------------------------
 

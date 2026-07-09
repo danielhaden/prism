@@ -132,21 +132,37 @@ class Labelable:
 
     def contextMenuEvent(self, event):
         menu = QMenu()
-        has_label = self._label is not None
-        edit_action = menu.addAction("Edit Label…" if has_label else "Add Label…")
-        props_action = menu.addAction("Label Properties…") if has_label else None
-        remove_action = menu.addAction("Remove Label") if has_label else None
-
+        actions = self.add_label_actions(menu)
         chosen = menu.exec(event.screenPos())
-        if chosen is None:
-            return
-        if chosen is edit_action:
-            self._prompt_label()
-        elif props_action is not None and chosen is props_action:
-            self.open_label_style_dialog()
-        elif remove_action is not None and chosen is remove_action:
-            self.set_label("")
+        if chosen is not None:
+            self.handle_label_action(chosen, actions)
         event.accept()
+
+    def add_label_actions(self, menu) -> dict:
+        """Append the label actions to ``menu``; return them keyed by role.
+
+        Reusable by subclasses that build a richer context menu.
+        """
+        has_label = self._label is not None
+        actions = {
+            "edit": menu.addAction("Edit Label…" if has_label else "Add Label…")
+        }
+        if has_label:
+            actions["props"] = menu.addAction("Label Properties…")
+            actions["remove"] = menu.addAction("Remove Label")
+        return actions
+
+    def handle_label_action(self, chosen, actions) -> bool:
+        """Dispatch a chosen label action; return True if it was handled."""
+        if chosen is actions.get("edit"):
+            self._prompt_label()
+        elif chosen is actions.get("props"):
+            self.open_label_style_dialog()
+        elif chosen is actions.get("remove"):
+            self.set_label("")
+        else:
+            return False
+        return True
 
     def _prompt_label(self) -> None:
         scene = self.scene()

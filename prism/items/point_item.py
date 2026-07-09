@@ -46,12 +46,32 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         self.setPos(center)
 
     def itemChange(self, change, value):
+        # Snap the point onto nearby objects while it is being moved.
+        if change == QGraphicsItem.ItemPositionChange and not self.is_derived:
+            value = self._snap_position(value)
         # Notify the scene so bound line endpoints and intersections update.
-        if change == QGraphicsItem.ItemPositionHasChanged:
+        elif change == QGraphicsItem.ItemPositionHasChanged:
             scene = self.scene()
             if scene is not None and hasattr(scene, "on_point_moved"):
                 scene.on_point_moved(self)
         return super().itemChange(change, value)
+
+    def _snap_position(self, value: QPointF) -> QPointF:
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "snap_position"):
+            return value
+        snapped = scene.snap_position(value, exclude=self)
+        if snapped is not None:
+            scene.show_snap_indicator(snapped)
+            return snapped
+        scene.hide_snap_indicator()
+        return value
+
+    def mouseReleaseEvent(self, event):
+        scene = self.scene()
+        if scene is not None:
+            scene.hide_snap_indicator()
+        super().mouseReleaseEvent(event)
 
     def paint(self, painter, option, widget=None):
         # Draw a selection halo instead of the default dashed rectangle.
