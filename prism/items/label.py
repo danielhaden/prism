@@ -1,11 +1,12 @@
 """Text labels for canvas items, added via a right-click context menu.
 
-Labels are draggable (to nudge them off the geometry), keep a constant
-on-screen size, and expose display properties (font, size, color, bold,
-italic, underline) through their own context menu.
+Labels are child items of the element they annotate, so they move with it.
+They keep a constant on-screen size (ignore zoom), are draggable to reposition
+(via Qt's built-in item movement), and expose display properties (font, size,
+color, bold, italic, underline) through their own context menu.
 """
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -16,25 +17,20 @@ from PySide6.QtWidgets import (
 
 
 class LabelItem(QGraphicsSimpleTextItem):
-    """A constant-size, draggable text label anchored to its parent item.
+    """A constant-size, draggable text label, child of the item it labels.
 
-    The item ignores view transformations, so it stays the same on-screen size
-    at any zoom. It paints at ``_offset`` pixels from its anchor; dragging the
-    label changes that offset.
+    Position (relative to the parent) carries the label's offset; dragging the
+    label moves it, and because it is a child it follows the parent when the
+    parent moves.
     """
 
-    DEFAULT_OFFSET = QPointF(8, -8)  # pixels, relative to the anchor
+    DEFAULT_OFFSET = QPointF(8, -8)  # pixels from the anchor
 
     def __init__(self, text: str, parent: QGraphicsItem):
-        # Initialise state BEFORE any call that can trigger boundingRect()
-        # (e.g. setCursor / setFlag), which reads self._offset.
-        self._offset = QPointF(self.DEFAULT_OFFSET)
-        self._drag_last = None
-
         super().__init__(text, parent)
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setBrush(QColor("#222222"))
-        self.setAcceptedMouseButtons(Qt.LeftButton)
         self.setCursor(Qt.OpenHandCursor)
         self.setZValue(20)
 
@@ -42,55 +38,10 @@ class LabelItem(QGraphicsSimpleTextItem):
         font.setPointSize(11)
         self.setFont(font)
 
-    # -- Geometry / painting ----------------------------------------------
-
-    def boundingRect(self) -> QRectF:
-        return super().boundingRect().translated(self._offset)
-
-    def paint(self, painter, option, widget=None):
-        painter.translate(self._offset)
-        super().paint(painter, option, widget)
-
     def apply_style(self, font, color) -> None:
-        self.prepareGeometryChange()
         self.setFont(font)
         self.setBrush(color)
         self.update()
-
-    def reset_offset(self) -> None:
-        self.prepareGeometryChange()
-        self._offset = QPointF(self.DEFAULT_OFFSET)
-        self.update()
-
-    # -- Dragging (updates the pixel offset, not the anchor) --------------
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_last = event.screenPos()
-            self.setCursor(Qt.ClosedHandCursor)
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._drag_last is not None:
-            cur = event.screenPos()
-            delta = cur - self._drag_last
-            self._drag_last = cur
-            self.prepareGeometryChange()
-            self._offset += QPointF(delta.x(), delta.y())
-            self.update()
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if self._drag_last is not None:
-            self._drag_last = None
-            self.setCursor(Qt.OpenHandCursor)
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
 
     # -- Context menu ------------------------------------------------------
 
@@ -105,8 +56,8 @@ class LabelItem(QGraphicsSimpleTextItem):
         chosen = menu.exec(event.screenPos())
         if chosen is props_action and owner is not None:
             owner.open_label_style_dialog()
-        elif chosen is reset_action:
-            self.reset_offset()
+        elif chosen is reset_action and owner is not None:
+            owner.reset_label_position()
         elif chosen is remove_action and owner is not None:
             owner.set_label("")
         event.accept()
@@ -121,6 +72,7 @@ class Labelable:
     """
 
     _label: LabelItem | None = None
+    _last_anchor: QPointF | None = None
 
     # -- Public API --------------------------------------------------------
 
@@ -137,6 +89,7 @@ class Labelable:
             return
         if self._label is None:
             self._label = LabelItem(text, self)
+            self._last_anchor = None  # fresh placement uses the default offset
         else:
             self._label.setText(text)
         self._reposition_label()
@@ -148,8 +101,23 @@ class Labelable:
         return QPointF(0, 0)
 
     def _reposition_label(self) -> None:
-        if self._label is not None:
-            self._label.setPos(self._label_anchor())
+        """Keep the label following its anchor while preserving its offset."""
+        if self._label is None:
+            return
+        anchor = self._label_anchor()
+        if self._last_anchor is None:
+            self._label.setPos(anchor + LabelItem.DEFAULT_OFFSET)
+        else:
+            delta = anchor - self._last_anchor
+            if not delta.isNull():
+                self._label.moveBy(delta.x(), delta.y())
+        self._last_anchor = anchor
+
+    def reset_label_position(self) -> None:
+        if self._label is None:
+            return
+        self._last_anchor = self._label_anchor()
+        self._label.setPos(self._last_anchor + LabelItem.DEFAULT_OFFSET)
 
     def _remove_label(self) -> None:
         if self._label is not None:
@@ -158,6 +126,7 @@ class Labelable:
             if scene is not None:
                 scene.removeItem(self._label)
             self._label = None
+            self._last_anchor = None
 
     # -- Context menu ------------------------------------------------------
 
