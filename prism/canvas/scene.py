@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from prism.items import IntersectionPointItem, LineItem, PointItem
+from prism.items import GroupItem, IntersectionPointItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
 
@@ -444,6 +444,51 @@ class CanvasScene(QGraphicsScene):
         font.setItalic(italic)
         label.apply_style(font, label.brush().color())
 
+    # -- Grouping ----------------------------------------------------------
+
+    def group_selected(self) -> GroupItem | None:
+        """Group the selected top-level items into a single unit."""
+        items = [
+            it
+            for it in self.selectedItems()
+            if isinstance(it, (PointItem, LineItem, GroupItem))
+            and not getattr(it, "is_derived", False)
+            and it.parentItem() is None
+        ]
+        if len(items) < 2:
+            return None
+        group = GroupItem()
+        self.addItem(group)
+        for it in items:
+            group.addToGroup(it)
+        self.clearSelection()
+        group.setSelected(True)
+        self.recompute_intersections()
+        return group
+
+    def ungroup_selected(self) -> int:
+        """Break the selected groups back into their members."""
+        groups = [it for it in self.selectedItems() if isinstance(it, GroupItem)]
+        for group in groups:
+            children = list(group.childItems())
+            self.destroyItemGroup(group)
+            # Reparented children aren't re-registered in the scene's selection
+            # index; remove/re-add restores it (positions are preserved).
+            for child in children:
+                if child.scene() is self:
+                    self.removeItem(child)
+                    self.addItem(child)
+                    child.setSelected(True)
+        self.recompute_intersections()
+        return len(groups)
+
+    def on_group_moved(self, group: GroupItem) -> None:
+        # Children moved rigidly with the group; re-baseline pivots so a later
+        # independent pivot move doesn't double-apply this translation.
+        for line in self._lines():
+            line.refresh_pivot_reference()
+        self.recompute_intersections()
+
     # -- Editing -----------------------------------------------------------
 
     def delete_selected(self) -> None:
@@ -452,15 +497,27 @@ class CanvasScene(QGraphicsScene):
         self.recompute_intersections()
 
     def _remove_geometry(self, item) -> None:
+        if isinstance(item, GroupItem):
+            # Detach references to the group's child points, then remove the
+            # group (which removes its children too).
+            for child in item.childItems():
+                self._detach_point_references(child)
+            self.removeItem(item)
+            return
         if isinstance(item, PointItem) and not item.is_derived:
-            # Free any line endpoints bound to, or pinned to, this point.
-            for line in self._lines():
-                for end in (1, 2):
-                    if line.bound_point(end) is item:
-                        line.unbind_endpoint(end)
-                if line.pivot() is item:
-                    line.clear_pivot()
+            self._detach_point_references(item)
         self.removeItem(item)
+
+    def _detach_point_references(self, point) -> None:
+        """Unbind/unpin any lines that reference ``point``."""
+        if not isinstance(point, PointItem):
+            return
+        for line in self._lines():
+            for end in (1, 2):
+                if line.bound_point(end) is point:
+                    line.unbind_endpoint(end)
+            if line.pivot() is point:
+                line.clear_pivot()
 
     def clear_all(self) -> None:
         self._cancel_line()

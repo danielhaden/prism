@@ -154,6 +154,11 @@ class LineItem(Labelable, QGraphicsLineItem):
     def pivot(self):
         return self._pivot
 
+    def refresh_pivot_reference(self) -> None:
+        """Re-baseline the pivot position without moving (after a rigid move)."""
+        if self._pivot is not None:
+            self._pivot_last = self._pivot.center()
+
     def sync_from_pivot(self) -> None:
         """The pivot moved: translate the line so it still passes through it."""
         if self._pivot is None:

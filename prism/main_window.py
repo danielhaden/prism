@@ -66,6 +66,18 @@ class MainWindow(QMainWindow):
         self.clear_action.setToolTip("Clear the whole canvas")
         self.clear_action.triggered.connect(self.scene.clear_all)
 
+        self.group_action = QAction("Group", self)
+        self.group_action.setShortcut(QKeySequence("Ctrl+G"))
+        self.group_action.setToolTip("Group selected objects (Ctrl+G)")
+        self.group_action.triggered.connect(self.scene.group_selected)
+        self.addAction(self.group_action)
+
+        self.ungroup_action = QAction("Ungroup", self)
+        self.ungroup_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
+        self.ungroup_action.setToolTip("Ungroup selected group (Ctrl+Shift+G)")
+        self.ungroup_action.triggered.connect(self.scene.ungroup_selected)
+        self.addAction(self.ungroup_action)
+
     # -- UI construction ---------------------------------------------------
 
     def _build_toolbar(self) -> None:
@@ -76,11 +88,17 @@ class MainWindow(QMainWindow):
             toolbar.addAction(self._tool_actions[tool])
 
         toolbar.addSeparator()
+        toolbar.addAction(self.group_action)
+        toolbar.addAction(self.ungroup_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.delete_action)
         toolbar.addAction(self.clear_action)
 
     def _build_menu(self) -> None:
         edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu.addAction(self.group_action)
+        edit_menu.addAction(self.ungroup_action)
+        edit_menu.addSeparator()
         edit_menu.addAction(self.delete_action)
         edit_menu.addAction(self.clear_action)
 
