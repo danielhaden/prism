@@ -5,6 +5,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QMainWindow
 
 from prism.canvas import CanvasScene, CanvasView
+from prism.library_panel import LibraryPanel
 from prism.tools import Tool
 
 
@@ -17,6 +18,9 @@ class MainWindow(QMainWindow):
         self.scene = CanvasScene(self)
         self.view = CanvasView(self.scene, self)
         self.setCentralWidget(self.view)
+
+        self.library = LibraryPanel(self.scene, self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.library)
 
         self._tool_actions: dict[Tool, QAction] = {}
         self._create_actions()
@@ -79,6 +83,11 @@ class MainWindow(QMainWindow):
         edit_menu = self.menuBar().addMenu("&Edit")
         edit_menu.addAction(self.delete_action)
         edit_menu.addAction(self.clear_action)
+
+        view_menu = self.menuBar().addMenu("&View")
+        toggle_library = self.library.toggleViewAction()
+        toggle_library.setText("Show Library")
+        view_menu.addAction(toggle_library)
 
     # -- Tool switching ----------------------------------------------------
 
