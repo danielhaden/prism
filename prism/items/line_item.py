@@ -52,9 +52,15 @@ class LineItem(Labelable, QGraphicsLineItem):
         # Endpoint -> bound PointItem (or None if the endpoint is free).
         self._bindings: dict[int, object] = {1: None, 2: None}
 
+        # A pivot point the line is pinned to: it stays a full line through
+        # the point, and dragging the line rotates it about the point.
+        self._pivot = None
+        self._pivot_last: QPointF | None = None
+
         self._hover_end: int | None = None
         self._drag_end: int | None = None
         self._body_drag = False
+        self._pivot_drag = False
         self._last_scene = QPointF()
         self._label = None
 
@@ -131,6 +137,67 @@ class LineItem(Labelable, QGraphicsLineItem):
         line = self.line()
         return QLineF(self.mapToScene(line.p1()), self.mapToScene(line.p2()))
 
+    # -- Pivot (pinned through a point; rotates about it) -----------------
+
+    def set_pivot(self, point) -> None:
+        """Pin this line to pass through ``point`` (a pencil member)."""
+        self._pivot = point
+        self._pivot_last = point.center()
+
+    def clear_pivot(self) -> None:
+        self._pivot = None
+        self._pivot_last = None
+
+    def has_pivot(self) -> bool:
+        return self._pivot is not None
+
+    def pivot(self):
+        return self._pivot
+
+    def refresh_pivot_reference(self) -> None:
+        """Re-baseline the pivot position without moving (after a rigid move)."""
+        if self._pivot is not None:
+            self._pivot_last = self._pivot.center()
+
+    def sync_from_pivot(self) -> None:
+        """The pivot moved: translate the line so it still passes through it."""
+        if self._pivot is None:
+            return
+        center = self._pivot.center()
+        if self._pivot_last is not None:
+            delta = center - self._pivot_last
+            if not delta.isNull():
+                self._translate(delta.x(), delta.y())
+        self._pivot_last = center
+
+    def _rotate_about_pivot(self, cursor_scene: QPointF) -> None:
+        """Rotate the line so it points from the pivot toward the cursor,
+        keeping each endpoint's distance from the pivot (a full line through
+        the point)."""
+        pivot = self._pivot.center()
+        v = cursor_scene - pivot
+        length = (v.x() ** 2 + v.y() ** 2) ** 0.5
+        if length < 1e-6:
+            return
+        ux, uy = v.x() / length, v.y() / length
+
+        line = self.line()
+        new_pts = []
+        for p in (line.p1(), line.p2()):
+            dx, dy = p.x() - pivot.x(), p.y() - pivot.y()
+            dist = (dx * dx + dy * dy) ** 0.5
+            side = 1.0 if (dx * v.x() + dy * v.y()) >= 0 else -1.0
+            new_pts.append(
+                QPointF(pivot.x() + ux * dist * side, pivot.y() + uy * dist * side)
+            )
+        self.prepareGeometryChange()
+        self.setLine(QLineF(new_pts[0], new_pts[1]))
+        self._reposition_label()
+        self.update()
+        scene = self.scene()
+        if scene is not None:
+            scene.on_line_changed(self)
+
     # -- Zoom-aware sizing -------------------------------------------------
 
     def _view_scale(self) -> float:
@@ -192,6 +259,13 @@ class LineItem(Labelable, QGraphicsLineItem):
     # -- Mouse: endpoint drag takes priority over whole-line move ---------
 
     def mousePressEvent(self, event):
+        # A pinned line rotates about its pivot no matter where it's grabbed.
+        if event.button() == Qt.LeftButton and self.has_pivot():
+            self._pivot_drag = True
+            self.setCursor(Qt.ClosedHandCursor)
+            super().mousePressEvent(event)  # allow selection
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             end = self._endpoint_at(event.pos())
             if end is not None:
@@ -205,6 +279,10 @@ class LineItem(Labelable, QGraphicsLineItem):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._pivot_drag and (event.buttons() & Qt.LeftButton):
+            self._rotate_about_pivot(event.scenePos())
+            event.accept()
+            return
         if self._drag_end is not None:
             self._drag_endpoint(event.scenePos())
             event.accept()
@@ -233,6 +311,9 @@ class LineItem(Labelable, QGraphicsLineItem):
             self.update()
             event.accept()
             return
+        if self._pivot_drag:
+            self._pivot_drag = False
+            self.setCursor(Qt.OpenHandCursor)
         if self._body_drag:
             self._body_drag = False
         super().mouseReleaseEvent(event)
