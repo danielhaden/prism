@@ -15,6 +15,7 @@ and user-saved selections, and are what gets dragged onto the canvas.
 """
 
 import json
+import math
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
@@ -194,6 +195,26 @@ def _seg(a, b):
     return {"a": {"pt": a}, "b": {"pt": b}, "label": ""}
 
 
+def _projectivity():
+    """A pencil: four lines through a common point, splayed slightly apart."""
+    half = 60.0
+    lines = []
+    for angle in (60, 80, 100, 120):  # fanned around vertical
+        r = math.radians(angle)
+        dx = round(half * math.cos(r), 2)
+        dy = round(half * math.sin(r), 2)
+        lines.append(
+            {"a": {"xy": [-dx, -dy]}, "b": {"xy": [dx, dy]}, "label": ""}
+        )
+    return {
+        "name": "Projectivity",
+        # The center point sits at the crossing so the six concurrent
+        # intersections aren't drawn as stacked markers.
+        "points": [_pt(0, 0)],
+        "lines": lines,
+    }
+
+
 def _builtins():
     segment = {
         "name": "Segment",
@@ -218,7 +239,7 @@ def _builtins():
             _seg(1, 2), _seg(1, 3), _seg(2, 3),
         ],
     }
-    return [segment, triangle, square, complete_quadrangle]
+    return [segment, triangle, square, complete_quadrangle, _projectivity()]
 
 
 BUILTIN_TEMPLATES = _builtins()
