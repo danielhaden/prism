@@ -4,6 +4,7 @@ from PySide6.QtCore import QLineF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsView
 
+from prism.templates import TEMPLATE_MIME, deserialize, instantiate
 from prism.tools import Tool
 
 
@@ -23,6 +24,7 @@ class CanvasView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setBackgroundBrush(QColor("#fafafa"))
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
 
     def apply_tool(self, tool: Tool) -> None:
         """Sync the view's drag mode with the active tool."""
@@ -31,6 +33,34 @@ class CanvasView(QGraphicsView):
         else:
             # Disable rubber-band so drawing clicks aren't swallowed.
             self.setDragMode(QGraphicsView.NoDrag)
+
+    # -- Drag & drop (templates from the Library) -------------------------
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(TEMPLATE_MIME):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(TEMPLATE_MIME):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasFormat(TEMPLATE_MIME):
+            template = deserialize(mime.data(TEMPLATE_MIME))
+            scene_pos = self.mapToScene(event.position().toPoint())
+            self.insert_template(template, scene_pos)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+    def insert_template(self, template, scene_pos):
+        """Instantiate a template at a scene position (returns new items)."""
+        return instantiate(self.scene(), template, scene_pos)
 
     # -- Zoom --------------------------------------------------------------
 
