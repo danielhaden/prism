@@ -289,11 +289,38 @@ class CanvasScene(QGraphicsScene):
     # -- Dependency propagation -------------------------------------------
 
     def on_point_moved(self, point: PointItem) -> None:
-        """A point moved: update bound line endpoints and intersections."""
-        for item in self.items():
-            if isinstance(item, LineItem) and item is not self._preview_line:
-                item.sync_from_point(point)
+        """A point moved: update bound endpoints, pinned lines, intersections."""
+        for item in self._lines():
+            item.sync_from_point(point)
+            if item.pivot() is point:
+                item.sync_from_pivot()
         self.recompute_intersections()
+
+    # -- Pencils (pinning lines through a point) --------------------------
+
+    def pin_lines_through(self, point: PointItem) -> int:
+        """Pin every unpinned line passing through ``point`` to pivot on it.
+
+        Returns the number of lines newly pinned.
+        """
+        radius = self.snap_radius()
+        count = 0
+        for line in self._lines():
+            if line.has_pivot():
+                continue
+            proj = _closest_on_segment(point.center(), line.scene_line())
+            if QLineF(point.center(), proj).length() <= radius:
+                line.set_pivot(point)
+                count += 1
+        return count
+
+    def unpin_lines_through(self, point: PointItem) -> int:
+        count = 0
+        for line in self._lines():
+            if line.pivot() is point:
+                line.clear_pivot()
+                count += 1
+        return count
 
     def on_line_changed(self, line: LineItem) -> None:
         """A line's geometry changed: recompute intersections."""
@@ -426,11 +453,13 @@ class CanvasScene(QGraphicsScene):
 
     def _remove_geometry(self, item) -> None:
         if isinstance(item, PointItem) and not item.is_derived:
-            # Free any line endpoints that were bound to this point.
+            # Free any line endpoints bound to, or pinned to, this point.
             for line in self._lines():
                 for end in (1, 2):
                     if line.bound_point(end) is item:
                         line.unbind_endpoint(end)
+                if line.pivot() is item:
+                    line.clear_pivot()
         self.removeItem(item)
 
     def clear_all(self) -> None:

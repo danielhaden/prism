@@ -60,10 +60,12 @@ def serialize_selection(items, name: str) -> dict:
                 return {"pt": index[id(bound)]}
             return {"xy": [scene_pt.x() - ox, scene_pt.y() - oy]}
 
+        pivot = line.pivot()
         tlines.append(
             {
                 "a": endpoint(1, seg.p1()),
                 "b": endpoint(2, seg.p2()),
+                "pivot": index[id(pivot)] if (pivot is not None and id(pivot) in index) else None,
                 "label": line.label_text(),
             }
         )
@@ -109,6 +111,8 @@ def instantiate(scene, template: dict, at: QPointF):
             line.bind_endpoint(1, start_pt)
         if end_pt is not None:
             line.bind_endpoint(2, end_pt)
+        if entry.get("pivot") is not None:
+            line.set_pivot(created_points[entry["pivot"]])
         if entry.get("label"):
             line.set_label(entry["label"])
         scene.on_line_changed(line)
@@ -204,7 +208,12 @@ def _projectivity():
         dx = round(half * math.cos(r), 2)
         dy = round(half * math.sin(r), 2)
         lines.append(
-            {"a": {"xy": [-dx, -dy]}, "b": {"xy": [dx, dy]}, "label": ""}
+            {
+                "a": {"xy": [-dx, -dy]},
+                "b": {"xy": [dx, dy]},
+                "pivot": 0,  # all pinned to the center point
+                "label": "",
+            }
         )
     return {
         "name": "Projectivity",

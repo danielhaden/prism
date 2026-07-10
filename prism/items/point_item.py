@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPen
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem, QMenu
 
 from prism.items.label import Labelable
 
@@ -39,11 +39,37 @@ class PointItem(Labelable, QGraphicsEllipseItem):
 
     def center(self) -> QPointF:
         """Return the point's center in scene coordinates."""
-        return self.pos()
+        return self.scenePos()
+
+    def contextMenuEvent(self, event):
+        scene = self.scene()
+        menu = QMenu()
+        pin_action = unpin_action = None
+        if scene is not None and hasattr(scene, "pin_lines_through"):
+            pinned = any(
+                line.pivot() is self for line in scene._lines()
+            )
+            if pinned:
+                unpin_action = menu.addAction("Unpin Lines From Point")
+            pin_action = menu.addAction("Pin Lines Through Point")
+            menu.addSeparator()
+        label_actions = self.add_label_actions(menu)
+
+        chosen = menu.exec(event.screenPos())
+        if chosen is None:
+            return
+        if chosen is pin_action:
+            scene.pin_lines_through(self)
+        elif chosen is unpin_action:
+            scene.unpin_lines_through(self)
+        else:
+            self.handle_label_action(chosen, label_actions)
+        event.accept()
 
     def set_center(self, center: QPointF) -> None:
         """Move the point to a new center (scene coordinates)."""
-        self.setPos(center)
+        parent = self.parentItem()
+        self.setPos(parent.mapFromScene(center) if parent is not None else center)
 
     def itemChange(self, change, value):
         # Snap the point onto nearby objects while it is being moved.
