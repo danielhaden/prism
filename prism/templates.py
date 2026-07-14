@@ -225,11 +225,6 @@ def _projectivity():
 
 
 def _builtins():
-    segment = {
-        "name": "Segment",
-        "points": [_pt(-45, 0), _pt(45, 0)],
-        "lines": [_seg(0, 1)],
-    }
     triangle = {
         "name": "Triangle",
         "points": [_pt(0, -46), _pt(-40, 23), _pt(40, 23)],
@@ -248,7 +243,7 @@ def _builtins():
             _seg(1, 2), _seg(1, 3), _seg(2, 3),
         ],
     }
-    return [segment, triangle, square, complete_quadrangle, _projectivity()]
+    return [triangle, square, complete_quadrangle, _projectivity()]
 
 
 BUILTIN_TEMPLATES = _builtins()
