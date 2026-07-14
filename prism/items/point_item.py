@@ -44,8 +44,9 @@ class PointItem(Labelable, QGraphicsEllipseItem):
     def contextMenuEvent(self, event):
         scene = self.scene()
         menu = QMenu()
-        pin_action = unpin_action = None
+        proj_action = pin_action = unpin_action = None
         if scene is not None and hasattr(scene, "pin_lines_through"):
+            proj_action = menu.addAction("Add Projectivity…")
             pinned = any(
                 line.pivot() is self for line in scene._lines()
             )
@@ -58,13 +59,24 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         chosen = menu.exec(event.screenPos())
         if chosen is None:
             return
-        if chosen is pin_action:
+        if chosen is proj_action:
+            self._open_projectivity_dialog()
+        elif chosen is pin_action:
             scene.pin_lines_through(self)
         elif chosen is unpin_action:
             scene.unpin_lines_through(self)
         else:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _open_projectivity_dialog(self):
+        from prism.projectivity_dialog import ProjectivityDialog
+
+        scene = self.scene()
+        parent = scene.views()[0] if (scene and scene.views()) else None
+        angles = ProjectivityDialog.get_angles(parent)
+        if angles:
+            scene.add_projectivity(self, angles)
 
     def set_center(self, center: QPointF) -> None:
         """Move the point to a new center (scene coordinates)."""

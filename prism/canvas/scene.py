@@ -7,6 +7,8 @@ When a point or line moves, the scene propagates the change so bound
 endpoints follow and intersections recompute.
 """
 
+import math
+
 from PySide6.QtCore import QLineF, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import (
@@ -324,6 +326,27 @@ class CanvasScene(QGraphicsScene):
                 line.clear_pivot()
                 count += 1
         return count
+
+    def add_projectivity(self, point: PointItem, angles) -> list:
+        """Create a pencil of lines through ``point`` at the given angles.
+
+        Angles are degrees clockwise from horizontal. Each line is infinite and
+        pinned to ``point`` (so the pencil rotates about it).
+        """
+        center = point.center()
+        half = 60.0  # defining half-length; rendering is infinite
+        created = []
+        for angle in angles:
+            r = math.radians(angle)
+            dx, dy = half * math.cos(r), half * math.sin(r)
+            line = self.add_line(
+                QPointF(center.x() - dx, center.y() - dy),
+                QPointF(center.x() + dx, center.y() + dy),
+            )
+            line.set_pivot(point)
+            created.append(line)
+        self.recompute_intersections()
+        return created
 
     def on_line_changed(self, line: LineItem) -> None:
         """A line's geometry changed: recompute intersections."""
