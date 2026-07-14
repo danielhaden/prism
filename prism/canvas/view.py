@@ -1,7 +1,7 @@
-"""The canvas view: renders the scene with pan, zoom, and a grid."""
+"""The canvas view: renders the scene with pan, zoom, and tool-aware panning."""
 
-from PySide6.QtCore import QLineF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QGraphicsView
 
 from prism.templates import TEMPLATE_MIME, deserialize, instantiate
@@ -9,11 +9,10 @@ from prism.tools import Tool
 
 
 class CanvasView(QGraphicsView):
-    """A QGraphicsView with wheel-zoom, a light grid, and tool-aware panning."""
+    """A QGraphicsView with wheel-zoom and tool-aware panning."""
 
     MIN_SCALE = 0.1
     MAX_SCALE = 20.0
-    GRID_SIZE = 50
 
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
@@ -111,31 +110,3 @@ class CanvasView(QGraphicsView):
     def _end_pan(self):
         self._panning = False
         self.unsetCursor()
-
-    # -- Grid --------------------------------------------------------------
-
-    def drawBackground(self, painter, rect):
-        super().drawBackground(painter, rect)
-
-        left = int(rect.left()) - (int(rect.left()) % self.GRID_SIZE)
-        top = int(rect.top()) - (int(rect.top()) % self.GRID_SIZE)
-
-        lines = []
-        x = left
-        while x < rect.right():
-            lines.append(QLineF(x, rect.top(), x, rect.bottom()))
-            x += self.GRID_SIZE
-        y = top
-        while y < rect.bottom():
-            lines.append(QLineF(rect.left(), y, rect.right(), y))
-            y += self.GRID_SIZE
-
-        pen = QPen(QColor("#e6e6e6"), 0)
-        painter.setPen(pen)
-        painter.drawLines(lines)
-
-        # Emphasise the origin axes.
-        axis_pen = QPen(QColor("#cfcfcf"), 0)
-        painter.setPen(axis_pen)
-        painter.drawLine(QLineF(0, rect.top(), 0, rect.bottom()))
-        painter.drawLine(QLineF(rect.left(), 0, rect.right(), 0))
