@@ -294,6 +294,9 @@ class CanvasScene(QGraphicsScene):
             item.sync_from_point(point)
             if item.pivot() is point:
                 item.sync_from_pivot()
+            if item.range_anchor() is point:
+                item.prepareGeometryChange()
+                item.update()
         self.recompute_intersections()
 
     # -- Pencils (pinning lines through a point) --------------------------
@@ -363,7 +366,8 @@ class CanvasScene(QGraphicsScene):
             self._updating = False
 
     def _intersection_of(self, a: LineItem, b: LineItem) -> QPointF | None:
-        kind, point = a.scene_line().intersects(b.scene_line())
+        # Use the visible (drawn) segment so markers appear where lines cross.
+        kind, point = a.display_line().intersects(b.display_line())
         if kind != QLineF.IntersectionType.BoundedIntersection:
             return None
         # Skip crossings that coincide with an existing point (shared vertex),
@@ -518,6 +522,8 @@ class CanvasScene(QGraphicsScene):
                     line.unbind_endpoint(end)
             if line.pivot() is point:
                 line.clear_pivot()
+            if line.range_anchor() is point:
+                line.clear_visible_range()
 
     def clear_all(self) -> None:
         self._cancel_line()
