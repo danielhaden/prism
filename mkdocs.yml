@@ -1,0 +1,73 @@
+site_name: Prism
+site_description: Mathematical drawings for projective geometry
+repo_url: https://github.com/danielhaden/prism
+repo_name: danielhaden/prism
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.keys
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Getting Started: guide/getting-started.md
+      - Tools & Canvas: guide/tools.md
+      - Points & Lines: guide/points-and-lines.md
+      - Projectivities & Pivots: guide/projectivities.md
+      - The Library: guide/library.md
+      - The Console: guide/console.md
+  - Concepts:
+      - Projective Basics: concepts/projective-basics.md
+  - Developer Reference:
+      - Overview: reference/index.md
+      - Items: reference/items.md
+      - Canvas: reference/canvas.md
+      - Templates: reference/templates.md
+      - Console Commands: reference/commands.md
+      - Application: reference/app.md

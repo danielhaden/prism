@@ -1,0 +1,6 @@
+# Documentation toolchain (not needed to run the app).
+#   pip install -r requirements-docs.txt
+#   mkdocs serve        # live preview at http://localhost:8000
+#   mkdocs build        # render the static site into ./site
+mkdocs-material>=9.5
+mkdocstrings[python]>=0.24
