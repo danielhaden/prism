@@ -13,6 +13,36 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem, QMenu
 from prism.items.label import Labelable
 
 
+def _clip_line_to_rect(p0: QPointF, d: QPointF, rect):
+    """Clip the infinite line ``p0 + t*d`` to ``rect`` (Liang-Barsky).
+
+    Returns the two boundary points, or None if the line misses the rect.
+    """
+    t_min, t_max = -1e18, 1e18
+    edges = (
+        (-d.x(), p0.x() - rect.left()),
+        (d.x(), rect.right() - p0.x()),
+        (-d.y(), p0.y() - rect.top()),
+        (d.y(), rect.bottom() - p0.y()),
+    )
+    for p, q in edges:
+        if abs(p) < 1e-12:
+            if q < 0:
+                return None  # parallel and outside this slab
+        else:
+            t = q / p
+            if p < 0:
+                t_min = max(t_min, t)
+            else:
+                t_max = min(t_max, t)
+    if t_min > t_max:
+        return None
+    return (
+        QPointF(p0.x() + d.x() * t_min, p0.y() + d.y() * t_min),
+        QPointF(p0.x() + d.x() * t_max, p0.y() + d.y() * t_max),
+    )
+
+
 class LineItem(Labelable, QGraphicsLineItem):
     """A straight line segment between two scene points.
 
@@ -57,6 +87,12 @@ class LineItem(Labelable, QGraphicsLineItem):
         self._pivot = None
         self._pivot_last: QPointF | None = None
 
+        # Visible range: the line is infinite by default; when an anchor point
+        # and extents are set, only a segment of it is drawn.
+        self._range_anchor = None
+        self._range_neg = 0.0
+        self._range_pos = 0.0
+
         self._hover_end: int | None = None
         self._drag_end: int | None = None
         self._body_drag = False
@@ -75,15 +111,68 @@ class LineItem(Labelable, QGraphicsLineItem):
     def contextMenuEvent(self, event):
         menu = QMenu()
         line_props_action = menu.addAction("Line Properties…")
+        proj_action = menu.addAction("Add Projectivity…")
+        range_action = menu.addAction("Define Visible Range…")
+        show_full_action = (
+            menu.addAction("Show Full Line") if self.has_visible_range() else None
+        )
         menu.addSeparator()
         label_actions = self.add_label_actions(menu)
 
         chosen = menu.exec(event.screenPos())
         if chosen is line_props_action:
             self.open_line_style_dialog()
+        elif chosen is proj_action:
+            self._add_projectivity_at(event.pos())
+        elif chosen is range_action:
+            self.open_visible_range_dialog()
+        elif show_full_action is not None and chosen is show_full_action:
+            self._show_full_line()
         elif chosen is not None:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _add_projectivity_at(self, local_pos: QPointF) -> None:
+        """Add a pencil centered at the clicked point on this line."""
+        from prism.projectivity_dialog import ProjectivityDialog
+
+        scene = self.scene()
+        if scene is None:
+            return
+        parent = scene.views()[0] if scene.views() else None
+        angles = ProjectivityDialog.get_angles(parent)
+        if not angles:
+            return
+        on_line = self._project_local(local_pos)  # snap the click onto the line
+        center = scene.add_point(self.mapToScene(on_line))
+        scene.add_projectivity(center, angles)
+
+    def open_visible_range_dialog(self) -> None:
+        from prism.visible_range_dialog import VisibleRangeDialog
+
+        scene = self.scene()
+        parent = scene.views()[0] if (scene and scene.views()) else None
+        neg = self._range_neg if self.has_visible_range() else 120.0
+        pos = self._range_pos if self.has_visible_range() else 120.0
+        result = VisibleRangeDialog.get_range(neg, pos, parent)
+        if result is None:
+            return
+        neg, pos = result
+        if self._range_anchor is None and scene is not None:
+            mid = (self.line().p1() + self.line().p2()) / 2  # a point on the line
+            self._range_anchor = scene.add_point(self.mapToScene(mid))
+        self.set_visible_range(self._range_anchor, neg, pos)
+        if scene is not None:
+            scene.on_line_changed(self)
+
+    def _show_full_line(self) -> None:
+        anchor = self._range_anchor
+        self.clear_visible_range()
+        scene = self.scene()
+        if scene is not None:
+            if anchor is not None:
+                scene._remove_geometry(anchor)
+            scene.recompute_intersections()
 
     def open_line_style_dialog(self) -> None:
         from prism.line_dialog import LineStyleDialog
@@ -133,9 +222,78 @@ class LineItem(Labelable, QGraphicsLineItem):
             self.update()
 
     def scene_line(self) -> QLineF:
-        """The segment in scene coordinates."""
+        """The *defining* segment (endpoints) in scene coordinates."""
         line = self.line()
         return QLineF(self.mapToScene(line.p1()), self.mapToScene(line.p2()))
+
+    # -- Infinite line / visible range ------------------------------------
+
+    def set_visible_range(self, anchor, neg: float, pos: float) -> None:
+        """Show only the segment ``neg`` back and ``pos`` forward of ``anchor``."""
+        self._range_anchor = anchor
+        self._range_neg = abs(neg)
+        self._range_pos = abs(pos)
+        self.prepareGeometryChange()
+        self._reposition_label()
+        self.update()
+
+    def clear_visible_range(self) -> None:
+        """Revert to a full (infinite) line."""
+        self._range_anchor = None
+        self.prepareGeometryChange()
+        self._reposition_label()
+        self.update()
+
+    def has_visible_range(self) -> bool:
+        return self._range_anchor is not None
+
+    def range_anchor(self):
+        return self._range_anchor
+
+    def _direction(self) -> QPointF | None:
+        """Unit direction of the line (local coords), or None if degenerate."""
+        line = self.line()
+        dx, dy = line.x2() - line.x1(), line.y2() - line.y1()
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < 1e-9:
+            return None
+        return QPointF(dx / length, dy / length)
+
+    def _project_local(self, local_pt: QPointF) -> QPointF:
+        line = self.line()
+        p1 = line.p1()
+        d = self._direction()
+        if d is None:
+            return p1
+        t = (local_pt.x() - p1.x()) * d.x() + (local_pt.y() - p1.y()) * d.y()
+        return QPointF(p1.x() + d.x() * t, p1.y() + d.y() * t)
+
+    def _display_segment(self):
+        """The segment actually drawn (local coords), or None if degenerate."""
+        d = self._direction()
+        if d is None:
+            return None
+        if self._range_anchor is not None:
+            c = self._project_local(self.mapFromScene(self._range_anchor.center()))
+            return (
+                QPointF(c.x() - d.x() * self._range_neg, c.y() - d.y() * self._range_neg),
+                QPointF(c.x() + d.x() * self._range_pos, c.y() + d.y() * self._range_pos),
+            )
+        # Infinite: clip to the scene rect (the working universe).
+        scene = self.scene()
+        line = self.line()
+        if scene is None:
+            return (line.p1(), line.p2())
+        rect = self.mapRectFromScene(scene.sceneRect())
+        clipped = _clip_line_to_rect(line.p1(), d, rect)
+        return clipped if clipped is not None else (line.p1(), line.p2())
+
+    def display_line(self) -> QLineF:
+        """The drawn segment in scene coordinates (for intersections)."""
+        seg = self._display_segment()
+        if seg is None:
+            return self.scene_line()
+        return QLineF(self.mapToScene(seg[0]), self.mapToScene(seg[1]))
 
     # -- Pivot (pinned through a point; rotates about it) -----------------
 
@@ -225,19 +383,35 @@ class LineItem(Labelable, QGraphicsLineItem):
     # -- Hit testing / bounds ---------------------------------------------
 
     def shape(self) -> QPainterPath:
-        """A fattened path around the segment for forgiving hit-testing."""
+        """A fattened path around the drawn segment for forgiving hit-testing."""
         path = QPainterPath()
-        path.moveTo(self.line().p1())
-        path.lineTo(self.line().p2())
-
+        seg = self._display_segment()
+        if seg is None:
+            return path
+        path.moveTo(seg[0])
+        path.lineTo(seg[1])
         stroker = QPainterPathStroker()
         stroker.setWidth(self.HIT_WIDTH)
         return stroker.createStroke(path)
 
     def boundingRect(self) -> QRectF:
-        # Grow the bounds so the hit band and endpoint handles aren't clipped.
-        margin = max(self.HIT_WIDTH / 2, self._px(self.ENDPOINT_GRAB_PX))
-        return super().boundingRect().adjusted(-margin, -margin, margin, margin)
+        line = self.line()
+        pts = [line.p1(), line.p2()]  # defining endpoints (handles)
+        seg = self._display_segment()
+        if seg is not None:
+            pts += [seg[0], seg[1]]
+        xs = [p.x() for p in pts]
+        ys = [p.y() for p in pts]
+        margin = (
+            max(self.HIT_WIDTH / 2, self._px(self.ENDPOINT_GRAB_PX))
+            + self._px(self.HANDLE_PX)
+        )
+        return QRectF(
+            min(xs) - margin,
+            min(ys) - margin,
+            (max(xs) - min(xs)) + 2 * margin,
+            (max(ys) - min(ys)) + 2 * margin,
+        )
 
     # -- Hover -------------------------------------------------------------
 
@@ -378,13 +552,15 @@ class LineItem(Labelable, QGraphicsLineItem):
     # -- Painting ----------------------------------------------------------
 
     def paint(self, painter, option, widget=None):
-        super().paint(painter, option, widget)
-
-        if self.isSelected():
-            pen = QPen(QColor("#ff7f0e"), 2)
-            pen.setCosmetic(True)
-            painter.setPen(pen)
-            painter.drawLine(self.line())
+        seg = self._display_segment()
+        if seg is not None:
+            painter.setPen(self.pen())
+            painter.drawLine(seg[0], seg[1])
+            if self.isSelected():
+                pen = QPen(QColor("#ff7f0e"), 2)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.drawLine(seg[0], seg[1])
 
         if self.isSelected() or self._hover_end is not None:
             self._paint_handles(painter)

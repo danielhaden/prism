@@ -5,6 +5,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QMainWindow
 
 from prism.canvas import CanvasScene, CanvasView
+from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
 from prism.tools import Tool
 
@@ -21,6 +22,9 @@ class MainWindow(QMainWindow):
 
         self.library = LibraryPanel(self.scene, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.library)
+
+        self.console = ConsolePanel(self.scene, self)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.console)
 
         self._tool_actions: dict[Tool, QAction] = {}
         self._create_actions()
@@ -106,6 +110,9 @@ class MainWindow(QMainWindow):
         toggle_library = self.library.toggleViewAction()
         toggle_library.setText("Show Library")
         view_menu.addAction(toggle_library)
+        toggle_console = self.console.toggleViewAction()
+        toggle_console.setText("Show Console")
+        view_menu.addAction(toggle_console)
 
     # -- Tool switching ----------------------------------------------------
 
