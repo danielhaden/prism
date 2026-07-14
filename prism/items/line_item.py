@@ -111,6 +111,7 @@ class LineItem(Labelable, QGraphicsLineItem):
     def contextMenuEvent(self, event):
         menu = QMenu()
         line_props_action = menu.addAction("Line Properties…")
+        proj_action = menu.addAction("Add Projectivity…")
         range_action = menu.addAction("Define Visible Range…")
         show_full_action = (
             menu.addAction("Show Full Line") if self.has_visible_range() else None
@@ -121,6 +122,8 @@ class LineItem(Labelable, QGraphicsLineItem):
         chosen = menu.exec(event.screenPos())
         if chosen is line_props_action:
             self.open_line_style_dialog()
+        elif chosen is proj_action:
+            self._add_projectivity_at(event.pos())
         elif chosen is range_action:
             self.open_visible_range_dialog()
         elif show_full_action is not None and chosen is show_full_action:
@@ -128,6 +131,21 @@ class LineItem(Labelable, QGraphicsLineItem):
         elif chosen is not None:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _add_projectivity_at(self, local_pos: QPointF) -> None:
+        """Add a pencil centered at the clicked point on this line."""
+        from prism.projectivity_dialog import ProjectivityDialog
+
+        scene = self.scene()
+        if scene is None:
+            return
+        parent = scene.views()[0] if scene.views() else None
+        angles = ProjectivityDialog.get_angles(parent)
+        if not angles:
+            return
+        on_line = self._project_local(local_pos)  # snap the click onto the line
+        center = scene.add_point(self.mapToScene(on_line))
+        scene.add_projectivity(center, angles)
 
     def open_visible_range_dialog(self) -> None:
         from prism.visible_range_dialog import VisibleRangeDialog
