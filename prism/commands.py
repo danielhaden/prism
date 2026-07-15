@@ -229,6 +229,8 @@ class CommandInterpreter:
             "Forms return the element they make, so they nest:\n"
             "  (add line 260 (point L1 2/3))\n"
             "\n"
+            "  (add point <across> <down>) a point placed on the canvas;\n"
+            "                              0 0 = top-left, 1 1 = bottom-right\n"
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
             "                              0 = top of canvas, 1 = bottom\n"
             "  (add line <angle> <point>)  line through a point, at an angle in\n"
@@ -245,7 +247,8 @@ class CommandInterpreter:
     def _form_add(self, args):
         if not args:
             raise CommandError(
-                "Usage: (add horizon <fraction>) or (add line <angle> <point>)"
+                "Usage: (add point <across> <down>), (add line <angle> "
+                "<point>), or (add horizon <fraction>)"
             )
         what = args[0]
         if not isinstance(what, str):
@@ -255,10 +258,24 @@ class CommandInterpreter:
             return self._add_horizon(args[1:])
         if what == "line":
             return self._add_line(args[1:])
+        if what == "point":
+            return self._add_point(args[1:])
         raise CommandError(
-            f"Don't know how to add {args[0]!r}. "
-            "Try (add horizon <fraction>) or (add line <angle> <point>)."
+            f"Don't know how to add {args[0]!r}. Try (add point <across> "
+            "<down>), (add line <angle> <point>) or (add horizon <fraction>)."
         )
+
+    def _add_point(self, args) -> PointItem:
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (add point <across> <down>)\n"
+                "  across: 0 = left edge of canvas, 1 = right edge\n"
+                "  down:   0 = top of canvas, 1 = bottom\n"
+                "  e.g. (add point 1/3 1/3)"
+            )
+        across = self._as_fraction(args[0])
+        down = self._as_fraction(args[1])
+        return self.scene.add_point_at(across, down)
 
     def _add_horizon(self, args) -> LineItem:
         if not args:

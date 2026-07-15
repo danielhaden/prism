@@ -44,6 +44,27 @@ case-insensitively) or by the **id shown by [`list`](#list)** (`P1`, `L1`).
 
 ## Commands
 
+### `(add point <across> <down>)`
+
+Place a point on the canvas.
+
+```
+(add point 1/3 1/3)     # a third across, a third down
+(add point 1/2 1/2)     # the centre
+(add point 0.75 .25)    # decimals work too
+```
+
+Both coordinates are fractions of the **reference frame** (the fully-zoomed-out
+canvas): **across** is 0 at the left edge and 1 at the right; **down** is 0 at
+the top and 1 at the bottom. So `0 0` is the top-left corner and `1 1` the
+bottom-right.
+
+The point it returns can be fed straight to other forms:
+
+```
+(add line 45 (add point 1/2 1/2))
+```
+
 ### `(add horizon <fraction>)`
 
 Add a **horizon**: a horizontal line across the canvas whose orientation is

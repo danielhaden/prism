@@ -358,6 +358,26 @@ class CanvasScene(QGraphicsScene):
         self.addItem(line)
         return line
 
+    def add_point_at(self, across: float, down: float) -> PointItem:
+        """Add a point placed by fractions of the reference frame.
+
+        Args:
+            across: 0 at the canvas's left edge, 1 at its right.
+            down: 0 at the canvas's top, 1 at its bottom.
+
+        Returns:
+            The new point.
+        """
+        rect = self.reference_rect()
+        point = self.add_point(
+            QPointF(
+                rect.left() + across * rect.width(),
+                rect.top() + down * rect.height(),
+            )
+        )
+        self.commit_undo()
+        return point
+
     def add_point_on_line(self, line: LineItem, fraction: float) -> PointItem | None:
         """Add a point a fraction of the way across a line.
 
