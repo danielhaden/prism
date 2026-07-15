@@ -43,6 +43,12 @@ class LabelItem(QGraphicsSimpleTextItem):
         self.setBrush(color)
         self.update()
 
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()  # a drag finished; record it
+
     # -- Context menu ------------------------------------------------------
 
     def contextMenuEvent(self, event):
@@ -162,6 +168,9 @@ class Labelable:
             self.set_label("")
         else:
             return False
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()
         return True
 
     def _prompt_label(self) -> None:

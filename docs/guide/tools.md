@@ -15,6 +15,8 @@ one-key shortcut.
 
 | Action | Shortcut | Notes |
 |--------|----------|-------|
+| Undo | ++ctrl+z++ | Step back to before the previous action. |
+| Redo | ++ctrl+shift+z++ | Re-apply an undone action. |
 | Delete | ++delete++ / ++backspace++ | Removes the selected elements. |
 | Clear | — | Empties the whole canvas. |
 | Group | ++ctrl+g++ | Combines selected elements into one unit. |
@@ -24,10 +26,25 @@ one-key shortcut.
     Selecting and moving happen with the **Select** tool. In Point or Line
     mode, clicks are reserved for drawing.
 
+## Undo & redo
+
+**Undo** (++ctrl+z++) steps back to before your previous action; **Redo**
+(++ctrl+shift+z++) re-applies it. Both are on the toolbar and the Edit menu, and
+grey out when there's nothing to undo/redo.
+
+History covers everything: drawing, dragging, deleting, grouping, styling,
+labelling, anchoring, and pencils — including the *relationships* between
+elements, not just their positions.
+
 ## Navigating the canvas
 
 - **Zoom** — mouse wheel (anchored under the cursor).
 - **Pan** — drag with the **middle mouse button**.
+
+The canvas opens **fully zoomed out**, fitted to the *reference frame* — the
+working area. You can zoom **in** from there, but not further out, so the frame
+always fills the viewport (and infinite lines always run off the edges rather
+than showing their ends).
 
 There is deliberately **no grid and no origin axes** — a metric has no place on
 a projective canvas. If you want a scale, construct one projectively from the

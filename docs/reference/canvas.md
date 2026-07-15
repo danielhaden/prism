@@ -10,3 +10,9 @@ intersections.
 ## View
 
 ::: prism.canvas.view.CanvasView
+
+## Scene state (undo/redo)
+
+Snapshot/restore of the whole scene, used to implement undo and redo.
+
+::: prism.scene_state

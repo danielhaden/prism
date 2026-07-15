@@ -32,6 +32,8 @@ class MainWindow(QMainWindow):
         self._build_menu()
 
         self.scene.statusMessage.connect(self.statusBar().showMessage)
+        self.scene.historyChanged.connect(self._update_history_actions)
+        self.scene.init_history()
         self._select_tool(Tool.SELECT)
 
     # -- Actions -----------------------------------------------------------
@@ -70,6 +72,22 @@ class MainWindow(QMainWindow):
         self.clear_action.setToolTip("Clear the whole canvas")
         self.clear_action.triggered.connect(self.scene.clear_all)
 
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.setToolTip("Undo the previous action")
+        self.undo_action.triggered.connect(self.scene.undo)
+        self.undo_action.setEnabled(False)
+        self.addAction(self.undo_action)
+
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcuts(
+            [QKeySequence.Redo, QKeySequence("Ctrl+Shift+Z")]
+        )
+        self.redo_action.setToolTip("Redo the last undone action")
+        self.redo_action.triggered.connect(self.scene.redo)
+        self.redo_action.setEnabled(False)
+        self.addAction(self.redo_action)
+
         self.group_action = QAction("Group", self)
         self.group_action.setShortcut(QKeySequence("Ctrl+G"))
         self.group_action.setToolTip("Group selected objects (Ctrl+G)")
@@ -92,6 +110,9 @@ class MainWindow(QMainWindow):
             toolbar.addAction(self._tool_actions[tool])
 
         toolbar.addSeparator()
+        toolbar.addAction(self.undo_action)
+        toolbar.addAction(self.redo_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.group_action)
         toolbar.addAction(self.ungroup_action)
         toolbar.addSeparator()
@@ -100,6 +121,9 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
         edit_menu.addAction(self.group_action)
         edit_menu.addAction(self.ungroup_action)
         edit_menu.addSeparator()
@@ -120,3 +144,7 @@ class MainWindow(QMainWindow):
         self._tool_actions[tool].setChecked(True)
         self.scene.set_tool(tool)
         self.view.apply_tool(tool)
+
+    def _update_history_actions(self, can_undo: bool, can_redo: bool) -> None:
+        self.undo_action.setEnabled(can_undo)
+        self.redo_action.setEnabled(can_redo)

@@ -179,6 +179,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         self.set_visible_range(self._range_anchor, neg, pos)
         if scene is not None:
             scene.on_line_changed(self)
+            scene.commit_undo()
 
     def _show_full_line(self) -> None:
         anchor = self._range_anchor
@@ -188,6 +189,7 @@ class LineItem(Labelable, QGraphicsLineItem):
             if anchor is not None:
                 scene._remove_geometry(anchor)
             scene.recompute_intersections()
+            scene.commit_undo()
 
     def open_line_style_dialog(self) -> None:
         from prism.line_dialog import LineStyleDialog
@@ -204,6 +206,8 @@ class LineItem(Labelable, QGraphicsLineItem):
             new_pen.setCosmetic(True)  # keep thickness constant on screen
             self.setPen(new_pen)
             self.update()
+            if scene is not None and hasattr(scene, "commit_undo"):
+                scene.commit_undo()
 
     # -- Endpoint <-> point bindings --------------------------------------
 
@@ -537,6 +541,9 @@ class LineItem(Labelable, QGraphicsLineItem):
         if self._body_drag:
             self._body_drag = False
         super().mouseReleaseEvent(event)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()
 
     # -- Movement ----------------------------------------------------------
 

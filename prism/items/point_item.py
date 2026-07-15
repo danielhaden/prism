@@ -171,9 +171,11 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         if apply_all and scene is not None and hasattr(
             scene, "apply_point_style_to_all"
         ):
-            scene.apply_point_style_to_all(style)
+            scene.apply_point_style_to_all(style)  # commits its own undo step
         else:
             self.set_display(**style)
+            if scene is not None and hasattr(scene, "commit_undo"):
+                scene.commit_undo()
 
     def set_center(self, center: QPointF) -> None:
         """Move the point to a new center (scene coordinates)."""
@@ -262,6 +264,8 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         if scene is not None:
             scene.hide_snap_indicator()
         super().mouseReleaseEvent(event)
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()
 
     def paint(self, painter, option, widget=None):
         origin = QPointF(0, 0)

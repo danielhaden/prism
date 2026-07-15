@@ -52,6 +52,8 @@ class CanvasScene(QGraphicsScene):
 
     #: Emitted with a short hint for the status bar.
     statusMessage = Signal(str)
+    #: Emitted when the undo/redo stacks change (args: can_undo, can_redo).
+    historyChanged = Signal(bool, bool)
 
     #: On-screen pixel radius within which an endpoint snaps to a point.
     SNAP_PX = 12.0
@@ -77,9 +79,78 @@ class CanvasScene(QGraphicsScene):
         self._updating = False
         self._syncing_anchors = False
         self._seq_counter = 0
+
+        # Undo/redo: snapshots of the whole scene, newest last.
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._restoring = False
         # Display properties applied to points created from now on (None = use
         # each item's own defaults). Set via apply_point_style_to_all().
         self._point_style: dict | None = None
+
+    # -- Undo / redo -------------------------------------------------------
+
+    #: Most snapshots kept; older history is discarded.
+    UNDO_LIMIT = 100
+
+    def init_history(self) -> None:
+        """Record the starting state; call once the scene is set up."""
+        from prism.scene_state import capture
+
+        self._undo_stack = [capture(self)]
+        self._redo_stack.clear()
+        self._emit_history()
+
+    def commit_undo(self) -> None:
+        """Record the current state as a new undo step (call after an action)."""
+        if self._restoring:
+            return
+        from prism.scene_state import capture
+
+        state = capture(self)
+        if self._undo_stack and state == self._undo_stack[-1]:
+            return  # nothing actually changed
+        self._undo_stack.append(state)
+        if len(self._undo_stack) > self.UNDO_LIMIT:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self._emit_history()
+
+    def can_undo(self) -> bool:
+        return len(self._undo_stack) > 1
+
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
+
+    def undo(self) -> bool:
+        """Step back to the previous state. Returns whether anything happened."""
+        if not self.can_undo():
+            return False
+        self._redo_stack.append(self._undo_stack.pop())
+        self._apply_state(self._undo_stack[-1])
+        return True
+
+    def redo(self) -> bool:
+        """Step forward again. Returns whether anything happened."""
+        if not self.can_redo():
+            return False
+        state = self._redo_stack.pop()
+        self._undo_stack.append(state)
+        self._apply_state(state)
+        return True
+
+    def _apply_state(self, state: dict) -> None:
+        from prism.scene_state import restore
+
+        self._restoring = True
+        try:
+            restore(self, state)
+        finally:
+            self._restoring = False
+        self._emit_history()
+
+    def _emit_history(self) -> None:
+        self.historyChanged.emit(self.can_undo(), self.can_redo())
 
     # -- Tool management ---------------------------------------------------
 
@@ -205,6 +276,7 @@ class CanvasScene(QGraphicsScene):
             snapped = self.snap_position(pos)
             self.add_point(snapped if snapped is not None else pos)
             self.hide_snap_indicator()
+            self.commit_undo()
             event.accept()
             return
 
@@ -277,6 +349,7 @@ class CanvasScene(QGraphicsScene):
             if isinstance(item, PointItem):
                 item.set_display(**style)
                 count += 1
+        self.commit_undo()
         return count
 
     def add_line(self, start: QPointF, end: QPointF) -> LineItem:
@@ -317,6 +390,7 @@ class CanvasScene(QGraphicsScene):
                 self.on_line_changed(line)
             self.hide_snap_indicator()
             self._emit_hint()
+            self.commit_undo()
 
     def _start_exclude(self):
         return (self._line_start_point,) if self._line_start_point else ()
@@ -413,6 +487,7 @@ class CanvasScene(QGraphicsScene):
         for point in points:
             point.set_anchor_line(line)
         self.recompute_intersections()
+        self.commit_undo()
         return len(points)
 
     def _points_anchored_to(self, line: LineItem):
@@ -443,6 +518,7 @@ class CanvasScene(QGraphicsScene):
             line.set_pivot(point)
             created.append(line)
         self.recompute_intersections()
+        self.commit_undo()
         return created
 
     def on_line_changed(self, line: LineItem) -> None:
@@ -585,6 +661,7 @@ class CanvasScene(QGraphicsScene):
         self.clearSelection()
         group.setSelected(True)
         self.recompute_intersections()
+        self.commit_undo()
         return group
 
     def ungroup_selected(self) -> int:
@@ -601,6 +678,7 @@ class CanvasScene(QGraphicsScene):
                     self.addItem(child)
                     child.setSelected(True)
         self.recompute_intersections()
+        self.commit_undo()
         return len(groups)
 
     def on_group_moved(self, group: GroupItem) -> None:
@@ -616,6 +694,7 @@ class CanvasScene(QGraphicsScene):
         for item in list(self.selectedItems()):
             self._remove_geometry(item)
         self.recompute_intersections()
+        self.commit_undo()
 
     def _remove_geometry(self, item) -> None:
         if isinstance(item, GroupItem):
@@ -651,3 +730,4 @@ class CanvasScene(QGraphicsScene):
         self.clear()
         self._intersections.clear()
         self._snap_indicator = None
+        self.commit_undo()

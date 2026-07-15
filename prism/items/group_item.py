@@ -24,3 +24,9 @@ class GroupItem(QGraphicsItemGroup):
             if scene is not None and hasattr(scene, "on_group_moved"):
                 scene.on_group_moved(self)
         return super().itemChange(change, value)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()  # a group drag finished

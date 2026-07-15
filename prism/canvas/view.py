@@ -112,7 +112,11 @@ class CanvasView(QGraphicsView):
 
     def insert_template(self, template, scene_pos):
         """Instantiate a template at a scene position (returns new items)."""
-        return instantiate(self.scene(), template, scene_pos)
+        created = instantiate(self.scene(), template, scene_pos)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()
+        return created
 
     # -- Zoom --------------------------------------------------------------
 
