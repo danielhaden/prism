@@ -69,6 +69,7 @@ class CanvasScene(QGraphicsScene):
         self._intersections: dict[tuple[int, int], IntersectionPointItem] = {}
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
+        self._syncing_anchors = False
         self._seq_counter = 0
         # Display properties applied to points created from now on (None = use
         # each item's own defaults). Set via apply_point_style_to_all().
@@ -327,7 +328,27 @@ class CanvasScene(QGraphicsScene):
             if item.range_anchor() is point:
                 item.prepareGeometryChange()
                 item.update()
+        # Lines bound to (or pivoting on) this point just changed shape, so
+        # carry any points anchored to them.
+        self._sync_anchored_points(exclude=point)
         self.recompute_intersections()
+
+    def _sync_anchored_points(self, exclude=None) -> None:
+        """Put every anchored point back onto its line (re-entrancy guarded)."""
+        if self._syncing_anchors:
+            return
+        self._syncing_anchors = True
+        try:
+            for item in self.items():
+                if (
+                    isinstance(item, PointItem)
+                    and not item.is_derived
+                    and item is not exclude
+                    and item.anchor_line() is not None
+                ):
+                    item.sync_to_anchor_line()
+        finally:
+            self._syncing_anchors = False
 
     # -- Pencils (pinning lines through a point) --------------------------
 
@@ -357,6 +378,41 @@ class CanvasScene(QGraphicsScene):
                 count += 1
         return count
 
+    # -- Anchoring points to lines ----------------------------------------
+
+    def selected_point_line_pair(self) -> tuple:
+        """The selected points and the single selected line, if that's the mix.
+
+        Returns:
+            A ``(points, line)`` tuple, or ``(None, None)`` when the selection
+                isn't exactly one line plus at least one point.
+        """
+        points = [
+            it
+            for it in self.selectedItems()
+            if isinstance(it, PointItem) and not it.is_derived
+        ]
+        lines = [it for it in self.selectedItems() if isinstance(it, LineItem)]
+        if points and len(lines) == 1:
+            return points, lines[0]
+        return None, None
+
+    def anchor_points_to_line(self, points, line: LineItem) -> int:
+        """Constrain each point to lie on ``line``. Returns how many anchored."""
+        for point in points:
+            point.set_anchor_line(line)
+        self.recompute_intersections()
+        return len(points)
+
+    def _points_anchored_to(self, line: LineItem):
+        return [
+            it
+            for it in self.items()
+            if isinstance(it, PointItem)
+            and not it.is_derived
+            and it.anchor_line() is line
+        ]
+
     def add_projectivity(self, point: PointItem, angles) -> list:
         """Create a pencil of lines through ``point`` at the given angles.
 
@@ -379,7 +435,8 @@ class CanvasScene(QGraphicsScene):
         return created
 
     def on_line_changed(self, line: LineItem) -> None:
-        """A line's geometry changed: recompute intersections."""
+        """A line's geometry changed: carry anchored points, recompute."""
+        self._sync_anchored_points()
         self.recompute_intersections()
 
     def _lines(self):
@@ -559,6 +616,10 @@ class CanvasScene(QGraphicsScene):
             return
         if isinstance(item, PointItem) and not item.is_derived:
             self._detach_point_references(item)
+        elif isinstance(item, LineItem):
+            # Release any points anchored to this line.
+            for point in self._points_anchored_to(item):
+                point.clear_anchor_line()
         self.removeItem(item)
 
     def _detach_point_references(self, point) -> None:

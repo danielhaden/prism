@@ -12,9 +12,28 @@ size at any zoom.
   derived point automatically (drawn in green). These are computed; you don't
   place or move them.
 
+### Anchoring a point to a line
+
+Snapping is transient — it releases as soon as you drag away. To make a point
+*stay* on a line, **anchor** it:
+
+1. Select **one line and one (or more) points** — click one, then ++shift++-click
+   the other.
+2. Right-click either of them → **Snap Point to Line**.
+
+The point jumps onto the line and is now constrained to it:
+
+- **Dragging the point** slides it *along* the line.
+- **Moving or rotating the line** carries the point with it.
+
+Right-click the point → **Remove Anchor** to release it. Deleting the line also
+releases anything anchored to it.
+
 ### Point context menu (right-click)
 
 - **Modify Display Properties…** — see [Display properties](#display-properties).
+- **Snap Point to Line** / **Remove Anchor** — see
+  [Anchoring](#anchoring-a-point-to-a-line).
 - **Pin Lines Through Point / Unpin** — turn the lines currently passing
   through the point into a [pencil](projectivities.md) (or release them).
 - **Add / Edit / Remove Label**, **Label Properties…** — see
