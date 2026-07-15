@@ -70,6 +70,9 @@ class CanvasScene(QGraphicsScene):
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._seq_counter = 0
+        # Display properties applied to points created from now on (None = use
+        # each item's own defaults). Set via apply_point_style_to_all().
+        self._point_style: dict | None = None
 
     # -- Tool management ---------------------------------------------------
 
@@ -235,9 +238,32 @@ class CanvasScene(QGraphicsScene):
 
     def add_point(self, pos: QPointF) -> PointItem:
         point = PointItem(pos)
+        self._apply_default_point_style(point)
         self._tag(point)
         self.addItem(point)
         return point
+
+    def _apply_default_point_style(self, point: PointItem) -> None:
+        """Give a newly created point the scene's display defaults, if set."""
+        if self._point_style:
+            point.set_display(**self._point_style)
+
+    def apply_point_style_to_all(self, style: dict) -> int:
+        """Apply display properties to every point, and to points created later.
+
+        Args:
+            style: Keyword arguments accepted by :meth:`PointItem.set_display`.
+
+        Returns:
+            The number of points updated.
+        """
+        self._point_style = dict(style)
+        count = 0
+        for item in self.items():
+            if isinstance(item, PointItem):
+                item.set_display(**style)
+                count += 1
+        return count
 
     def add_line(self, start: QPointF, end: QPointF) -> LineItem:
         line = LineItem(start, end)
@@ -378,6 +404,7 @@ class CanvasScene(QGraphicsScene):
                     existing = self._intersections.get(key)
                     if existing is None:
                         marker = IntersectionPointItem(point)
+                        self._apply_default_point_style(marker)
                         self.addItem(marker)
                         self._intersections[key] = marker
                     else:
@@ -409,13 +436,8 @@ class CanvasScene(QGraphicsScene):
         # spot (or a derived point) shows the scene-level menu.
         target = None
         for item in self.items(event.scenePos()):
-            if isinstance(item, LabelItem):
-                target = item
-                break
-            if isinstance(item, (PointItem, LineItem)) and not getattr(
-                item, "is_derived", False
-            ):
-                target = item
+            if isinstance(item, (LabelItem, PointItem, LineItem)):
+                target = item  # includes derived points (display properties)
                 break
 
         if target is not None:

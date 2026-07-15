@@ -14,10 +14,32 @@ size at any zoom.
 
 ### Point context menu (right-click)
 
+- **Modify Display Properties…** — see [Display properties](#display-properties).
 - **Pin Lines Through Point / Unpin** — turn the lines currently passing
   through the point into a [pencil](projectivities.md) (or release them).
 - **Add / Edit / Remove Label**, **Label Properties…** — see
   [Labels](#labels).
+
+### Display properties
+
+Right-click any point — **including intersection points** — and choose
+**Modify Display Properties…**:
+
+| Property | Meaning |
+|----------|---------|
+| **Radius** | The dot's on-screen radius. |
+| **Color** | The dot's fill color. |
+| **Glow radius** | Radius of a disc drawn *around* the point. `0` disables it. |
+| **Glow color** | Fill of that disc — typically the background color. |
+
+**Glow** is the surround: a filled disc drawn *behind* the dot but *over* the
+lines. Where many lines converge, a background-colored glow cuts them away near
+the point so it reads cleanly instead of dissolving into a knot of ink.
+
+!!! tip "Apply to All Points"
+    The dialog's **Apply to All Points** button pushes the properties to every
+    point on the canvas *and* makes them the default for points created later —
+    including intersection points as they're recomputed.
 
 ## Lines
 
