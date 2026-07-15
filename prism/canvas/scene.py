@@ -9,7 +9,7 @@ endpoints follow and intersections recompute.
 
 import math
 
-from PySide6.QtCore import QLineF, QPointF, Qt, Signal
+from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
@@ -52,9 +52,17 @@ class CanvasScene(QGraphicsScene):
 
     #: Emitted with a short hint for the status bar.
     statusMessage = Signal(str)
+    #: Emitted when the undo/redo stacks change (args: can_undo, can_redo).
+    historyChanged = Signal(bool, bool)
 
     #: On-screen pixel radius within which an endpoint snaps to a point.
     SNAP_PX = 12.0
+
+    #: Side length of the reference frame: the working area the canvas shows
+    #: when fully zoomed out. Deliberately much smaller than the scene rect,
+    #: which only needs to be big enough that infinite lines always run past
+    #: the viewport (so their clipped ends are never visible).
+    REFERENCE_SIZE = 1200.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,7 +77,80 @@ class CanvasScene(QGraphicsScene):
         self._intersections: dict[tuple[int, int], IntersectionPointItem] = {}
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
+        self._syncing_anchors = False
         self._seq_counter = 0
+
+        # Undo/redo: snapshots of the whole scene, newest last.
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._restoring = False
+        # Display properties applied to points created from now on (None = use
+        # each item's own defaults). Set via apply_point_style_to_all().
+        self._point_style: dict | None = None
+
+    # -- Undo / redo -------------------------------------------------------
+
+    #: Most snapshots kept; older history is discarded.
+    UNDO_LIMIT = 100
+
+    def init_history(self) -> None:
+        """Record the starting state; call once the scene is set up."""
+        from prism.scene_state import capture
+
+        self._undo_stack = [capture(self)]
+        self._redo_stack.clear()
+        self._emit_history()
+
+    def commit_undo(self) -> None:
+        """Record the current state as a new undo step (call after an action)."""
+        if self._restoring:
+            return
+        from prism.scene_state import capture
+
+        state = capture(self)
+        if self._undo_stack and state == self._undo_stack[-1]:
+            return  # nothing actually changed
+        self._undo_stack.append(state)
+        if len(self._undo_stack) > self.UNDO_LIMIT:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self._emit_history()
+
+    def can_undo(self) -> bool:
+        return len(self._undo_stack) > 1
+
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
+
+    def undo(self) -> bool:
+        """Step back to the previous state. Returns whether anything happened."""
+        if not self.can_undo():
+            return False
+        self._redo_stack.append(self._undo_stack.pop())
+        self._apply_state(self._undo_stack[-1])
+        return True
+
+    def redo(self) -> bool:
+        """Step forward again. Returns whether anything happened."""
+        if not self.can_redo():
+            return False
+        state = self._redo_stack.pop()
+        self._undo_stack.append(state)
+        self._apply_state(state)
+        return True
+
+    def _apply_state(self, state: dict) -> None:
+        from prism.scene_state import restore
+
+        self._restoring = True
+        try:
+            restore(self, state)
+        finally:
+            self._restoring = False
+        self._emit_history()
+
+    def _emit_history(self) -> None:
+        self.historyChanged.emit(self.can_undo(), self.can_redo())
 
     # -- Tool management ---------------------------------------------------
 
@@ -93,6 +174,11 @@ class CanvasScene(QGraphicsScene):
         self.statusMessage.emit(hints[self._tool])
 
     # -- Snapping ----------------------------------------------------------
+
+    def reference_rect(self) -> QRectF:
+        """The working area shown when the canvas is fully zoomed out."""
+        half = self.REFERENCE_SIZE / 2
+        return QRectF(-half, -half, self.REFERENCE_SIZE, self.REFERENCE_SIZE)
 
     def snap_radius(self) -> float:
         """Snap threshold in scene units (constant on screen across zoom)."""
@@ -143,7 +229,9 @@ class CanvasScene(QGraphicsScene):
             return best
 
         # 2) Otherwise, the nearest point on a line (skipping lines the moved
-        #    point is bound to, which would just snap it to itself).
+        #    point is bound to, which would just snap it to itself). Project
+        #    onto the *visible* extent, so a point snaps anywhere along an
+        #    infinite line - not just near its two defining endpoints.
         best = None
         best_d = radius
         for line in self._lines():
@@ -151,7 +239,7 @@ class CanvasScene(QGraphicsScene):
                 line.bound_point(1) is exclude or line.bound_point(2) is exclude
             ):
                 continue
-            proj = _closest_on_segment(scene_pos, line.scene_line())
+            proj = _closest_on_segment(scene_pos, line.display_line())
             d = QLineF(scene_pos, proj).length()
             if d <= best_d:
                 best_d = d
@@ -188,6 +276,7 @@ class CanvasScene(QGraphicsScene):
             snapped = self.snap_position(pos)
             self.add_point(snapped if snapped is not None else pos)
             self.hide_snap_indicator()
+            self.commit_undo()
             event.accept()
             return
 
@@ -235,9 +324,33 @@ class CanvasScene(QGraphicsScene):
 
     def add_point(self, pos: QPointF) -> PointItem:
         point = PointItem(pos)
+        self._apply_default_point_style(point)
         self._tag(point)
         self.addItem(point)
         return point
+
+    def _apply_default_point_style(self, point: PointItem) -> None:
+        """Give a newly created point the scene's display defaults, if set."""
+        if self._point_style:
+            point.set_display(**self._point_style)
+
+    def apply_point_style_to_all(self, style: dict) -> int:
+        """Apply display properties to every point, and to points created later.
+
+        Args:
+            style: Keyword arguments accepted by :meth:`PointItem.set_display`.
+
+        Returns:
+            The number of points updated.
+        """
+        self._point_style = dict(style)
+        count = 0
+        for item in self.items():
+            if isinstance(item, PointItem):
+                item.set_display(**style)
+                count += 1
+        self.commit_undo()
+        return count
 
     def add_line(self, start: QPointF, end: QPointF) -> LineItem:
         line = LineItem(start, end)
@@ -277,6 +390,7 @@ class CanvasScene(QGraphicsScene):
                 self.on_line_changed(line)
             self.hide_snap_indicator()
             self._emit_hint()
+            self.commit_undo()
 
     def _start_exclude(self):
         return (self._line_start_point,) if self._line_start_point else ()
@@ -299,7 +413,27 @@ class CanvasScene(QGraphicsScene):
             if item.range_anchor() is point:
                 item.prepareGeometryChange()
                 item.update()
+        # Lines bound to (or pivoting on) this point just changed shape, so
+        # carry any points anchored to them.
+        self._sync_anchored_points(exclude=point)
         self.recompute_intersections()
+
+    def _sync_anchored_points(self, exclude=None) -> None:
+        """Put every anchored point back onto its line (re-entrancy guarded)."""
+        if self._syncing_anchors:
+            return
+        self._syncing_anchors = True
+        try:
+            for item in self.items():
+                if (
+                    isinstance(item, PointItem)
+                    and not item.is_derived
+                    and item is not exclude
+                    and item.anchor_line() is not None
+                ):
+                    item.sync_to_anchor_line()
+        finally:
+            self._syncing_anchors = False
 
     # -- Pencils (pinning lines through a point) --------------------------
 
@@ -313,7 +447,9 @@ class CanvasScene(QGraphicsScene):
         for line in self._lines():
             if line.has_pivot():
                 continue
-            proj = _closest_on_segment(point.center(), line.scene_line())
+            # Use the visible extent so any line drawn through the point
+            # qualifies, not just one whose defining endpoints straddle it.
+            proj = _closest_on_segment(point.center(), line.display_line())
             if QLineF(point.center(), proj).length() <= radius:
                 line.set_pivot(point)
                 count += 1
@@ -326,6 +462,42 @@ class CanvasScene(QGraphicsScene):
                 line.clear_pivot()
                 count += 1
         return count
+
+    # -- Anchoring points to lines ----------------------------------------
+
+    def selected_point_line_pair(self) -> tuple:
+        """The selected points and the single selected line, if that's the mix.
+
+        Returns:
+            A ``(points, line)`` tuple, or ``(None, None)`` when the selection
+                isn't exactly one line plus at least one point.
+        """
+        points = [
+            it
+            for it in self.selectedItems()
+            if isinstance(it, PointItem) and not it.is_derived
+        ]
+        lines = [it for it in self.selectedItems() if isinstance(it, LineItem)]
+        if points and len(lines) == 1:
+            return points, lines[0]
+        return None, None
+
+    def anchor_points_to_line(self, points, line: LineItem) -> int:
+        """Constrain each point to lie on ``line``. Returns how many anchored."""
+        for point in points:
+            point.set_anchor_line(line)
+        self.recompute_intersections()
+        self.commit_undo()
+        return len(points)
+
+    def _points_anchored_to(self, line: LineItem):
+        return [
+            it
+            for it in self.items()
+            if isinstance(it, PointItem)
+            and not it.is_derived
+            and it.anchor_line() is line
+        ]
 
     def add_projectivity(self, point: PointItem, angles) -> list:
         """Create a pencil of lines through ``point`` at the given angles.
@@ -346,10 +518,12 @@ class CanvasScene(QGraphicsScene):
             line.set_pivot(point)
             created.append(line)
         self.recompute_intersections()
+        self.commit_undo()
         return created
 
     def on_line_changed(self, line: LineItem) -> None:
-        """A line's geometry changed: recompute intersections."""
+        """A line's geometry changed: carry anchored points, recompute."""
+        self._sync_anchored_points()
         self.recompute_intersections()
 
     def _lines(self):
@@ -378,6 +552,7 @@ class CanvasScene(QGraphicsScene):
                     existing = self._intersections.get(key)
                     if existing is None:
                         marker = IntersectionPointItem(point)
+                        self._apply_default_point_style(marker)
                         self.addItem(marker)
                         self._intersections[key] = marker
                     else:
@@ -409,13 +584,8 @@ class CanvasScene(QGraphicsScene):
         # spot (or a derived point) shows the scene-level menu.
         target = None
         for item in self.items(event.scenePos()):
-            if isinstance(item, LabelItem):
-                target = item
-                break
-            if isinstance(item, (PointItem, LineItem)) and not getattr(
-                item, "is_derived", False
-            ):
-                target = item
+            if isinstance(item, (LabelItem, PointItem, LineItem)):
+                target = item  # includes derived points (display properties)
                 break
 
         if target is not None:
@@ -491,6 +661,7 @@ class CanvasScene(QGraphicsScene):
         self.clearSelection()
         group.setSelected(True)
         self.recompute_intersections()
+        self.commit_undo()
         return group
 
     def ungroup_selected(self) -> int:
@@ -507,6 +678,7 @@ class CanvasScene(QGraphicsScene):
                     self.addItem(child)
                     child.setSelected(True)
         self.recompute_intersections()
+        self.commit_undo()
         return len(groups)
 
     def on_group_moved(self, group: GroupItem) -> None:
@@ -522,6 +694,7 @@ class CanvasScene(QGraphicsScene):
         for item in list(self.selectedItems()):
             self._remove_geometry(item)
         self.recompute_intersections()
+        self.commit_undo()
 
     def _remove_geometry(self, item) -> None:
         if isinstance(item, GroupItem):
@@ -533,6 +706,10 @@ class CanvasScene(QGraphicsScene):
             return
         if isinstance(item, PointItem) and not item.is_derived:
             self._detach_point_references(item)
+        elif isinstance(item, LineItem):
+            # Release any points anchored to this line.
+            for point in self._points_anchored_to(item):
+                point.clear_anchor_line()
         self.removeItem(item)
 
     def _detach_point_references(self, point) -> None:
@@ -553,3 +730,4 @@ class CanvasScene(QGraphicsScene):
         self.clear()
         self._intersections.clear()
         self._snap_indicator = None
+        self.commit_undo()

@@ -116,12 +116,27 @@ class LineItem(Labelable, QGraphicsLineItem):
         show_full_action = (
             menu.addAction("Show Full Line") if self.has_visible_range() else None
         )
+
+        # Anchor a point to this line when the selection is one line + point(s).
+        scene = self.scene()
+        snap_action = None
+        sel_points, sel_line = (
+            scene.selected_point_line_pair()
+            if scene is not None and hasattr(scene, "selected_point_line_pair")
+            else (None, None)
+        )
+        if sel_line is not None and sel_points:
+            menu.addSeparator()
+            snap_action = menu.addAction("Snap Point to Line")
+
         menu.addSeparator()
         label_actions = self.add_label_actions(menu)
 
         chosen = menu.exec(event.screenPos())
         if chosen is line_props_action:
             self.open_line_style_dialog()
+        elif snap_action is not None and chosen is snap_action:
+            scene.anchor_points_to_line(sel_points, sel_line)
         elif chosen is proj_action:
             self._add_projectivity_at(event.pos())
         elif chosen is range_action:
@@ -164,6 +179,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         self.set_visible_range(self._range_anchor, neg, pos)
         if scene is not None:
             scene.on_line_changed(self)
+            scene.commit_undo()
 
     def _show_full_line(self) -> None:
         anchor = self._range_anchor
@@ -173,6 +189,7 @@ class LineItem(Labelable, QGraphicsLineItem):
             if anchor is not None:
                 scene._remove_geometry(anchor)
             scene.recompute_intersections()
+            scene.commit_undo()
 
     def open_line_style_dialog(self) -> None:
         from prism.line_dialog import LineStyleDialog
@@ -189,6 +206,8 @@ class LineItem(Labelable, QGraphicsLineItem):
             new_pen.setCosmetic(True)  # keep thickness constant on screen
             self.setPen(new_pen)
             self.update()
+            if scene is not None and hasattr(scene, "commit_undo"):
+                scene.commit_undo()
 
     # -- Endpoint <-> point bindings --------------------------------------
 
@@ -225,6 +244,37 @@ class LineItem(Labelable, QGraphicsLineItem):
         """The *defining* segment (endpoints) in scene coordinates."""
         line = self.line()
         return QLineF(self.mapToScene(line.p1()), self.mapToScene(line.p2()))
+
+    # -- Geometry queries (scene coords) ----------------------------------
+
+    def scene_direction(self) -> QPointF | None:
+        """Unit direction of the line in scene coords, or None if degenerate."""
+        seg = self.scene_line()
+        dx, dy = seg.x2() - seg.x1(), seg.y2() - seg.y1()
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < 1e-9:
+            return None
+        return QPointF(dx / length, dy / length)
+
+    def param_of(self, scene_pt: QPointF) -> float:
+        """Signed distance of ``scene_pt``'s projection from the line's origin."""
+        d = self.scene_direction()
+        if d is None:
+            return 0.0
+        p1 = self.scene_line().p1()
+        return (scene_pt.x() - p1.x()) * d.x() + (scene_pt.y() - p1.y()) * d.y()
+
+    def point_at_param(self, t: float) -> QPointF:
+        """The point at parameter ``t`` along the (infinite) line."""
+        p1 = self.scene_line().p1()
+        d = self.scene_direction()
+        if d is None:
+            return QPointF(p1)
+        return QPointF(p1.x() + d.x() * t, p1.y() + d.y() * t)
+
+    def project_scene(self, scene_pt: QPointF) -> QPointF:
+        """The closest point on the infinite line to ``scene_pt``."""
+        return self.point_at_param(self.param_of(scene_pt))
 
     # -- Infinite line / visible range ------------------------------------
 
@@ -491,6 +541,9 @@ class LineItem(Labelable, QGraphicsLineItem):
         if self._body_drag:
             self._body_drag = False
         super().mouseReleaseEvent(event)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "commit_undo"):
+            scene.commit_undo()
 
     # -- Movement ----------------------------------------------------------
 
