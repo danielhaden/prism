@@ -9,7 +9,7 @@ endpoints follow and intersections recompute.
 
 import math
 
-from PySide6.QtCore import QLineF, QPointF, Qt, Signal
+from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
@@ -56,6 +56,12 @@ class CanvasScene(QGraphicsScene):
     #: On-screen pixel radius within which an endpoint snaps to a point.
     SNAP_PX = 12.0
 
+    #: Side length of the reference frame: the working area the canvas shows
+    #: when fully zoomed out. Deliberately much smaller than the scene rect,
+    #: which only needs to be big enough that infinite lines always run past
+    #: the viewport (so their clipped ends are never visible).
+    REFERENCE_SIZE = 1200.0
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSceneRect(-2000, -2000, 4000, 4000)
@@ -97,6 +103,11 @@ class CanvasScene(QGraphicsScene):
         self.statusMessage.emit(hints[self._tool])
 
     # -- Snapping ----------------------------------------------------------
+
+    def reference_rect(self) -> QRectF:
+        """The working area shown when the canvas is fully zoomed out."""
+        half = self.REFERENCE_SIZE / 2
+        return QRectF(-half, -half, self.REFERENCE_SIZE, self.REFERENCE_SIZE)
 
     def snap_radius(self) -> float:
         """Snap threshold in scene units (constant on screen across zoom)."""
