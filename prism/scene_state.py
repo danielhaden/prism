@@ -138,6 +138,7 @@ def capture(scene) -> dict:
                 ],
                 "pivot": p_index.get(id(pivot)) if pivot is not None else None,
                 "range": visible_range,
+                "locked": line.is_orientation_locked(),
                 "label": _capture_label(line),
             }
         )
@@ -188,6 +189,7 @@ def restore(scene, state: dict) -> None:
         pen.setStyle(Qt.PenStyle(spec["style"]))
         pen.setCosmetic(True)
         line.setPen(pen)
+        line.set_orientation_locked(data.get("locked", False))
         _restore_label(line, data["label"])
         lines.append(line)
 

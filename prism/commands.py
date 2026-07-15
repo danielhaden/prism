@@ -8,10 +8,37 @@ scripting surface.
 from prism.items import LineItem, PointItem
 
 
+def parse_fraction(text: str):
+    """Read a 0-1 position written as a fraction or a decimal.
+
+    Accepts forms like ``1/2``, ``2/3``, ``0.5`` or ``.25``.
+
+    Returns:
+        The value as a float, or None if it can't be read.
+    """
+    text = text.strip()
+    if "/" in text:
+        parts = text.split("/")
+        if len(parts) != 2:
+            return None
+        try:
+            numerator, denominator = float(parts[0]), float(parts[1])
+        except ValueError:
+            return None
+        if denominator == 0:
+            return None
+        return numerator / denominator
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 class CommandInterpreter:
     def __init__(self, scene):
         self.scene = scene
         self._commands = {
+            "add": self._cmd_add,
             "list": self._cmd_list,
             "help": self._cmd_help,
         }
@@ -54,10 +81,43 @@ class CommandInterpreter:
     def _cmd_help(self, args) -> str:
         return (
             "Commands:\n"
+            "  add horizon <fraction>    add a horizontal, orientation-locked\n"
+            "                            line; 0 = top of canvas, 1 = bottom\n"
+            "                            (e.g. 'add horizon 1/3' or '0.5')\n"
             "  list [-points | -lines]   list canvas elements "
             "(all if no qualifier)\n"
-            "  help                       show this help"
+            "  help                      show this help"
         )
+
+    def _cmd_add(self, args) -> str:
+        if not args:
+            return "Usage: add horizon <fraction>"
+        what = args[0].lower()
+        if what == "horizon":
+            return self._add_horizon(args[1:])
+        return f"Don't know how to add {args[0]!r}. Try 'add horizon <fraction>'."
+
+    def _add_horizon(self, args) -> str:
+        if not args:
+            return (
+                "Usage: add horizon <fraction>\n"
+                "  0 = top of canvas, 1 = bottom. e.g. 'add horizon 1/3', "
+                "'add horizon 0.5'"
+            )
+        fraction = parse_fraction(args[0])
+        if fraction is None:
+            return (
+                f"Couldn't read {args[0]!r} as a position. "
+                "Use a fraction like 1/3 or a decimal like 0.5."
+            )
+        if not 0.0 <= fraction <= 1.0:
+            return (
+                f"Position must be between 0 and 1 (got {fraction:g}). "
+                "0 = top of canvas, 1 = bottom."
+            )
+        line = self.scene.add_horizon(fraction)
+        y = line.scene_line().y1()
+        return f"Added horizon at {args[0]} down the canvas (y = {y:.1f})."
 
     def _cmd_list(self, args) -> str:
         show_points = show_lines = True
@@ -109,6 +169,8 @@ class CommandInterpreter:
         else:
             extent = "infinite"
         parts = [base, extent]
+        if ln.is_orientation_locked():
+            parts.append("locked")
         if ln.has_pivot():
             parts.append("pivot")
         if ln.label_text():

@@ -358,6 +358,24 @@ class CanvasScene(QGraphicsScene):
         self.addItem(line)
         return line
 
+    def add_horizon(self, fraction: float) -> LineItem:
+        """Add a horizontal, orientation-locked line across the canvas.
+
+        Args:
+            fraction: Where to place it down the reference frame, from 0 (the
+                top of the canvas) to 1 (the bottom).
+
+        Returns:
+            The new line.
+        """
+        rect = self.reference_rect()
+        y = rect.top() + fraction * rect.height()
+        line = self.add_line(QPointF(rect.left(), y), QPointF(rect.right(), y))
+        line.set_orientation_locked(True)
+        self.on_line_changed(line)
+        self.commit_undo()
+        return line
+
     def _tag(self, item) -> None:
         """Stamp a creation sequence number for stable auto-label ordering."""
         self._seq_counter += 1

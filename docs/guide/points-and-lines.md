@@ -85,6 +85,16 @@ Drag the anchor to slide the visible window along the line. Right-click →
 **Show Full Line** restores the infinite line (and removes the anchor). Deleting
 the anchor also reverts the line.
 
+### Locked orientation
+
+A line's **orientation can be locked**, freezing its direction: it can still be
+moved, but nothing rotates it — dragging an endpoint handle slides the whole
+line through the cursor rather than tilting it, and pivot rotation is refused.
+
+The [`add horizon`](console.md#add-horizon) console command creates a
+horizontal line with its orientation locked; otherwise it's an ordinary
+infinite line.
+
 ### Line properties
 
 Right-click a line → **Line Properties…** to set its **color**, **thickness**,

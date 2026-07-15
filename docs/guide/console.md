@@ -8,6 +8,25 @@ walk through your command history.
 
 ## Commands
 
+### `add horizon`
+
+Add a **horizon**: a horizontal line across the canvas whose orientation is
+**locked**, so it can be moved but never rotated.
+
+```
+add horizon 1/2     # halfway down the canvas
+add horizon 1/3     # a third of the way down
+add horizon 0.25    # decimals work too
+```
+
+The position is given as a fraction of the way down the **reference frame**
+(the fully-zoomed-out canvas): **0 is the top, 1 is the bottom**. Fractions
+(`1/3`) and decimals (`0.5`, `.25`) are both accepted.
+
+Otherwise it's an ordinary infinite line — you can style it, label it, hang
+pencils off it, and drag it up and down. Dragging one of its endpoint handles
+slides the whole line instead of tilting it.
+
 ### `list`
 
 List the elements on the canvas.
