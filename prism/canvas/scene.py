@@ -146,7 +146,9 @@ class CanvasScene(QGraphicsScene):
             return best
 
         # 2) Otherwise, the nearest point on a line (skipping lines the moved
-        #    point is bound to, which would just snap it to itself).
+        #    point is bound to, which would just snap it to itself). Project
+        #    onto the *visible* extent, so a point snaps anywhere along an
+        #    infinite line - not just near its two defining endpoints.
         best = None
         best_d = radius
         for line in self._lines():
@@ -154,7 +156,7 @@ class CanvasScene(QGraphicsScene):
                 line.bound_point(1) is exclude or line.bound_point(2) is exclude
             ):
                 continue
-            proj = _closest_on_segment(scene_pos, line.scene_line())
+            proj = _closest_on_segment(scene_pos, line.display_line())
             d = QLineF(scene_pos, proj).length()
             if d <= best_d:
                 best_d = d
@@ -339,7 +341,9 @@ class CanvasScene(QGraphicsScene):
         for line in self._lines():
             if line.has_pivot():
                 continue
-            proj = _closest_on_segment(point.center(), line.scene_line())
+            # Use the visible extent so any line drawn through the point
+            # qualifies, not just one whose defining endpoints straddle it.
+            proj = _closest_on_segment(point.center(), line.display_line())
             if QLineF(point.center(), proj).length() <= radius:
                 line.set_pivot(point)
                 count += 1
