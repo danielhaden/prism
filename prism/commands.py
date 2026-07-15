@@ -59,27 +59,55 @@ class CommandInterpreter:
 
     # -- Entry point -------------------------------------------------------
 
+    #: Forms that only inspect; they aren't worth recording into a script.
+    NON_RECORDING = {"list", "help"}
+
     def execute(self, text: str) -> str:
+        """Run one or more forms and return the output text."""
+        return self.run(text)[0]
+
+    def run(self, text: str) -> tuple:
+        """Run one or more forms.
+
+        Returns:
+            An ``(output, ok)`` pair, where ok is False if anything failed.
+        """
         text = text.strip()
         if not text:
-            return ""
+            return "", False
         try:
             expressions = parse(text)
         except SexprError as exc:
-            return f"Syntax error: {exc}"
+            return f"Syntax error: {exc}", False
 
         outputs = []
         for expression in expressions:
             try:
                 value = self._eval(expression)
             except CommandError as exc:
-                return str(exc)
+                return str(exc), False
             except Exception as exc:  # keep the console alive on any error
-                return f"Error: {exc}"
+                return f"Error: {exc}", False
             rendered = self._render(value)
             if rendered:
                 outputs.append(rendered)
-        return "\n".join(outputs)
+        return "\n".join(outputs), True
+
+    def is_recordable(self, text: str) -> bool:
+        """Whether a command is worth saving into a script (i.e. it builds)."""
+        try:
+            expressions = parse(text)
+        except SexprError:
+            return False
+        for expression in expressions:
+            if (
+                isinstance(expression, list)
+                and expression
+                and isinstance(expression[0], str)
+                and expression[0].lower() not in self.NON_RECORDING
+            ):
+                return True
+        return False
 
     def command_names(self):
         return sorted(self._forms)

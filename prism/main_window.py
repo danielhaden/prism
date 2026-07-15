@@ -2,11 +2,13 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QFileDialog, QMainWindow
 
 from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
+from prism.scripts_panel import ScriptsPanel
+from prism.settings import scripts_dir, set_scripts_dir
 from prism.tools import Tool
 
 
@@ -25,6 +27,12 @@ class MainWindow(QMainWindow):
 
         self.console = ConsolePanel(self.scene, self)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console)
+
+        self.scripts = ScriptsPanel(self.console.run_script, self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.scripts)
+        self.tabifyDockWidget(self.library, self.scripts)
+        self.library.raise_()
+        self.console.scriptSaved.connect(self.scripts.refresh)
 
         self._tool_actions: dict[Tool, QAction] = {}
         self._create_actions()
@@ -137,6 +145,15 @@ class MainWindow(QMainWindow):
         toggle_console = self.console.toggleViewAction()
         toggle_console.setText("Show Console")
         view_menu.addAction(toggle_console)
+        toggle_scripts = self.scripts.toggleViewAction()
+        toggle_scripts.setText("Show Scripts")
+        view_menu.addAction(toggle_scripts)
+
+        settings_menu = self.menuBar().addMenu("&Settings")
+        scripts_folder_action = QAction("Scripts Folder…", self)
+        scripts_folder_action.setToolTip("Choose where scripts are saved")
+        scripts_folder_action.triggered.connect(self._choose_scripts_folder)
+        settings_menu.addAction(scripts_folder_action)
 
     # -- Tool switching ----------------------------------------------------
 
@@ -148,3 +165,11 @@ class MainWindow(QMainWindow):
     def _update_history_actions(self, can_undo: bool, can_redo: bool) -> None:
         self.undo_action.setEnabled(can_undo)
         self.redo_action.setEnabled(can_redo)
+
+    def _choose_scripts_folder(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Choose Scripts Folder", scripts_dir()
+        )
+        if chosen:
+            set_scripts_dir(chosen)
+            self.scripts.refresh()

@@ -26,6 +26,9 @@ def tokenize(text: str) -> list:
             i += 1
         elif char.isspace():
             i += 1
+        elif char == ";":  # comment to end of line
+            newline = text.find("\n", i)
+            i = len(text) if newline == -1 else newline + 1
         elif char == '"':
             end = text.find('"', i + 1)
             if end == -1:

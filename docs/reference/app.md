@@ -13,3 +13,9 @@ Entry point, main window, and shared enums.
 ## Tools
 
 ::: prism.tools.Tool
+
+## Settings & scripts
+
+Where the scripts folder lives, and how saved scripts are read/written.
+
+::: prism.settings

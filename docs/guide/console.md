@@ -115,6 +115,41 @@ plus `locked`, `pivot`, and their label.
 
 List the available commands.
 
+## Scripts
+
+Anything you build from the console can be saved and replayed.
+
+### Saving
+
+Click **Save Script…** next to the input and give it a name. The session's
+**building** commands are written out in order — inspection commands
+(`(list)`, `(help)`) are left out, so the script is just the construction.
+
+### The Scripts panel
+
+**View → Show Scripts** opens a dock (tabbed with the Library) listing every
+script in your scripts folder. **Double-click** one — or select it and hit
+**Run** — to execute it; its commands and output are echoed to the console.
+**Refresh** re-reads the folder, so scripts you add by hand show up too.
+
+Replaying a script doesn't re-record its commands, so running one won't
+duplicate it into the next thing you save.
+
+### Where scripts live
+
+Scripts are plain text files (`.prism`) in your **scripts folder**, so you can
+edit them in any editor. Choose the folder from **Settings → Scripts Folder…**;
+it defaults to a per-user application-data directory, and the panel shows the
+current path at the bottom.
+
+Scripts may contain blank lines and `;` comments:
+
+```
+; a horizon with a vanishing point
+(add horizon 1/3)
+(add line 250 (point L1 1/3))   ; the pencil's first ray
+```
+
 ## Worked example
 
 A horizon with two vanishing points, each carrying a pencil — no coordinates
