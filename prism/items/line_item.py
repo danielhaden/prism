@@ -280,6 +280,26 @@ class LineItem(Labelable, QGraphicsLineItem):
         """The closest point on the infinite line to ``scene_pt``."""
         return self.point_at_param(self.param_of(scene_pt))
 
+    def span_in_rect(self, rect: QRectF) -> tuple | None:
+        """Where the infinite line crosses ``rect``, ordered left to right.
+
+        Vertical lines (whose ends share an x) are ordered top to bottom.
+
+        Returns:
+            An ``(a, b)`` pair of scene points, or None if the line misses
+                the rect entirely.
+        """
+        direction = self.scene_direction()
+        if direction is None:
+            return None
+        clipped = _clip_line_to_rect(self.scene_line().p1(), direction, rect)
+        if clipped is None:
+            return None
+        a, b = clipped
+        if (round(a.x(), 9), round(a.y(), 9)) > (round(b.x(), 9), round(b.y(), 9)):
+            a, b = b, a
+        return a, b
+
     # -- Orientation lock --------------------------------------------------
 
     def set_orientation_locked(self, locked: bool) -> None:

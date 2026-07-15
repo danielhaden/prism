@@ -358,6 +358,35 @@ class CanvasScene(QGraphicsScene):
         self.addItem(line)
         return line
 
+    def add_point_on_line(self, line: LineItem, fraction: float) -> PointItem | None:
+        """Add a point a fraction of the way across a line.
+
+        The span is measured where the line crosses the reference frame (the
+        fully zoomed-out canvas): 0 is its left-hand end, 1 its right-hand end
+        (top and bottom for a vertical line). The point is anchored to the
+        line, so it stays on it.
+
+        Args:
+            line: The line to place the point on.
+            fraction: Position along the span, from 0 to 1.
+
+        Returns:
+            The new point, or None if the line doesn't cross the canvas.
+        """
+        span = line.span_in_rect(self.reference_rect())
+        if span is None:
+            return None
+        a, b = span
+        pos = QPointF(
+            a.x() + (b.x() - a.x()) * fraction,
+            a.y() + (b.y() - a.y()) * fraction,
+        )
+        point = self.add_point(pos)
+        point.set_anchor_line(line)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
     def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
         """Add one infinite line through ``point`` at a given angle.
 

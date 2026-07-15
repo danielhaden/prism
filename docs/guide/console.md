@@ -1,97 +1,129 @@
 # The Console
 
 The **Console** is a dockable command line (bottom; toggle via **View → Show
-Console**) for inspecting — and, over time, scripting — the canvas.
+Console**) for building and inspecting the canvas.
 
-Type a command into the input line and press ++enter++. Use ++up++ / ++down++ to
-walk through your command history.
+Type a command and press ++enter++. Use ++up++ / ++down++ to walk through your
+command history.
+
+## Syntax
+
+Commands are **S-expressions** — every command is wrapped in parentheses:
+
+```
+(add horizon 1/3)
+(list -points)
+(help)
+```
+
+The point of the parentheses is **composition**: a form returns the element it
+creates, so forms nest. Instead of placing a point and then referring to it,
+you can describe it inline:
+
+```
+(add line 260 (point L1 2/3))
+```
+
+That reads: *add a line at 260°, through the point two-thirds of the way along
+line L1.* The inner form makes the point; the outer form uses it.
+
+You can also put several forms on one line, which is the seed of scripting:
+
+```
+(add horizon 1/3) (add line 250 (point L1 1/3))
+```
+
+## Naming elements
+
+Elements are referred to either by their **label** (`A`, `a` — matched
+case-insensitively) or by the **id shown by [`list`](#list)** (`P1`, `L1`).
+
+!!! note "Ids are positional"
+    `P1` / `L1` are the numbers `list` prints *right now*; they shift as you
+    add and remove elements. Labels are the stabler handle.
 
 ## Commands
 
-### `add horizon`
+### `(add horizon <fraction>)`
 
 Add a **horizon**: a horizontal line across the canvas whose orientation is
 **locked**, so it can be moved but never rotated.
 
 ```
-add horizon 1/2     # halfway down the canvas
-add horizon 1/3     # a third of the way down
-add horizon 0.25    # decimals work too
+(add horizon 1/2)     # halfway down the canvas
+(add horizon 1/3)     # a third of the way down
+(add horizon 0.25)    # decimals work too
 ```
 
-The position is given as a fraction of the way down the **reference frame**
-(the fully-zoomed-out canvas): **0 is the top, 1 is the bottom**. Fractions
-(`1/3`) and decimals (`0.5`, `.25`) are both accepted.
+The position is a fraction of the way down the **reference frame** (the
+fully-zoomed-out canvas): **0 is the top, 1 is the bottom**.
 
-Otherwise it's an ordinary infinite line — you can style it, label it, hang
-pencils off it, and drag it up and down. Dragging one of its endpoint handles
-slides the whole line instead of tilting it.
+Otherwise it's an ordinary infinite line — style it, label it, hang pencils off
+it, drag it up and down. Dragging an endpoint handle slides the whole line
+rather than tilting it.
 
-### `add line`
+### `(add line <angle> <point>)`
 
-Add an infinite line through an existing point, at a given angle.
+Add an infinite line through a point, at a given angle.
 
 ```
-add line 30 A       # 30° through the point labelled A
-add line -45 P2     # -45° through the point listed as P2
-add line 90 A       # vertical
+(add line 30 A)                  # 30° through the point labelled A
+(add line -45 P2)                # -45° through the point listed as P2
+(add line 260 (point L1 2/3))    # through a point defined inline
 ```
 
 - **angle** — degrees **clockwise from the horizontal** (the same convention as
-  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical;
-  negatives are fine.
-- **point** — referenced by its **label** (`A`) or by the **id shown by
-  [`list`](#list)** (`P1`). Labels are matched case-insensitively.
+  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical.
+- **point** — a label, an id, or a nested form that yields a point.
 
 The line is **pinned** to the point, so it stays through it and rotates about
-it. Repeating the command on the same point therefore builds up a
-[pencil](projectivities.md) line by line:
+it. Repeating the command on one point builds a [pencil](projectivities.md)
+line by line.
+
+### `(point <line> <fraction>)`
+
+Make a point along a line, and return it.
 
 ```
-add horizon 1/3
-add line 65 V
-add line 80 V
-add line 100 V
+(point L1 2/3)      # two-thirds along L1
+(point a 0.5)       # the midpoint of line a
 ```
 
-!!! note "Intersection points can't anchor a line"
-    Derived (intersection) points are recomputed as lines move, so they can't
-    be used as the anchor; the command says so if you try.
+The span is measured where the line crosses the **reference frame**: `0` is its
+**left-hand** end and `1` its **right-hand** end (top and bottom for a vertical
+line). The point is **anchored** to the line, so it stays on it — drag it and
+it slides along.
 
-### `list`
+This form exists to be nested, so you can build in terms of existing geometry
+rather than bare coordinates.
+
+### `(list [-points | -lines])`
 
 List the elements on the canvas.
 
 ```
-list            # all elements
-list -points    # points only
-list -lines     # lines only
+(list)            # everything
+(list -points)    # points only
+(list -lines)     # lines only
 ```
 
-Points are shown with their coordinates, label, and an `[intersection]` marker
-for derived points. Lines show their defining endpoints, whether they are
-`infinite` or limited to a `range[…]`, whether they have a `pivot`, and their
-label.
+Points show coordinates, label, `on-line` if anchored, and `[intersection]` for
+derived points. Lines show their defining endpoints, `infinite` or `range[…]`,
+plus `locked`, `pivot`, and their label.
 
-Example:
-
-```
-> list
-Points (3):
-  P1  (0.0, 0.0)  "A"
-  P2  (100.0, 0.0)
-  P3  (50.0, 0.0)
-Lines (2):
-  L1  (-10.0, 0.0)->(10.0, 0.0)  infinite  "a"
-  L2  (0.0, -10.0)->(0.0, 10.0)  range[-40, +20]  pivot
-```
-
-### `help`
+### `(help)`
 
 List the available commands.
 
-!!! info "Growing surface"
-    The console is intentionally small right now. It's built on an extensible
-    command registry, so creation and manipulation commands (and running whole
-    scripts) can be added incrementally. See
-    [`CommandInterpreter`](../reference/commands.md).
+## Worked example
+
+A horizon with two vanishing points, each carrying a pencil — no coordinates
+and no hand-placed points:
+
+```
+(add horizon 1/3)
+(add line 250 (point L1 1/3))
+(add line 265 P1) (add line 280 P1) (add line 295 P1)
+(add line 230 (point L1 2/3))
+(add line 245 P2) (add line 260 P2) (add line 275 P2)
+```

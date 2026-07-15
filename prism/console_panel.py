@@ -21,7 +21,7 @@ class _CommandInput(QLineEdit):
         self._on_submit = on_submit
         self._history: list[str] = []
         self._index = 0
-        self.setPlaceholderText("Type a command (e.g. 'list -points'), Enter to run")
+        self.setPlaceholderText("Type a command, e.g. (add horizon 1/3) - Enter to run")
         self.returnPressed.connect(self._submit)
 
     def _submit(self):
@@ -70,7 +70,10 @@ class ConsolePanel(QDockWidget):
         layout.addWidget(self._input)
         self.setWidget(container)
 
-        self._output.appendPlainText("Prism console. Type 'help' for commands.")
+        self._output.appendPlainText(
+            "Prism console. Commands are S-expressions, e.g. (add horizon 1/3).\n"
+            "Type (help) for the list."
+        )
 
     def _run(self, line: str) -> None:
         self._output.appendPlainText(f"> {line}")
