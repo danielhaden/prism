@@ -27,6 +27,37 @@ Otherwise it's an ordinary infinite line — you can style it, label it, hang
 pencils off it, and drag it up and down. Dragging one of its endpoint handles
 slides the whole line instead of tilting it.
 
+### `add line`
+
+Add an infinite line through an existing point, at a given angle.
+
+```
+add line 30 A       # 30° through the point labelled A
+add line -45 P2     # -45° through the point listed as P2
+add line 90 A       # vertical
+```
+
+- **angle** — degrees **clockwise from the horizontal** (the same convention as
+  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical;
+  negatives are fine.
+- **point** — referenced by its **label** (`A`) or by the **id shown by
+  [`list`](#list)** (`P1`). Labels are matched case-insensitively.
+
+The line is **pinned** to the point, so it stays through it and rotates about
+it. Repeating the command on the same point therefore builds up a
+[pencil](projectivities.md) line by line:
+
+```
+add horizon 1/3
+add line 65 V
+add line 80 V
+add line 100 V
+```
+
+!!! note "Intersection points can't anchor a line"
+    Derived (intersection) points are recomputed as lines move, so they can't
+    be used as the anchor; the command says so if you try.
+
 ### `list`
 
 List the elements on the canvas.

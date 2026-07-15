@@ -358,6 +358,18 @@ class CanvasScene(QGraphicsScene):
         self.addItem(line)
         return line
 
+    def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
+        """Add one infinite line through ``point`` at a given angle.
+
+        Args:
+            point: The point the line runs through; the line is pinned to it.
+            angle_degrees: Direction, in degrees clockwise from horizontal.
+
+        Returns:
+            The new line.
+        """
+        return self.add_projectivity(point, [angle_degrees])[0]
+
     def add_horizon(self, fraction: float) -> LineItem:
         """Add a horizontal, orientation-locked line across the canvas.
 

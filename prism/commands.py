@@ -76,6 +76,40 @@ class CommandInterpreter:
     def _lines(self):
         return sorted(self.scene._lines(), key=lambda ln: getattr(ln, "_seq", 0))
 
+    def resolve_point(self, name: str) -> tuple:
+        """Find a point by label (``A``) or by its ``list`` id (``P1``).
+
+        Returns:
+            A ``(point, error)`` pair; exactly one of the two is None.
+        """
+        points = self._points()  # same order/numbering as the `list` command
+        match = None
+        for point in points:
+            if point.label_text() == name:
+                match = point
+                break
+        if match is None:
+            lowered = name.lower()
+            for point in points:
+                if point.label_text().lower() == lowered:
+                    match = point
+                    break
+        if match is None and name[:1].lower() == "p" and name[1:].isdigit():
+            index = int(name[1:])
+            if 1 <= index <= len(points):
+                match = points[index - 1]
+        if match is None:
+            return None, (
+                f"No point named {name!r}. Use a label (e.g. A) or an id from "
+                "'list' (e.g. P1)."
+            )
+        if match.is_derived:
+            return None, (
+                f"{name!r} is an intersection point. Those are recomputed as "
+                "lines move, so they can't anchor a new line."
+            )
+        return match, None
+
     # -- Commands ----------------------------------------------------------
 
     def _cmd_help(self, args) -> str:
@@ -84,6 +118,10 @@ class CommandInterpreter:
             "  add horizon <fraction>    add a horizontal, orientation-locked\n"
             "                            line; 0 = top of canvas, 1 = bottom\n"
             "                            (e.g. 'add horizon 1/3' or '0.5')\n"
+            "  add line <angle> <point>  add a line through a point, at an\n"
+            "                            angle in degrees clockwise from\n"
+            "                            horizontal; the line is pinned to the\n"
+            "                            point (e.g. 'add line 30 A')\n"
             "  list [-points | -lines]   list canvas elements "
             "(all if no qualifier)\n"
             "  help                      show this help"
@@ -95,7 +133,34 @@ class CommandInterpreter:
         what = args[0].lower()
         if what == "horizon":
             return self._add_horizon(args[1:])
-        return f"Don't know how to add {args[0]!r}. Try 'add horizon <fraction>'."
+        if what == "line":
+            return self._add_line(args[1:])
+        return (
+            f"Don't know how to add {args[0]!r}. "
+            "Try 'add horizon <fraction>' or 'add line <angle> <point>'."
+        )
+
+    def _add_line(self, args) -> str:
+        if len(args) < 2:
+            return (
+                "Usage: add line <angle> <point>\n"
+                "  angle: degrees clockwise from horizontal (e.g. 30, -45)\n"
+                "  point: a label (e.g. A) or an id from 'list' (e.g. P1)"
+            )
+        angle_text, name = args[0], args[1]
+        try:
+            angle = float(angle_text)
+        except ValueError:
+            return f"Couldn't read {angle_text!r} as an angle in degrees."
+        point, error = self.resolve_point(name)
+        if error:
+            return error
+        self.scene.add_line_through(point, angle)
+        center = point.center()
+        return (
+            f"Added line at {angle:g}° through {name} "
+            f"({center.x():.1f}, {center.y():.1f})."
+        )
 
     def _add_horizon(self, args) -> str:
         if not args:
