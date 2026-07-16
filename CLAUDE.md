@@ -1,0 +1,173 @@
+# Prism — project notes for Claude
+
+Prism is a **PySide6 desktop app for projective-geometry drawings**. The goal is
+to build complex projective constructions (pencils, complete quadrangles,
+harmonic nets, perspective figures) through *composition* — snapping, pinning,
+grouping, templates, and a scripting console. The long-term target is
+reproducing dense harmonic-net drawings.
+
+Core philosophy: elements are **projective entities**. Lines are infinite by
+default, there is **no metric grid or origin axes**, and a "metric" (if wanted)
+is imposed *projectively* using the app's own elements.
+
+## Running & environment
+
+- Python **3.12** in `.venv` (created with `/opt/homebrew/bin/python3.12`).
+- Run the app: `python main.py` (or the VS Code "Prism" launch config, F5).
+- App deps: `requirements.txt` (PySide6). Docs deps: `requirements-docs.txt`.
+
+## Working conventions (IMPORTANT)
+
+- **Feature-branch workflow, always**: branch off `main` as
+  `feature/<description>` → commit → push → the user raises/merges the PR. Never
+  commit feature work directly to `main`. After a merge, pull `main` and cut a
+  fresh branch. (The user raises and merges PRs themselves.)
+- Commit messages end with the `Co-Authored-By: Claude` trailer.
+- **`STATUS.md` is gitignored** — never commit it.
+- **Docs must stay green**: after any docstring/API change run
+  `mkdocs build --strict` (exit 0). Recurring gotcha: a Google-style `Returns:`
+  block on a function **without a return type annotation** fails griffe in
+  strict mode — add the annotation (e.g. `-> tuple`, `-> float | None`).
+- **Headless testing**: verify behavior with
+  `QT_QPA_PLATFORM=offscreen ./.venv/bin/python -u -c "..."`. Filter noise with
+  `grep -v "propagateSizeHints\|font family"`. For rendering/visual checks,
+  render the scene/view to a `QImage` and inspect pixels (state checks alone
+  have hidden real rendering bugs — see below).
+- The shell's working directory sometimes drifts; prefer `cd
+  /Users/dhadenx6/projects/prism && …` in one-off commands.
+
+## Architecture
+
+```
+main.py → prism/app.py → prism/main_window.py (QMainWindow)
+  CanvasView (canvas/view.py)   — pan, wheel-zoom (capped), template drops
+  CanvasScene (canvas/scene.py) — the hub: owns geometry, propagates deps
+  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, SelectionPanel
+```
+
+- **`CanvasScene`** coordinates everything: snapping, endpoint bindings, pivots
+  (pencils), point↔line anchors, automatic intersections, undo/redo, naming,
+  grouping, labeling.
+- **Items** (`prism/items/`): `PointItem` (+ `Labelable` mixin), `LineItem`,
+  `GroupItem`, `LabelItem`. There is **one** point type.
+
+### Points & anchors (recently refactored — read carefully)
+
+- **All points are `PointItem`.** There is no `IntersectionPointItem` anymore.
+- A point may carry an invisible **anchor** (`prism/anchors.py`) that *pins its
+  position*. Anchors are pseudo-points, never drawn:
+  - `IntersectionAnchor(a, b)` — pins a point to the crossing of two lines.
+    **Dragging detaches** it (becomes a free point; the crossing gets a fresh
+    marker).
+  - `LineAnchor(line, t)` — keeps a point on a line; **dragging slides** it.
+- `PointItem.is_intersection()` / `has_anchor()` / `set_anchor()` /
+  `clear_anchor()`. `itemChange` applies the anchor's drag rule; a `_syncing`
+  guard lets the scene reposition anchored points without detaching/churning.
+- Default point styling: **radius 1, glow 7, black** (glow = a background-color
+  disc drawn behind the dot but over the lines, so converging lines are cut
+  away — the harmonic-net look).
+- **Boundary**: operations that build *hard dependencies* (endpoint binding,
+  pin, add-line-through, grouping) **exclude intersection points**, because a
+  computed point can't yet propagate its motion. See "Next steps".
+
+### Lines (`LineItem`)
+
+- **Infinite by default**, clipped to the scene rect for drawing/intersections
+  (`display_line()`); the two defining endpoints are draggable handles.
+- **Endpoint binding**: an endpoint can bind to a `PointItem` and follow it.
+- **Pivot**: pinned through a point → rotates about it (pencils/projectivities).
+- **Visible range**: right-click → "Define Visible Range…" adds an anchor point
+  + neg/pos extents; only that segment is drawn.
+- **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
+  move, can't rotate). The horizon uses this.
+- Line properties dialog: color, thickness (cosmetic), dash style.
+
+### Intersections
+
+- The scene auto-maintains an intersection point (a `PointItem` +
+  `IntersectionAnchor`) for every crossing pair, in `_intersections` (keyed by
+  ordered line-id pair). Reused across recomputes (so selection/label sticks);
+  removed when the crossing is gone; a crossing coincident with a placed point
+  is skipped.
+
+### Undo/redo & persistence
+
+- `prism/scene_state.py` snapshots/restores the **whole scene** as plain data
+  (also groundwork for save/load). Undo = snapshot after each action + rebuild.
+  Intersections are recomputed, not stored. `CanvasScene.commit_undo()` is
+  called from actions/drags/dialogs; it no-ops when state is unchanged.
+
+## The console (S-expression CLI)
+
+- Commands are **S-expressions**; forms **return the element they create**, so
+  they compose: `(add line 260 (point L1 2/3))`.
+- Reader: `prism/sexpr.py` (supports `;` comments). Interpreter:
+  `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
+- Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
+  `(add line <angle> <point>)`, `(add line <point> <point>)`,
+  `(point <line> <fraction>)`, `(list [-points|-lines])`, `(help)`.
+- Elements referenced by **label** (`A`, case-insensitive) or **`list` id**
+  (`P1`, `L1`). Fractions accept `1/3` or `0.5`. Angles are **degrees clockwise
+  from horizontal**. Canvas fractions: 0 = top/left, 1 = bottom/right, of the
+  *reference frame*.
+- **Scripts**: Console "Save Script…" records the session's *building* commands;
+  ScriptsPanel lists/runs them. Location set via **Settings → Scripts Folder…**
+  (`prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides; `.prism` text files).
+
+## Panels
+
+- **Library** (right): built-in templates (Triangle, Quadrilateral, Complete
+  Quadrangle, Projectivity) + user-saved; drag onto canvas; save selection;
+  right-click rename/delete; persisted via `prism/template_store.py`.
+- **Console** (bottom), **Scripts** (right, tabbed with Library), **Selection**
+  (left; live names + positions, matches console naming via
+  `CanvasScene.element_name`).
+
+## Canvas behavior
+
+- Opens **fully zoomed out** to a **reference frame** (`REFERENCE_SIZE = 1200`,
+  separate from the 4000-unit scene rect so infinite-line ends stay off-screen);
+  can zoom in but **not out** past it.
+- **Right-click never changes the selection** (swallowed in
+  `CanvasScene.mousePressEvent`) so selection-based menus survive.
+- Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).
+- Delete/Backspace deletes; Ctrl+G/Ctrl+Shift+G group/ungroup; Ctrl+Z /
+  Ctrl+Shift+Z undo/redo.
+
+## Hard-won bugs / lessons
+
+- **Init order**: set attributes read by `boundingRect()`/`itemChange()`
+  **before** `super().__init__`/`setFlag`/`setPos` — Qt calls those overrides
+  during construction and Shiboken *swallows* the resulting Python exception, so
+  the item ends up silently broken (bit us on `LabelItem._offset` and point
+  glow/anchor state).
+- **Verify rendering with pixels, not just state.** A label that stored its text
+  correctly still didn't paint (hit-testing/paint-offset mismatch). Render to a
+  `QImage` and check pixels for visual features (glow masking lines, infinite
+  lines spanning the view, etc.).
+- QGraphicsItemGroup **clears/loses child registration** on ungroup — remove &
+  re-add children so the scene re-registers them in its selection index.
+- Enum access differs by PySide version: `QLineF.IntersectionType.Bounded…`.
+
+## Next steps (deferred to future sessions)
+
+1. **Propagation engine** — let geometry stay attached to *live intersection
+   points* (lines through intersections that update): the real harmonic-net
+   enabler. Needs a dependency DAG with topological update + cycle handling.
+   Currently intersection points are excluded from binding/pin/etc. for this
+   reason.
+2. **Higher-order console forms** — `fold`/map to build pencils/projectivities
+   programmatically.
+3. Intersection-marker **visibility control** (dense nets get busy).
+4. Save/load a drawing to a file (scene_state is most of the way there).
+5. Possibly: promote/detach UX, snapping toggles, coordinate readout.
+
+## Branch history (merged PRs → main)
+
+canvas scaffold → canvas refinement → composability (groups, pivots) → library
+tab → harmonic-nets groundwork (infinite lines, visible range, no grid, console
+`list`, projectivity command) → docs (MkDocs site) → display properties
+(point radius/color/glow, point↔line anchor, zoom cap, undo/redo) → expand CLI
+(S-expressions, add horizon/line/point, scripts, settings) → refine canvas
+behavior (default point style, line-through-two-points + CLI, selectable
+intersections, Selection panel, **point/anchor unification**).
