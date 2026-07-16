@@ -71,5 +71,6 @@ def test_is_recordable(interp):
     assert interp.is_recordable("(define A (add point 1/3 1/3))")
     assert interp.is_recordable("(add horizon 1/3)")
     assert interp.is_recordable("(let ((t 1/3)) (add horizon t))")
-    assert not interp.is_recordable("(list)")
+    assert interp.is_recordable("(map (lambda (t) (add horizon t)) (range 0 1 3))")
+    assert not interp.is_recordable("(show)")  # inspection, not building
     assert not interp.is_recordable("(help)")

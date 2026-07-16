@@ -12,7 +12,7 @@ Commands are **S-expressions** — every command is wrapped in parentheses:
 
 ```
 (add horizon 1/3)
-(list -points)
+(show -points)
 (help)
 ```
 
@@ -42,7 +42,7 @@ The console is a small Lisp. Every argument is a **value**:
   [`define`](#define) or [`let`](#let). An unbound word is an error.
 - **`'x`** (a leading quote) is the name `x` *itself*, unevaluated. This is how
   you point at an existing element by its **label** (`'A`, `'a`) or by the
-  **id shown by [`list`](#list)** (`'P1`, `'L1`):
+  **id shown by [`show`](#show)** (`'P1`, `'L1`):
 
 ```
 (add line 30 'A)      # 30° through the point labelled A
@@ -55,7 +55,7 @@ The console is a small Lisp. Every argument is a **value**:
     collides with an element's label or id.
 
 !!! note "Ids are positional"
-    `'P1` / `'L1` are the numbers `list` prints *right now*; they shift as you
+    `'P1` / `'L1` are the numbers `show` prints *right now*; they shift as you
     add and remove elements. A `define`d name, or a label, is the stabler handle.
 
 ## Commands
@@ -177,14 +177,77 @@ value. Bindings are **sequential**, so a later one can use an earlier one:
 Unlike `define`, the names disappear once the `let` finishes — use it for the
 scaffolding of a single construction without cluttering the session.
 
-### `(list [-points | -lines])`
+### `(lambda (<params> …) <body> …)`
+
+A **procedure**: parameters and a body, to hand to [`map`](#map) or
+[`fold`](#fold). It captures the names in scope where it's written, so it can
+refer to your bindings:
+
+```
+(define V (add point 1/2 1/3))
+(map (lambda (a) (add line a V)) (list 250 260 270))   # three rays through V
+```
+
+### `(list <x> …)` · `(range …)`
+
+Two ways to make a **list** — the thing `map` and `fold` walk over.
+
+`list` collects its (evaluated) arguments:
+
+```
+(list 250 260 270)          # a list of angles
+(list 'L1 'L2)              # a list of two lines
+```
+
+`range` makes a list of numbers, in three shapes:
+
+```
+(range 5)             # (0 1 2 3 4)          — a count, from 0
+(range 2 5)           # (2 3 4)              — a half-open span (end excluded)
+(range 0 1 5)         # (0 0.25 0.5 0.75 1)  — 5 values evenly spaced, ends included
+```
+
+The three-argument form is the one you'll reach for placing *n* points evenly
+along a line.
+
+### `(map <proc> <list>)`
+
+Apply a procedure to every item of a list and collect the results. Since the
+construction forms return the element they make, mapping one **builds** — this
+is the pencil/net workhorse:
+
+```
+; five rays through five points evenly spaced along L1
+(map (lambda (t) (add line 250 (point 'L1 t))) (range 0 1 5))
+
+; a fan of angles through one vanishing point V
+(define V (add point 1/2 1/3))
+(map (lambda (i) (add line (+ 250 (* i 10)) V)) (range 0 5))
+```
+
+### `(fold <proc> <init> <list>)`
+
+Accumulate across a list, left to right: `proc` is called with the running
+value and each item. `(fold + 0 (range 0 5))` is `10`.
+
+### `(+ …)` · `(- …)` · `(* …)` · `(/ …)`
+
+Arithmetic, so positions and angles can be *computed* rather than typed. Each is
+variadic; `-` and `/` with one argument negate / reciprocate:
+
+```
+(+ 250 (* i 10))    # an angle from an index
+(/ 1 3)             # 0.333…    (same value as the fraction 1/3)
+```
+
+### `(show [-points | -lines])`
 
 List the elements on the canvas.
 
 ```
-(list)            # everything
-(list -points)    # points only
-(list -lines)     # lines only
+(show)            # everything
+(show -points)    # points only
+(show -lines)     # lines only
 ```
 
 Points show coordinates, label, `on-line` if anchored, and `[intersection]` for
@@ -203,7 +266,7 @@ Anything you build from the console can be saved and replayed.
 
 Click **Save Script…** next to the input and give it a name. The session's
 **building** commands are written out in order — inspection commands
-(`(list)`, `(help)`) are left out, so the script is just the construction.
+(`(show)`, `(help)`) are left out, so the script is just the construction.
 
 ### The Scripts panel
 
@@ -233,13 +296,19 @@ Scripts may contain blank lines and `;` comments:
 ## Worked example
 
 A horizon with two vanishing points, each carrying a pencil — no coordinates
-and no hand-placed points. Naming the two vanishing points with `define` keeps
-each pencil readable:
+and no hand-placed points. `define` names each vanishing point; `map` draws its
+rays as a computed fan, so the whole pencil is one line:
 
 ```
 (add horizon 1/3)
 (define V1 (point 'L1 1/3))
-(add line 250 V1) (add line 265 V1) (add line 280 V1) (add line 295 V1)
+(map (lambda (i) (add line (+ 250 (* i 15)) V1)) (range 0 4))
 (define V2 (point 'L1 2/3))
-(add line 230 V2) (add line 245 V2) (add line 260 V2) (add line 275 V2)
+(map (lambda (i) (add line (+ 230 (* i 15)) V2)) (range 0 4))
+```
+
+Spelled out ray by ray, the first pencil is just:
+
+```
+(add line 250 V1) (add line 265 V1) (add line 280 V1) (add line 295 V1)
 ```
