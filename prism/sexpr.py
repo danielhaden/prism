@@ -17,6 +17,8 @@ gives these nodes meaning: numbers and strings evaluate to themselves, symbols
 are looked up in the environment, and forms are dispatched on their head.
 """
 
+import math
+
 
 class SexprError(Exception):
     """Raised when the text isn't well-formed."""
@@ -52,9 +54,12 @@ class _String:
 def read_number(text: str) -> float | None:
     """Read a numeric literal: an int, a decimal, or an ``n/d`` fraction.
 
+    Words that Python's ``float`` accepts but that are really names here —
+    ``inf``, ``infinity``, ``nan`` — are treated as symbols, not numbers.
+
     Returns:
         The value as a float, or None if the text isn't a number (e.g. ``L1``,
-        ``-points``).
+        ``-points``, ``infinity``).
     """
     text = text.strip()
     if "/" in text:
@@ -67,11 +72,13 @@ def read_number(text: str) -> float | None:
             return None
         if denominator == 0:
             return None
-        return numerator / denominator
-    try:
-        return float(text)
-    except ValueError:
-        return None
+        value = numerator / denominator
+    else:
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+    return value if math.isfinite(value) else None
 
 
 def tokenize(text: str) -> list:

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from prism.anchors import IntersectionAnchor
+from prism.infinity import InfinitePoint
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
@@ -81,6 +82,8 @@ class CanvasScene(QGraphicsScene):
         self._updating = False
         self._syncing_anchors = False
         self._seq_counter = 0
+        # Infinite points (ideal points): shared directions, never drawn.
+        self._infinities: list = []
 
         # Undo/redo: snapshots of the whole scene, newest last.
         self._undo_stack: list[dict] = []
@@ -654,6 +657,64 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return created
 
+    # -- Infinite points (ideal points) ------------------------------------
+
+    def add_infinity(self, angle: float) -> InfinitePoint:
+        """Create an infinite point (a direction) for parallel-line families.
+
+        Angle is degrees clockwise from horizontal. The point has no finite
+        location and is never drawn; lines are attached to it via
+        ``add_line_through_infinity``.
+
+        Returns:
+            The new infinite point.
+        """
+        infinity = InfinitePoint(angle)
+        self._tag(infinity)
+        self._infinities.append(infinity)
+        self.commit_undo()
+        return infinity
+
+    def infinities(self) -> list:
+        """All infinite points, in id order (I1, I2, ...)."""
+        return sorted(self._infinities, key=lambda i: getattr(i, "_seq", 0))
+
+    def add_line_through_infinity(
+        self, infinity: InfinitePoint, point: PointItem
+    ) -> LineItem:
+        """Add a line through ``point``, parallel to ``infinity``'s direction.
+
+        The line follows ``point`` (its finite anchor) and belongs to the
+        infinite point's parallel family, so dragging it rotates the family.
+
+        Returns:
+            The new line.
+        """
+        center = point.center()
+        dx, dy = infinity.direction()
+        half = 60.0  # defining half-length; rendering is infinite
+        line = self.add_line(
+            QPointF(center.x() - dx * half, center.y() - dy * half),
+            QPointF(center.x() + dx * half, center.y() + dy * half),
+        )
+        line.set_pivot(point)
+        line.set_infinity(infinity)
+        self.recompute_intersections()
+        self.commit_undo()
+        return line
+
+    def set_infinity_angle(self, infinity: InfinitePoint, angle: float) -> None:
+        """Re-aim a whole parallel family to a new shared direction.
+
+        No undo is committed here: the drag commits on release, and the console
+        ``orient`` form commits itself.
+        """
+        infinity.set_angle(angle)
+        for line in self._lines():
+            if line.infinity() is infinity:
+                line.sync_from_infinity()
+        self.recompute_intersections()
+
     def on_line_changed(self, line: LineItem) -> None:
         """A line's geometry changed: carry anchored points, recompute."""
         self._sync_anchored_points()
@@ -679,13 +740,20 @@ class CanvasScene(QGraphicsScene):
         """All lines, in the id order used for names (L1, L2, ...)."""
         return sorted(self._lines(), key=lambda ln: getattr(ln, "_seq", 0))
 
+    def ordered_infinities(self):
+        """All infinite points, in the id order used for names (I1, I2, ...)."""
+        return self.infinities()
+
     def element_name(self, item) -> str:
-        """A stable-ish display name: label if set, else a P#/L# id."""
+        """A stable-ish display name: label if set, else a P#/L#/I# id."""
         label = item.label_text() if hasattr(item, "label_text") else ""
         if isinstance(item, PointItem):
             base = f"P{self.ordered_points().index(item) + 1}" if item in self.ordered_points() else "P?"
         elif isinstance(item, LineItem):
             base = f"L{self.ordered_lines().index(item) + 1}" if item in self.ordered_lines() else "L?"
+        elif isinstance(item, InfinitePoint):
+            infinities = self.ordered_infinities()
+            return f"I{infinities.index(item) + 1}" if item in infinities else "I?"
         else:
             return type(item).__name__
         return f'{base} "{label}"' if label else base
@@ -890,6 +958,9 @@ class CanvasScene(QGraphicsScene):
                     line.unbind_endpoint(end)
             if line.pivot() is point:
                 line.clear_pivot()
+                # A family line loses its anchor: free it rather than dangle.
+                if line.has_infinity():
+                    line.clear_infinity()
             if line.range_anchor() is point:
                 line.clear_visible_range()
 
@@ -897,5 +968,6 @@ class CanvasScene(QGraphicsScene):
         self._cancel_line()
         self.clear()
         self._intersections.clear()
+        self._infinities.clear()
         self._snap_indicator = None
         self.commit_undo()

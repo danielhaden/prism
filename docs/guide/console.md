@@ -131,6 +131,41 @@ line by line.
 Each endpoint is **bound** to its point, so the line follows them as they move.
 (This is also available by selecting two points and right-clicking.)
 
+### `(add infinity <angle>)` — points at infinity
+
+A **point at infinity** (an *ideal point*) is a **direction**: the place where a
+family of parallel lines "meets." It is the exact dual of a pencil's pivot — a
+pivot is a finite point that *concurrent* lines turn about; an infinite point is
+a shared direction that *parallel* lines share.
+
+```
+(add infinity 30)     # -> I1, the direction 30° clockwise from horizontal
+```
+
+The angle is degrees clockwise from horizontal, taken **mod 180°** (a direction
+and its opposite are the same ideal point). It returns an infinite point named
+`I1`, `I2`, …; it has no location on the canvas, so it isn't drawn — you see and
+handle it through its lines.
+
+**Lines through it** — `(add line <infinity> <point>)` draws a line through the
+finite point, parallel to the infinite point's direction:
+
+```
+(add infinity 30)
+(add line 'I1 (add point 1/3 1/3))
+(add line 'I1 (add point 2/3 2/3))   # a parallel family
+```
+
+Every such line is **parallel** to the others and follows its own finite anchor
+point. **Dragging any one of them rotates the whole family** (the dual of
+dragging a pencil line about its pivot); they all stay parallel.
+
+**`(orient <infinity> <angle>)`** swings the whole family to an exact direction:
+
+```
+(orient 'I1 75)       # every line of family I1 turns to 75°
+```
+
 ### `(point <line> <fraction>)`
 
 Make a point along a line, and return it.
@@ -240,19 +275,21 @@ variadic; `-` and `/` with one argument negate / reciprocate:
 (/ 1 3)             # 0.333…    (same value as the fraction 1/3)
 ```
 
-### `(show [-points | -lines])`
+### `(show [-points | -lines | -directions])`
 
 List the elements on the canvas.
 
 ```
-(show)            # everything
-(show -points)    # points only
-(show -lines)     # lines only
+(show)              # everything
+(show -points)      # points only
+(show -lines)       # lines only
+(show -directions)  # infinite points (directions) only
 ```
 
 Points show coordinates, label, `on-line` if anchored, and `[intersection]` for
 derived points. Lines show their defining endpoints, `infinite` or `range[…]`,
-plus `locked`, `pivot`, and their label.
+plus `locked`, `pivot`, and their label. Directions list each infinite point's
+angle. The directions block appears in a bare `(show)` only when some exist.
 
 ### `(help)`
 

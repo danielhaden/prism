@@ -1,5 +1,7 @@
 """A drawable line (segment) on the canvas."""
 
+import math
+
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
@@ -86,6 +88,10 @@ class LineItem(Labelable, QGraphicsLineItem):
         # the point, and dragging the line rotates it about the point.
         self._pivot = None
         self._pivot_last: QPointF | None = None
+
+        # An infinite point (shared direction) the line belongs to: it stays
+        # parallel to the family, and dragging it rotates the whole family.
+        self._infinity = None
 
         # Visible range: the line is infinite by default; when an anchor point
         # and extents are set, only a segment of it is drawn.
@@ -421,10 +427,55 @@ class LineItem(Labelable, QGraphicsLineItem):
                 self._translate(delta.x(), delta.y())
         self._pivot_last = center
 
+    # -- Infinite point (a shared direction; the dual of a pivot) ----------
+
+    def set_infinity(self, infinity) -> None:
+        """Attach this line to an infinite point (parallel-line family)."""
+        self._infinity = infinity
+
+    def clear_infinity(self) -> None:
+        self._infinity = None
+
+    def has_infinity(self) -> bool:
+        return self._infinity is not None
+
+    def infinity(self):
+        return self._infinity
+
+    def sync_from_infinity(self) -> None:
+        """The family's direction changed: re-aim this line to it, in place.
+
+        The line keeps passing through its pivot point (its finite anchor); only
+        its direction changes.
+        """
+        if self._infinity is None:
+            return
+        center = self._pivot.center() if self._pivot is not None else self.scene_line().center()
+        dx, dy = self._infinity.direction()
+        half = self.scene_line().length() / 2 or 60.0
+        p1 = self.mapFromScene(QPointF(center.x() - dx * half, center.y() - dy * half))
+        p2 = self.mapFromScene(QPointF(center.x() + dx * half, center.y() + dy * half))
+        self.prepareGeometryChange()
+        self.setLine(QLineF(p1, p2))
+        self._reposition_label()
+        self.update()
+        scene = self.scene()
+        if scene is not None:
+            scene.on_line_changed(self)
+
     def _rotate_about_pivot(self, cursor_scene: QPointF) -> None:
         """Rotate the line so it points from the pivot toward the cursor,
         keeping each endpoint's distance from the pivot (a full line through
         the point)."""
+        if self._infinity is not None:
+            # A family line: dragging rotates the whole parallel family.
+            scene = self.scene()
+            pivot = self._pivot.center() if self._pivot is not None else self.scene_line().center()
+            v = cursor_scene - pivot
+            if scene is not None and (v.x() ** 2 + v.y() ** 2) ** 0.5 >= 1e-6:
+                angle = math.degrees(math.atan2(v.y(), v.x()))
+                scene.set_infinity_angle(self._infinity, angle)
+            return
         if self._orientation_locked:
             return
         pivot = self._pivot.center()

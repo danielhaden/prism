@@ -23,6 +23,7 @@ Evaluation rules:
 Construction forms return the element they make, so forms nest and can be mapped.
 """
 
+from prism.infinity import InfinitePoint
 from prism.items import LineItem, PointItem
 from prism.sexpr import SexprError, Symbol, parse
 
@@ -104,6 +105,7 @@ class CommandInterpreter:
         env.define("map", Builtin("map", self._b_map))
         env.define("fold", Builtin("fold", self._b_fold))
         env.define("point", Builtin("point", self._b_point))
+        env.define("orient", Builtin("orient", self._b_orient))
 
     # -- Entry point -------------------------------------------------------
 
@@ -246,6 +248,14 @@ class CommandInterpreter:
             return line
         raise CommandError(f"Expected a line, got {self._show(value)}.")
 
+    def _as_infinity(self, value) -> InfinitePoint:
+        infinity = (
+            self.resolve_infinity(value.name) if isinstance(value, Symbol) else value
+        )
+        if isinstance(infinity, InfinitePoint):
+            return infinity
+        raise CommandError(f"Expected an infinite point, got {self._show(value)}.")
+
     def _require_live(self, item) -> None:
         if item.scene() is None:
             raise CommandError(
@@ -288,6 +298,17 @@ class CommandInterpreter:
             raise CommandError(
                 f"No line named {name!r}. Quote a label (e.g. 'a) or an id "
                 "from (show) (e.g. 'L1)."
+            )
+        return match
+
+    def resolve_infinity(self, name: str) -> InfinitePoint:
+        """Find an infinite point by its ``show`` id (``I1``)."""
+        infinities = self.scene.infinities()
+        match = _match_by_id(infinities, name, "i")
+        if match is None:
+            raise CommandError(
+                f"No infinite point named {name!r}. Quote an id from (show) "
+                "(e.g. 'I1)."
             )
         return match
 
@@ -359,10 +380,22 @@ class CommandInterpreter:
             return self._add_line(args[1:], env)
         if key == "point":
             return self._add_point(args[1:], env)
+        if key == "infinity":
+            return self._add_infinity(args[1:], env)
         raise CommandError(
             f"Don't know how to add {what.name!r}. Try (add point <across> "
             "<down>), (add line <angle> <point>) or (add horizon <fraction>)."
         )
+
+    def _add_infinity(self, args, env) -> InfinitePoint:
+        if len(args) != 1:
+            raise CommandError(
+                "Usage: (add infinity <angle>)\n"
+                "  angle: a direction in degrees clockwise from horizontal\n"
+                "  e.g. (add infinity 30) — the direction all its lines share"
+            )
+        angle = self._as_number(self._eval(args[0], env), "an angle")
+        return self.scene.add_infinity(angle)
 
     def _add_point(self, args, env) -> PointItem:
         if len(args) != 2:
@@ -389,6 +422,7 @@ class CommandInterpreter:
             raise CommandError(
                 "Usage: (add line <angle> <point>)  - through a point\n"
                 "   or: (add line <point> <point>)  - through two points\n"
+                "   or: (add line <infinity> <point>) - parallel to a direction\n"
                 "  angle: degrees clockwise from horizontal (e.g. 30, -45)\n"
                 "  point: a binding (A), a quoted id ('P1), or a form like "
                 "(point 'L1 2/3)"
@@ -398,9 +432,19 @@ class CommandInterpreter:
             # (add line <angle> <point>)
             point = self._as_point(self._eval(args[1], env))
             return self.scene.add_line_through(point, float(first))
+        # (add line <infinity> <point>) — a member of a parallel family.
+        a = self._as_point_or_infinity(first)
+        b = self._as_point_or_infinity(self._eval(args[1], env))
+        if isinstance(a, InfinitePoint) and isinstance(b, PointItem):
+            return self.scene.add_line_through_infinity(a, b)
+        if isinstance(b, InfinitePoint) and isinstance(a, PointItem):
+            return self.scene.add_line_through_infinity(b, a)
+        if isinstance(a, InfinitePoint) or isinstance(b, InfinitePoint):
+            raise CommandError(
+                "A line through an infinite point needs a finite point to sit "
+                "at: (add line <infinity> <point>)."
+            )
         # (add line <point> <point>)
-        a = self._as_point(first)
-        b = self._as_point(self._eval(args[1], env))
         line = self.scene.add_line_between(a, b)
         if line is None:
             raise CommandError(
@@ -408,30 +452,47 @@ class CommandInterpreter:
             )
         return line
 
+    def _as_point_or_infinity(self, value):
+        """Resolve an ``add line`` argument to a point or an infinite point."""
+        if isinstance(value, InfinitePoint):
+            return value
+        if isinstance(value, Symbol):
+            infinity = _match_by_id(self.scene.infinities(), value.name, "i")
+            if infinity is not None:
+                return infinity
+        return self._as_point(value)
+
     def _form_show(self, args, env) -> str:
-        show_points = show_lines = True
+        show_points = show_lines = show_directions = True
         if args:
-            show_points = show_lines = False
+            show_points = show_lines = show_directions = False
             for arg in args:
                 if not isinstance(arg, Symbol):
                     raise CommandError(
-                        f"Unknown qualifier: {self._show(arg)}. Use -points or "
-                        "-lines."
+                        f"Unknown qualifier: {self._show(arg)}. Use -points, "
+                        "-lines, or -directions."
                     )
                 key = arg.name.lower().lstrip("-")
                 if key in ("points", "point", "p"):
                     show_points = True
                 elif key in ("lines", "line", "l"):
                     show_lines = True
+                elif key in ("directions", "direction", "infinities", "d", "i"):
+                    show_directions = True
                 else:
                     raise CommandError(
-                        f"Unknown qualifier: {arg.name!r}. Use -points or -lines."
+                        f"Unknown qualifier: {arg.name!r}. Use -points, -lines, "
+                        "or -directions."
                     )
         blocks = []
         if show_points:
             blocks.append(self._list_points())
         if show_lines:
             blocks.append(self._list_lines())
+        # In the default (show), the directions block appears only when there
+        # are any; asked for explicitly (-directions), it always shows.
+        if show_directions and (args or self.scene.infinities()):
+            blocks.append(self._list_infinities())
         return "\n".join(blocks)
 
     def _form_help(self, args, env) -> str:
@@ -446,6 +507,9 @@ class CommandInterpreter:
             "  (add horizon <fraction>)    horizontal, orientation-locked line\n"
             "  (add line <angle> <point>)  line through a point at an angle;\n"
             "  (add line <point> <point>)  or through two points\n"
+            "  (add infinity <angle>)      a direction (point at infinity)\n"
+            "  (add line <infinity> <pt>)  a line parallel to that direction\n"
+            "  (orient <infinity> <angle>) swing a whole parallel family\n"
             "  (point <line> <fraction>)   a point along a line (0=left, 1=right)\n"
             "  (define <name> <value>)     name a value for later reuse\n"
             "  (let ((<name> <value>) …)   bind names locally, then run the body\n"
@@ -458,7 +522,7 @@ class CommandInterpreter:
             "  (map <proc> <list>)         apply a procedure across a list\n"
             "  (fold <proc> <init> <list>) accumulate across a list\n"
             "  (+ …) (- …) (* …) (/ …)     arithmetic\n"
-            "  (show [-points | -lines])   list canvas elements\n"
+            "  (show [-points|-lines|-directions])  list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
             "Reference an element by quoting its label ('A, 'a) or id ('P1, 'L1)."
@@ -556,6 +620,15 @@ class CommandInterpreter:
             raise CommandError("That line doesn't cross the canvas.")
         return point
 
+    def _b_orient(self, args) -> InfinitePoint:
+        if len(args) != 2:
+            raise CommandError("Usage: (orient <infinity> <angle>)")
+        infinity = self._as_infinity(args[0])
+        angle = self._as_number(args[1], "an angle")
+        self.scene.set_infinity_angle(infinity, angle)
+        self.scene.commit_undo()
+        return infinity
+
     # -- Rendering ---------------------------------------------------------
 
     def _render(self, value) -> str:
@@ -573,6 +646,8 @@ class CommandInterpreter:
             return f"{self._point_name(value)}  {self._describe_point(value)}"
         if isinstance(value, LineItem):
             return f"{self._line_name(value)}  {self._describe_line(value)}"
+        if isinstance(value, InfinitePoint):
+            return f"{self._infinity_name(value)}  direction {value.angle:g}°"
         if isinstance(value, (Builtin, Closure)):
             return repr(value)
         return str(value)
@@ -593,6 +668,8 @@ class CommandInterpreter:
             return self._point_name(value)
         if isinstance(value, LineItem):
             return self._line_name(value)
+        if isinstance(value, InfinitePoint):
+            return self._infinity_name(value)
         if isinstance(value, list):
             return "a list"
         if self._is_number(value):
@@ -606,6 +683,10 @@ class CommandInterpreter:
     def _line_name(self, line) -> str:
         lines = self._lines()
         return f"L{lines.index(line) + 1}" if line in lines else "L?"
+
+    def _infinity_name(self, infinity) -> str:
+        infinities = self.scene.infinities()
+        return f"I{infinities.index(infinity) + 1}" if infinity in infinities else "I?"
 
     def _describe_point(self, point) -> str:
         c = point.center()
@@ -632,6 +713,15 @@ class CommandInterpreter:
         rows = [f"Lines ({len(items)}):"]
         for i, line in enumerate(items, 1):
             rows.append(f"  L{i}  {self._describe_line(line)}")
+        if not items:
+            rows.append("  (none)")
+        return "\n".join(rows)
+
+    def _list_infinities(self) -> str:
+        items = self.scene.infinities()
+        rows = [f"Directions ({len(items)}):"]
+        for i, inf in enumerate(items, 1):
+            rows.append(f"  I{i}  direction {inf.angle:g}°")
         if not items:
             rows.append("  (none)")
         return "\n".join(rows)

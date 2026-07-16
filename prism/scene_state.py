@@ -88,8 +88,10 @@ def capture(scene) -> dict:
         key=lambda it: getattr(it, "_seq", 0),
     )
     lines = sorted(scene._lines(), key=lambda it: getattr(it, "_seq", 0))
+    infinities = scene.infinities() if hasattr(scene, "infinities") else []
     p_index = {id(p): i for i, p in enumerate(points)}
     l_index = {id(ln): i for i, ln in enumerate(lines)}
+    inf_index = {id(inf): i for i, inf in enumerate(infinities)}
 
     point_data = []
     for point in points:
@@ -142,6 +144,7 @@ def capture(scene) -> dict:
                     p_index.get(id(line.bound_point(2))) if line.bound_point(2) else None,
                 ],
                 "pivot": p_index.get(id(pivot)) if pivot is not None else None,
+                "infinity": inf_index.get(id(line.infinity())) if line.has_infinity() else None,
                 "range": visible_range,
                 "locked": line.is_orientation_locked(),
                 "label": _capture_label(line),
@@ -162,6 +165,7 @@ def capture(scene) -> dict:
     return {
         "points": point_data,
         "lines": line_data,
+        "infinities": [{"angle": inf.angle} for inf in infinities],
         "groups": groups,
         "point_style": _capture_point_style(getattr(scene, "_point_style", None)),
     }
@@ -186,6 +190,15 @@ def restore(scene, state: dict) -> None:
         _restore_label(point, data["label"])
         points.append(point)
 
+    from prism.infinity import InfinitePoint
+
+    infinities = []
+    for data in state.get("infinities", []):
+        inf = InfinitePoint(data["angle"])
+        scene._tag(inf)
+        scene._infinities.append(inf)
+        infinities.append(inf)
+
     lines = []
     for data in state["lines"]:
         line = scene.add_line(QPointF(*data["p1"]), QPointF(*data["p2"]))
@@ -207,6 +220,8 @@ def restore(scene, state: dict) -> None:
             line.bind_endpoint(2, points[bind2])
         if data["pivot"] is not None:
             line.set_pivot(points[data["pivot"]])
+        if data.get("infinity") is not None:
+            line.set_infinity(infinities[data["infinity"]])
         if data["range"] is not None:
             line.set_visible_range(
                 points[data["range"]["anchor"]],
