@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from prism.items import GroupItem, IntersectionPointItem, LineItem, PointItem
+from prism.anchors import IntersectionAnchor
+from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
 
@@ -73,8 +74,9 @@ class CanvasScene(QGraphicsScene):
         self._line_start_point: PointItem | None = None
         self._preview_line: LineItem | None = None
 
-        # Derived intersection points, keyed by the (ordered id) line pair.
-        self._intersections: dict[tuple[int, int], IntersectionPointItem] = {}
+        # Intersection points (plain points with an IntersectionAnchor), keyed
+        # by the (ordered id) line pair.
+        self._intersections: dict[tuple[int, int], PointItem] = {}
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._syncing_anchors = False
@@ -187,14 +189,18 @@ class CanvasScene(QGraphicsScene):
         return self.SNAP_PX / (scale or 1.0)
 
     def snap_target(self, scene_pos: QPointF, exclude=()) -> PointItem | None:
-        """The nearest snappable point within the snap radius, or None."""
+        """The nearest point a line endpoint may bind to, or None.
+
+        Intersection points are excluded: a binding to a computed point can't
+        propagate, so lines don't bind to them.
+        """
         radius = self.snap_radius()
         best = None
         best_d = radius
         for item in self.items():
             if (
                 isinstance(item, PointItem)
-                and not item.is_derived
+                and not item.is_intersection()
                 and item not in exclude
             ):
                 d = QLineF(scene_pos, item.center()).length()
@@ -212,15 +218,11 @@ class CanvasScene(QGraphicsScene):
         """
         radius = self.snap_radius()
 
-        # 1) Nearest other user point wins.
+        # 1) Nearest other point wins (any point - they're all the same).
         best = None
         best_d = radius
         for item in self.items():
-            if (
-                isinstance(item, PointItem)
-                and not item.is_derived
-                and item is not exclude
-            ):
+            if isinstance(item, PointItem) and item is not exclude:
                 d = QLineF(scene_pos, item.center()).length()
                 if d <= best_d:
                     best_d = d
@@ -266,6 +268,12 @@ class CanvasScene(QGraphicsScene):
     # -- Mouse handling ----------------------------------------------------
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            # A right-click opens a context menu; don't let it change the
+            # selection (otherwise a two-point selection collapses to the one
+            # clicked, and selection-based menu items disappear).
+            event.accept()
+            return
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
@@ -407,6 +415,36 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def add_line_between(self, a: PointItem, b: PointItem) -> LineItem | None:
+        """Add an infinite line through two points, bound to both.
+
+        Each endpoint is bound to a point, so the line stays through them as
+        they move. Returns None if the two points coincide.
+        """
+        if a is b or a.center() == b.center():
+            return None
+        line = self.add_line(a.center(), b.center())
+        line.bind_endpoint(1, a)
+        line.bind_endpoint(2, b)
+        self.on_line_changed(line)
+        self.commit_undo()
+        return line
+
+    def selected_points(self):
+        """Selected points a line can be built on, in order.
+
+        Intersection points are excluded (a line can't bind to a computed
+        point).
+        """
+        return sorted(
+            (
+                it
+                for it in self.selectedItems()
+                if isinstance(it, PointItem) and not it.is_intersection()
+            ),
+            key=lambda it: getattr(it, "_seq", 0),
+        )
+
     def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
         """Add one infinite line through ``point`` at a given angle.
 
@@ -498,7 +536,10 @@ class CanvasScene(QGraphicsScene):
         self.recompute_intersections()
 
     def _sync_anchored_points(self, exclude=None) -> None:
-        """Put every anchored point back onto its line (re-entrancy guarded)."""
+        """Re-place line-anchored points on their line (re-entrancy guarded).
+
+        Intersection points are handled by :meth:`recompute_intersections`.
+        """
         if self._syncing_anchors:
             return
         self._syncing_anchors = True
@@ -506,13 +547,24 @@ class CanvasScene(QGraphicsScene):
             for item in self.items():
                 if (
                     isinstance(item, PointItem)
-                    and not item.is_derived
                     and item is not exclude
-                    and item.anchor_line() is not None
+                    and item.has_anchor()
+                    and not item.is_intersection()
                 ):
-                    item.sync_to_anchor_line()
+                    item.sync_to_anchor()
         finally:
             self._syncing_anchors = False
+
+    def on_point_detached(self, point: PointItem) -> None:
+        """A point's anchor released (e.g. an intersection point was dragged).
+
+        Drop it from the managed intersection set so it becomes a free point;
+        the crossing gets a fresh marker on the next recompute.
+        """
+        for key, managed in list(self._intersections.items()):
+            if managed is point:
+                del self._intersections[key]
+                break
 
     # -- Pencils (pinning lines through a point) --------------------------
 
@@ -554,7 +606,7 @@ class CanvasScene(QGraphicsScene):
         points = [
             it
             for it in self.selectedItems()
-            if isinstance(it, PointItem) and not it.is_derived
+            if isinstance(it, PointItem) and not it.is_intersection()
         ]
         lines = [it for it in self.selectedItems() if isinstance(it, LineItem)]
         if points and len(lines) == 1:
@@ -570,12 +622,14 @@ class CanvasScene(QGraphicsScene):
         return len(points)
 
     def _points_anchored_to(self, line: LineItem):
+        # Line-anchored points only; intersection markers are cleaned up by the
+        # recompute when a line goes away.
         return [
             it
             for it in self.items()
             if isinstance(it, PointItem)
-            and not it.is_derived
-            and it.anchor_line() is line
+            and not it.is_intersection()
+            and it.anchor_references_line(line)
         ]
 
     def add_projectivity(self, point: PointItem, angles) -> list:
@@ -612,8 +666,37 @@ class CanvasScene(QGraphicsScene):
             if isinstance(it, LineItem) and it is not self._preview_line
         ]
 
+    # -- Naming (shared with the console) ----------------------------------
+
+    def ordered_points(self):
+        """All points, in the id order used for names (P1, P2, ...)."""
+        return sorted(
+            (it for it in self.items() if isinstance(it, PointItem)),
+            key=lambda p: getattr(p, "_seq", 0),
+        )
+
+    def ordered_lines(self):
+        """All lines, in the id order used for names (L1, L2, ...)."""
+        return sorted(self._lines(), key=lambda ln: getattr(ln, "_seq", 0))
+
+    def element_name(self, item) -> str:
+        """A stable-ish display name: label if set, else a P#/L# id."""
+        label = item.label_text() if hasattr(item, "label_text") else ""
+        if isinstance(item, PointItem):
+            base = f"P{self.ordered_points().index(item) + 1}" if item in self.ordered_points() else "P?"
+        elif isinstance(item, LineItem):
+            base = f"L{self.ordered_lines().index(item) + 1}" if item in self.ordered_lines() else "L?"
+        else:
+            return type(item).__name__
+        return f'{base} "{label}"' if label else base
+
     def recompute_intersections(self) -> None:
-        """Create/move/remove derived points at every line crossing."""
+        """Maintain an intersection point at every line crossing.
+
+        Each is a plain point carrying an IntersectionAnchor; the scene keeps
+        it positioned. It stays the same object as lines move (so a selection or
+        label sticks with it) until its crossing is gone.
+        """
         if self._updating:
             return
         self._updating = True
@@ -630,12 +713,14 @@ class CanvasScene(QGraphicsScene):
                     seen.add(key)
                     existing = self._intersections.get(key)
                     if existing is None:
-                        marker = IntersectionPointItem(point)
+                        marker = PointItem(point)
+                        marker.set_anchor(IntersectionAnchor(a, b))
                         self._apply_default_point_style(marker)
+                        self._tag(marker)
                         self.addItem(marker)
                         self._intersections[key] = marker
                     else:
-                        existing.set_center(point)
+                        existing.sync_to_anchor()
             for key in list(self._intersections):
                 if key not in seen:
                     self.removeItem(self._intersections.pop(key))
@@ -647,11 +732,11 @@ class CanvasScene(QGraphicsScene):
         kind, point = a.display_line().intersects(b.display_line())
         if kind != QLineF.IntersectionType.BoundedIntersection:
             return None
-        # Skip crossings that coincide with an existing point (shared vertex),
-        # so we don't stack a derived marker on top of a real point.
+        # Skip crossings that coincide with a placed/free point (e.g. a shared
+        # vertex), so we don't stack a marker on top of an existing point.
         radius = self.snap_radius()
         for item in self.items():
-            if isinstance(item, PointItem) and not item.is_derived:
+            if isinstance(item, PointItem) and not item.is_intersection():
                 if QLineF(point, item.center()).length() <= radius:
                     return None
         return point
@@ -660,11 +745,11 @@ class CanvasScene(QGraphicsScene):
 
     def contextMenuEvent(self, event):
         # Route to the topmost label / point / line under the cursor; a blank
-        # spot (or a derived point) shows the scene-level menu.
+        # spot shows the scene-level menu.
         target = None
         for item in self.items(event.scenePos()):
             if isinstance(item, (LabelItem, PointItem, LineItem)):
-                target = item  # includes derived points (display properties)
+                target = item
                 break
 
         if target is not None:
@@ -687,7 +772,7 @@ class CanvasScene(QGraphicsScene):
             (
                 it
                 for it in self.items()
-                if isinstance(it, PointItem) and not it.is_derived
+                if isinstance(it, PointItem) and not it.is_intersection()
             ),
             key=lambda it: getattr(it, "_seq", 0),
         )
@@ -728,7 +813,7 @@ class CanvasScene(QGraphicsScene):
             it
             for it in self.selectedItems()
             if isinstance(it, (PointItem, LineItem, GroupItem))
-            and not getattr(it, "is_derived", False)
+            and not (isinstance(it, PointItem) and it.is_intersection())
             and it.parentItem() is None
         ]
         if len(items) < 2:
@@ -771,6 +856,10 @@ class CanvasScene(QGraphicsScene):
 
     def delete_selected(self) -> None:
         for item in list(self.selectedItems()):
+            # An intersection point is computed and re-created by the recompute;
+            # deleting it directly would leave a stale entry, so skip it.
+            if isinstance(item, PointItem) and item.is_intersection():
+                continue
             self._remove_geometry(item)
         self.recompute_intersections()
         self.commit_undo()
@@ -783,12 +872,12 @@ class CanvasScene(QGraphicsScene):
                 self._detach_point_references(child)
             self.removeItem(item)
             return
-        if isinstance(item, PointItem) and not item.is_derived:
+        if isinstance(item, PointItem):
             self._detach_point_references(item)
         elif isinstance(item, LineItem):
-            # Release any points anchored to this line.
+            # Release any line-anchored points (they become free).
             for point in self._points_anchored_to(item):
-                point.clear_anchor_line()
+                point.clear_anchor()
         self.removeItem(item)
 
     def _detach_point_references(self, point) -> None:

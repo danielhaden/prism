@@ -36,6 +36,14 @@ History covers everything: drawing, dragging, deleting, grouping, styling,
 labelling, anchoring, and pencils — including the *relationships* between
 elements, not just their positions.
 
+## The Selection panel
+
+A dock (left side; **View → Show Selection**) lists whatever is currently
+selected — each element's name (its `P1` / `L1` id, or label) and position,
+updating live as you move things. Lines also show their endpoints and any
+`locked` / `range` / `pivot` tags. The names match the ones the
+[console](console.md) uses.
+
 ## Navigating the canvas
 
 - **Zoom** — mouse wheel (anchored under the cursor).

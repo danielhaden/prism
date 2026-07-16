@@ -8,9 +8,30 @@ size at any zoom.
 - **Drag** a point (Select tool) to move it. Anything attached to it follows.
 - **Snapping** — while placing or dragging, a point snaps onto a nearby
   **existing point** or onto a **line** (an orange ring previews the target).
-- **Intersection points** — where two visible lines cross, Prism maintains a
-  derived point automatically (drawn in green). These are computed; you don't
-  place or move them.
+- **Points are all the same.** Whether you place a point or one appears where
+  two lines cross, it's the same kind of object — same styling, selection, and
+  context menu.
+
+- **Anchors.** A point may carry an invisible *anchor* that pins its position
+  (these are never drawn). A point at a line **crossing** is simply a point
+  anchored to that intersection; a point [anchored to a
+  line](#anchoring-a-point-to-a-line) is one anchored to slide along it.
+  **Dragging** an intersection point **detaches** it — it becomes an ordinary
+  free point, and a fresh point re-marks the crossing. (A line-anchored point,
+  by contrast, slides along its line when dragged.) A line can't be *bound* to
+  an anchored point, since its position is computed.
+
+### A line through two points
+
+Select **two points** — click one, then **++ctrl++-click** the other (or drag a
+**rubber-band box** around both). Right-click either point →
+**Add Line Through Points**. An infinite line is drawn through both, with each
+endpoint **bound** to its point, so the line stays through them as they move.
+
+!!! tip "Selecting more than one thing"
+    A plain click selects just what you clicked — a second click *replaces* the
+    selection. To select several items, ++ctrl++-click each, or drag a box
+    around them with the Select tool.
 
 ### Anchoring a point to a line
 

@@ -22,25 +22,25 @@ class PointItem(Labelable, QGraphicsEllipseItem):
       background color, so converging lines are cut away near the point. A
       ``glow_radius`` of 0 disables it.
 
-    ``is_derived`` marks points that are computed from other geometry (e.g.
-    intersections). Derived points are not valid snap targets and are managed
-    by the scene rather than the user.
+    A point may carry an :class:`~prism.anchors.Anchor` that pins its position
+    (e.g. to a line, or to the intersection of two lines). All points are the
+    same kind of object regardless; the anchor is an invisible constraint, not
+    a different type of point.
     """
 
-    RADIUS = 5.0
-    DEFAULT_COLOR = "#1f77b4"
+    RADIUS = 1.0
+    DEFAULT_COLOR = "#000000"
+    DEFAULT_GLOW_RADIUS = 7.0
     DEFAULT_GLOW_COLOR = "#fafafa"  # matches the canvas background
-    is_derived = False
 
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
         # trigger boundingRect()/itemChange() (which read these attributes).
         self._radius = float(self.RADIUS)
-        self._glow_radius = 0.0
+        self._glow_radius = float(self.DEFAULT_GLOW_RADIUS)
         self._glow_color = QColor(self.DEFAULT_GLOW_COLOR)
-        # Anchor: a line this point is constrained to lie on.
-        self._anchor_line = None
-        self._anchor_t = 0.0
+        # An optional invisible constraint pinning this point's position.
+        self._anchor = None
         self._syncing = False
 
         super().__init__(-self.RADIUS, -self.RADIUS, 2 * self.RADIUS, 2 * self.RADIUS)
@@ -110,6 +110,17 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         display_action = menu.addAction("Modify Display Properties…")
         menu.addSeparator()
 
+        # Line through exactly two selected points.
+        line_action = None
+        two_points = (
+            scene.selected_points()
+            if scene is not None and hasattr(scene, "selected_points")
+            else []
+        )
+        if len(two_points) == 2 and self in two_points:
+            line_action = menu.addAction("Add Line Through Points")
+            menu.addSeparator()
+
         # Anchor a point to a line when the selection is one line + point(s).
         snap_action = unsnap_action = None
         sel_points, sel_line = (
@@ -119,13 +130,19 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         )
         if sel_line is not None and sel_points:
             snap_action = menu.addAction("Snap Point to Line")
-        if self.has_anchor_line():
+        if self.has_anchor():
             unsnap_action = menu.addAction("Remove Anchor")
         if snap_action is not None or unsnap_action is not None:
             menu.addSeparator()
 
+        # Pinning uses this point as a pivot; an intersection point is computed
+        # and doesn't drive lines, so hide it there.
         pin_action = unpin_action = None
-        if scene is not None and hasattr(scene, "pin_lines_through"):
+        if (
+            scene is not None
+            and hasattr(scene, "pin_lines_through")
+            and not self.is_intersection()
+        ):
             pinned = any(
                 line.pivot() is self for line in scene._lines()
             )
@@ -140,10 +157,12 @@ class PointItem(Labelable, QGraphicsEllipseItem):
             return
         if chosen is display_action:
             self.open_display_dialog()
+        elif line_action is not None and chosen is line_action:
+            scene.add_line_between(two_points[0], two_points[1])
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
         elif unsnap_action is not None and chosen is unsnap_action:
-            self.clear_anchor_line()
+            self.clear_anchor()
         elif chosen is pin_action:
             scene.pin_lines_through(self)
         elif chosen is unpin_action:
@@ -183,51 +202,60 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         self.setPos(parent.mapFromScene(center) if parent is not None else center)
 
     def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionChange and not self.is_derived:
-            if self._anchor_line is not None:
-                # Anchored: slide along the line instead of moving freely.
-                if not self._syncing:
-                    value = self._constrain_to_anchor(value)
+        if change == QGraphicsItem.ItemPositionChange:
+            if self._syncing:
+                pass  # the scene is repositioning us from our anchor
+            elif self._anchor is not None:
+                value = self._drag_anchored(value)
             else:
-                # Free: snap onto nearby objects while being moved.
-                value = self._snap_position(value)
-        # Notify the scene so bound line endpoints and intersections update.
+                value = self._snap_position(value)  # free: snap while dragging
         elif change == QGraphicsItem.ItemPositionHasChanged:
-            scene = self.scene()
-            if scene is not None and hasattr(scene, "on_point_moved"):
-                scene.on_point_moved(self)
+            # Notify so bound endpoints / anchored points / intersections
+            # update. An intersection point moved *by the scene* has nothing
+            # depending on it, so skip that to avoid needless churn.
+            if not (self._syncing and self.is_intersection()):
+                scene = self.scene()
+                if scene is not None and hasattr(scene, "on_point_moved"):
+                    scene.on_point_moved(self)
         return super().itemChange(change, value)
 
-    # -- Anchor to a line --------------------------------------------------
+    # -- Anchor ------------------------------------------------------------
 
-    def anchor_line(self):
-        """The line this point is constrained to lie on, or None."""
-        return self._anchor_line
+    def anchor(self):
+        """The invisible constraint pinning this point, or None."""
+        return self._anchor
 
-    def has_anchor_line(self) -> bool:
-        return self._anchor_line is not None
+    def has_anchor(self) -> bool:
+        return self._anchor is not None
+
+    def is_intersection(self) -> bool:
+        """Whether this point is currently pinned to a line intersection."""
+        return self._anchor is not None and self._anchor.kind == "intersection"
+
+    def set_anchor(self, anchor) -> None:
+        """Pin this point with ``anchor`` and snap it to the anchor's position."""
+        self._anchor = anchor
+        self.sync_to_anchor()
+
+    def clear_anchor(self) -> None:
+        """Release the point; it moves freely again."""
+        self._anchor = None
 
     def set_anchor_line(self, line) -> None:
-        """Constrain this point to lie on ``line``, snapping onto it now.
+        """Convenience: constrain the point to slide along ``line``."""
+        from prism.anchors import LineAnchor
 
-        The point keeps its position *along* the line, so dragging it slides it
-        and moving the line carries it along.
-        """
-        self._anchor_line = line
-        self._anchor_t = line.param_of(self.center())
-        self.sync_to_anchor_line()
+        self.set_anchor(LineAnchor(line, line.param_of(self.center())))
 
-    def clear_anchor_line(self) -> None:
-        """Release the point from its line; it moves freely again."""
-        self._anchor_line = None
+    def anchor_references_line(self, line) -> bool:
+        return self._anchor is not None and self._anchor.references_line(line)
 
-    def sync_to_anchor_line(self) -> None:
-        """The line moved: put the point back on it at its stored parameter."""
-        line = self._anchor_line
-        if line is None:
+    def sync_to_anchor(self) -> None:
+        """Put the point back at its anchor's computed position."""
+        if self._anchor is None:
             return
-        target = line.point_at_param(self._anchor_t)
-        if target == self.center():
+        target = self._anchor.position()
+        if target is None or target == self.center():
             return
         self._syncing = True
         try:
@@ -235,18 +263,19 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         finally:
             self._syncing = False
 
-    def _constrain_to_anchor(self, value: QPointF) -> QPointF:
-        """Project a proposed position onto the anchor line."""
-        line = self._anchor_line
-        scene_pt = value
+    def _drag_anchored(self, value: QPointF) -> QPointF:
+        """Apply the anchor's drag rule; detach (and snap) if it releases."""
         parent = self.parentItem()
-        if parent is not None:
-            scene_pt = parent.mapToScene(value)
-        projected = line.project_scene(scene_pt)
-        self._anchor_t = line.param_of(projected)
-        if parent is not None:
-            return parent.mapFromScene(projected)
-        return projected
+        scene_pt = parent.mapToScene(value) if parent is not None else value
+        constrained = self._anchor.constrain_drag(scene_pt)
+        if constrained is None:
+            # The anchor released: this point is now free.
+            self._anchor = None
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "on_point_detached"):
+                scene.on_point_detached(self)
+            return self._snap_position(value)
+        return parent.mapFromScene(constrained) if parent is not None else constrained
 
     def _snap_position(self, value: QPointF) -> QPointF:
         scene = self.scene()

@@ -8,6 +8,7 @@ from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
+from prism.selection_panel import SelectionPanel
 from prism.settings import scripts_dir, set_scripts_dir
 from prism.tools import Tool
 
@@ -27,6 +28,9 @@ class MainWindow(QMainWindow):
 
         self.console = ConsolePanel(self.scene, self)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console)
+
+        self.selection = SelectionPanel(self.scene, self)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.selection)
 
         self.scripts = ScriptsPanel(self.console.run_script, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.scripts)
@@ -148,6 +152,9 @@ class MainWindow(QMainWindow):
         toggle_scripts = self.scripts.toggleViewAction()
         toggle_scripts.setText("Show Scripts")
         view_menu.addAction(toggle_scripts)
+        toggle_selection = self.selection.toggleViewAction()
+        toggle_selection.setText("Show Selection")
+        view_menu.addAction(toggle_selection)
 
         settings_menu = self.menuBar().addMenu("&Settings")
         scripts_folder_action = QAction("Scripts Folder…", self)

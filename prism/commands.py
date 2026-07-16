@@ -162,10 +162,10 @@ class CommandInterpreter:
     def _as_point(self, argument) -> PointItem:
         value = self._value(argument)
         if isinstance(value, PointItem):
-            if value.is_derived:
+            if value.is_intersection():
                 raise CommandError(
-                    "That is an intersection point. Those are recomputed as "
-                    "lines move, so they can't anchor a new line."
+                    "That is an intersection point. It's computed from its "
+                    "lines, so a new line can't anchor to it."
                 )
             return value
         if isinstance(value, str):
@@ -183,13 +183,10 @@ class CommandInterpreter:
     # -- Element access ----------------------------------------------------
 
     def _points(self):
-        items = [it for it in self.scene.items() if isinstance(it, PointItem)]
-        user = sorted(
-            (p for p in items if not p.is_derived),
+        return sorted(
+            (it for it in self.scene.items() if isinstance(it, PointItem)),
             key=lambda p: getattr(p, "_seq", 0),
         )
-        derived = [p for p in items if p.is_derived]
-        return user + derived
 
     def _lines(self):
         return sorted(self.scene._lines(), key=lambda ln: getattr(ln, "_seq", 0))
@@ -203,10 +200,10 @@ class CommandInterpreter:
                 f"No point named {name!r}. Use a label (e.g. A) or an id from "
                 "(list) (e.g. P1)."
             )
-        if match.is_derived:
+        if match.is_intersection():
             raise CommandError(
-                f"{name!r} is an intersection point. Those are recomputed as "
-                "lines move, so they can't anchor a new line."
+                f"{name!r} is an intersection point. It's computed from its "
+                "lines, so a new line can't anchor to it."
             )
         return match
 
@@ -236,6 +233,8 @@ class CommandInterpreter:
             "  (add line <angle> <point>)  line through a point, at an angle in\n"
             "                              degrees clockwise from horizontal;\n"
             "                              pinned to the point\n"
+            "  (add line <point> <point>)  line through two points, bound to\n"
+            "                              both\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
             "  (list [-points | -lines])   list canvas elements\n"
@@ -286,16 +285,27 @@ class CommandInterpreter:
         return self.scene.add_horizon(self._as_fraction(args[0]))
 
     def _add_line(self, args) -> LineItem:
-        if len(args) < 2:
+        if len(args) != 2:
             raise CommandError(
-                "Usage: (add line <angle> <point>)\n"
+                "Usage: (add line <angle> <point>)  - through a point\n"
+                "   or: (add line <point> <point>)  - through two points\n"
                 "  angle: degrees clockwise from horizontal (e.g. 30, -45)\n"
-                "  point: a label (A), an id (P1), or a form like "
-                "(point L1 2/3)"
+                "  point: a label (A), an id (P1), or a form like (point L1 2/3)"
             )
-        angle = self._as_float(args[0], "an angle in degrees")
-        point = self._as_point(args[1])
-        return self.scene.add_line_through(point, angle)
+        first = args[0]
+        if isinstance(first, str) and _is_number(first):
+            # (add line <angle> <point>)
+            return self.scene.add_line_through(
+                self._as_point(args[1]), float(first)
+            )
+        # (add line <point> <point>)
+        a, b = self._as_point(args[0]), self._as_point(args[1])
+        line = self.scene.add_line_between(a, b)
+        if line is None:
+            raise CommandError(
+                "Can't draw a line: those two points are in the same place."
+            )
+        return line
 
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:
@@ -355,9 +365,13 @@ class CommandInterpreter:
     def _describe_point(self, point) -> str:
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
-        kind = "  [intersection]" if point.is_derived else ""
-        anchored = "  on-line" if point.has_anchor_line() else ""
-        return f"({c.x():.1f}, {c.y():.1f}){label}{anchored}{kind}"
+        if point.is_intersection():
+            tag = "  [intersection]"
+        elif point.has_anchor():
+            tag = "  [on-line]"
+        else:
+            tag = ""
+        return f"({c.x():.1f}, {c.y():.1f}){label}{tag}"
 
     def _list_points(self) -> str:
         points = self._points()
@@ -404,6 +418,14 @@ def _match_by_label(items, name: str):
         if item.label_text().lower() == lowered:
             return item
     return None
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
 
 
 def _match_by_id(items, name: str, prefix: str):
