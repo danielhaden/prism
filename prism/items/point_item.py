@@ -111,6 +111,17 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         display_action = menu.addAction("Modify Display Properties…")
         menu.addSeparator()
 
+        # Line through exactly two selected points.
+        line_action = None
+        two_points = (
+            scene.selected_points()
+            if scene is not None and hasattr(scene, "selected_points")
+            else []
+        )
+        if len(two_points) == 2 and self in two_points:
+            line_action = menu.addAction("Add Line Through Points")
+            menu.addSeparator()
+
         # Anchor a point to a line when the selection is one line + point(s).
         snap_action = unsnap_action = None
         sel_points, sel_line = (
@@ -141,6 +152,8 @@ class PointItem(Labelable, QGraphicsEllipseItem):
             return
         if chosen is display_action:
             self.open_display_dialog()
+        elif line_action is not None and chosen is line_action:
+            scene.add_line_between(two_points[0], two_points[1])
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
         elif unsnap_action is not None and chosen is unsnap_action:

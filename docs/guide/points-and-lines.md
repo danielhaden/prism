@@ -12,6 +12,13 @@ size at any zoom.
   derived point automatically (drawn in green). These are computed; you don't
   place or move them.
 
+### A line through two points
+
+Select **two points** (click one, ++shift++-click the other) and right-click
+either → **Add Line Through Points**. An infinite line is drawn through both,
+with each endpoint **bound** to its point — so the line stays through them as
+they move.
+
 ### Anchoring a point to a line
 
 Snapping is transient — it releases as soon as you drag away. To make a point

@@ -407,6 +407,32 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def add_line_between(self, a: PointItem, b: PointItem) -> LineItem | None:
+        """Add an infinite line through two points, bound to both.
+
+        Each endpoint is bound to a point, so the line stays through them as
+        they move. Returns None if the two points coincide.
+        """
+        if a is b or a.center() == b.center():
+            return None
+        line = self.add_line(a.center(), b.center())
+        line.bind_endpoint(1, a)
+        line.bind_endpoint(2, b)
+        self.on_line_changed(line)
+        self.commit_undo()
+        return line
+
+    def selected_points(self):
+        """The user (non-derived) points currently selected, in order."""
+        return sorted(
+            (
+                it
+                for it in self.selectedItems()
+                if isinstance(it, PointItem) and not it.is_derived
+            ),
+            key=lambda it: getattr(it, "_seq", 0),
+        )
+
     def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
         """Add one infinite line through ``point`` at a given angle.
 
