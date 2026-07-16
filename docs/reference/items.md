@@ -6,8 +6,6 @@ Drawable geometry objects that live in the scene.
 
 ::: prism.items.point_item.PointItem
 
-::: prism.items.intersection_point_item.IntersectionPointItem
-
 ## Lines
 
 ::: prism.items.line_item.LineItem

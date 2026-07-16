@@ -78,11 +78,12 @@ def _restore_point_style(data: dict | None) -> dict | None:
 
 def capture(scene) -> dict:
     """Snapshot every user-authored element and relationship in ``scene``."""
+    # Intersection points are recomputed, not stored.
     points = sorted(
         (
             it
             for it in scene.items()
-            if isinstance(it, PointItem) and not it.is_derived
+            if isinstance(it, PointItem) and not it.is_intersection()
         ),
         key=lambda it: getattr(it, "_seq", 0),
     )
@@ -94,9 +95,13 @@ def capture(scene) -> dict:
     for point in points:
         style = point.display_style()
         anchor = None
-        anchor_line = point.anchor_line()
-        if anchor_line is not None and id(anchor_line) in l_index:
-            anchor = {"line": l_index[id(anchor_line)], "t": point._anchor_t}
+        pt_anchor = point.anchor()
+        if (
+            pt_anchor is not None
+            and pt_anchor.kind == "line"
+            and id(pt_anchor.line) in l_index
+        ):
+            anchor = {"line": l_index[id(pt_anchor.line)], "t": pt_anchor.t}
         point_data.append(
             {
                 "xy": [point.center().x(), point.center().y()],
@@ -209,11 +214,12 @@ def restore(scene, state: dict) -> None:
                 data["range"]["pos"],
             )
 
+    from prism.anchors import LineAnchor
+
     for point, data in zip(points, state["points"]):
         if data["anchor"] is not None:
-            point._anchor_line = lines[data["anchor"]["line"]]
-            point._anchor_t = data["anchor"]["t"]
-            point.sync_to_anchor_line()
+            line = lines[data["anchor"]["line"]]
+            point.set_anchor(LineAnchor(line, data["anchor"]["t"]))
 
     for members in state.get("groups", []):
         group = GroupItem()

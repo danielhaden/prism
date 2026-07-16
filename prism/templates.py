@@ -31,7 +31,11 @@ TEMPLATE_MIME = "application/x-prism-template"
 
 def serialize_selection(items, name: str) -> dict:
     """Build a template from selected scene items (points + lines)."""
-    points = [it for it in items if isinstance(it, PointItem) and not it.is_derived]
+    points = [
+        it
+        for it in items
+        if isinstance(it, PointItem) and not it.is_intersection()
+    ]
     lines = [it for it in items if isinstance(it, LineItem)]
     index = {id(p): i for i, p in enumerate(points)}
 

@@ -67,6 +67,7 @@ nav:
   - Developer Reference:
       - Overview: reference/index.md
       - Items: reference/items.md
+      - Anchors: reference/anchors.md
       - Canvas: reference/canvas.md
       - Templates: reference/templates.md
       - Console Commands: reference/commands.md

@@ -162,10 +162,10 @@ class CommandInterpreter:
     def _as_point(self, argument) -> PointItem:
         value = self._value(argument)
         if isinstance(value, PointItem):
-            if value.is_derived:
+            if value.is_intersection():
                 raise CommandError(
-                    "That is an intersection point. Those are recomputed as "
-                    "lines move, so they can't anchor a new line."
+                    "That is an intersection point. It's computed from its "
+                    "lines, so a new line can't anchor to it."
                 )
             return value
         if isinstance(value, str):
@@ -183,13 +183,10 @@ class CommandInterpreter:
     # -- Element access ----------------------------------------------------
 
     def _points(self):
-        items = [it for it in self.scene.items() if isinstance(it, PointItem)]
-        user = sorted(
-            (p for p in items if not p.is_derived),
+        return sorted(
+            (it for it in self.scene.items() if isinstance(it, PointItem)),
             key=lambda p: getattr(p, "_seq", 0),
         )
-        derived = [p for p in items if p.is_derived]
-        return user + derived
 
     def _lines(self):
         return sorted(self.scene._lines(), key=lambda ln: getattr(ln, "_seq", 0))
@@ -203,10 +200,10 @@ class CommandInterpreter:
                 f"No point named {name!r}. Use a label (e.g. A) or an id from "
                 "(list) (e.g. P1)."
             )
-        if match.is_derived:
+        if match.is_intersection():
             raise CommandError(
-                f"{name!r} is an intersection point. Those are recomputed as "
-                "lines move, so they can't anchor a new line."
+                f"{name!r} is an intersection point. It's computed from its "
+                "lines, so a new line can't anchor to it."
             )
         return match
 
@@ -368,9 +365,13 @@ class CommandInterpreter:
     def _describe_point(self, point) -> str:
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
-        kind = "  [intersection]" if point.is_derived else ""
-        anchored = "  on-line" if point.has_anchor_line() else ""
-        return f"({c.x():.1f}, {c.y():.1f}){label}{anchored}{kind}"
+        if point.is_intersection():
+            tag = "  [intersection]"
+        elif point.has_anchor():
+            tag = "  [on-line]"
+        else:
+            tag = ""
+        return f"({c.x():.1f}, {c.y():.1f}){label}{tag}"
 
     def _list_points(self) -> str:
         points = self._points()

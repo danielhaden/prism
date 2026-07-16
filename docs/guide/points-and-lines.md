@@ -8,12 +8,18 @@ size at any zoom.
 - **Drag** a point (Select tool) to move it. Anything attached to it follows.
 - **Snapping** — while placing or dragging, a point snaps onto a nearby
   **existing point** or onto a **line** (an orange ring previews the target).
-- **Intersection points** — where two visible lines cross, Prism maintains a
-  point automatically. It looks and selects **exactly like a point you placed**
-  — same styling, same context menu (you can even label it). The only
-  difference is that its position is *computed*: you don't place, move, or
-  delete it, and a line can't be bound to it. A selection or label sticks with
-  the crossing as its lines move.
+- **Points are all the same.** Whether you place a point or one appears where
+  two lines cross, it's the same kind of object — same styling, selection, and
+  context menu.
+
+- **Anchors.** A point may carry an invisible *anchor* that pins its position
+  (these are never drawn). A point at a line **crossing** is simply a point
+  anchored to that intersection; a point [anchored to a
+  line](#anchoring-a-point-to-a-line) is one anchored to slide along it.
+  **Dragging** an intersection point **detaches** it — it becomes an ordinary
+  free point, and a fresh point re-marks the crossing. (A line-anchored point,
+  by contrast, slides along its line when dragged.) A line can't be *bound* to
+  an anchored point, since its position is computed.
 
 ### A line through two points
 
