@@ -644,6 +644,32 @@ class CanvasScene(QGraphicsScene):
             if isinstance(it, LineItem) and it is not self._preview_line
         ]
 
+    # -- Naming (shared with the console) ----------------------------------
+
+    def ordered_points(self):
+        """All points, in the id order used for names (P1, P2, ...)."""
+        items = [it for it in self.items() if isinstance(it, PointItem)]
+        user = sorted(
+            (p for p in items if not p.is_derived),
+            key=lambda p: getattr(p, "_seq", 0),
+        )
+        return user + [p for p in items if p.is_derived]
+
+    def ordered_lines(self):
+        """All lines, in the id order used for names (L1, L2, ...)."""
+        return sorted(self._lines(), key=lambda ln: getattr(ln, "_seq", 0))
+
+    def element_name(self, item) -> str:
+        """A stable-ish display name: label if set, else a P#/L# id."""
+        label = item.label_text() if hasattr(item, "label_text") else ""
+        if isinstance(item, PointItem):
+            base = f"P{self.ordered_points().index(item) + 1}" if item in self.ordered_points() else "P?"
+        elif isinstance(item, LineItem):
+            base = f"L{self.ordered_lines().index(item) + 1}" if item in self.ordered_lines() else "L?"
+        else:
+            return type(item).__name__
+        return f'{base} "{label}"' if label else base
+
     def recompute_intersections(self) -> None:
         """Create/move/remove derived points at every line crossing."""
         if self._updating:
