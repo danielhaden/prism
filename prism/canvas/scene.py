@@ -797,6 +797,11 @@ class CanvasScene(QGraphicsScene):
 
     def delete_selected(self) -> None:
         for item in list(self.selectedItems()):
+            # Derived points are computed; the scene owns them (removing one
+            # here would leave a stale entry and be undone by the next
+            # recompute), so leave them be.
+            if isinstance(item, PointItem) and item.is_derived:
+                continue
             self._remove_geometry(item)
         self.recompute_intersections()
         self.commit_undo()

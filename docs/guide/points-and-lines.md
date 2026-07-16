@@ -10,7 +10,8 @@ size at any zoom.
   **existing point** or onto a **line** (an orange ring previews the target).
 - **Intersection points** — where two visible lines cross, Prism maintains a
   derived point automatically (drawn in green). These are computed; you don't
-  place or move them.
+  place or move them, but you can **select** them like any other point (a
+  selection sticks with a crossing as its lines move).
 
 ### A line through two points
 

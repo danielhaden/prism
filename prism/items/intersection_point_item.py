@@ -9,10 +9,10 @@ from prism.items.point_item import PointItem
 class IntersectionPointItem(PointItem):
     """A computed point where two lines cross.
 
-    Derived points are managed entirely by the scene: they are not movable,
-    selectable, or valid snap targets, and they don't emit move notifications
-    (the scene positions them directly). Their display properties can still be
-    edited via the right-click menu.
+    Derived points can be *selected* like any other point, but their position
+    is computed: the scene positions them directly, so they are not movable,
+    not deletable, and not valid snap/binding targets. (They persist across
+    recomputes as their lines move, so a selection sticks with them.)
     """
 
     RADIUS = 4.0
@@ -23,10 +23,10 @@ class IntersectionPointItem(PointItem):
     def __init__(self, center: QPointF):
         super().__init__(center)
 
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, False)
-        self.unsetCursor()
+        self.unsetCursor()  # not draggable, so no open-hand cursor
         self.setZValue(9)  # just below user points
 
     def contextMenuEvent(self, event):
