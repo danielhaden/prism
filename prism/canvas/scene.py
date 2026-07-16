@@ -358,6 +358,85 @@ class CanvasScene(QGraphicsScene):
         self.addItem(line)
         return line
 
+    def add_point_at(self, across: float, down: float) -> PointItem:
+        """Add a point placed by fractions of the reference frame.
+
+        Args:
+            across: 0 at the canvas's left edge, 1 at its right.
+            down: 0 at the canvas's top, 1 at its bottom.
+
+        Returns:
+            The new point.
+        """
+        rect = self.reference_rect()
+        point = self.add_point(
+            QPointF(
+                rect.left() + across * rect.width(),
+                rect.top() + down * rect.height(),
+            )
+        )
+        self.commit_undo()
+        return point
+
+    def add_point_on_line(self, line: LineItem, fraction: float) -> PointItem | None:
+        """Add a point a fraction of the way across a line.
+
+        The span is measured where the line crosses the reference frame (the
+        fully zoomed-out canvas): 0 is its left-hand end, 1 its right-hand end
+        (top and bottom for a vertical line). The point is anchored to the
+        line, so it stays on it.
+
+        Args:
+            line: The line to place the point on.
+            fraction: Position along the span, from 0 to 1.
+
+        Returns:
+            The new point, or None if the line doesn't cross the canvas.
+        """
+        span = line.span_in_rect(self.reference_rect())
+        if span is None:
+            return None
+        a, b = span
+        pos = QPointF(
+            a.x() + (b.x() - a.x()) * fraction,
+            a.y() + (b.y() - a.y()) * fraction,
+        )
+        point = self.add_point(pos)
+        point.set_anchor_line(line)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
+    def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
+        """Add one infinite line through ``point`` at a given angle.
+
+        Args:
+            point: The point the line runs through; the line is pinned to it.
+            angle_degrees: Direction, in degrees clockwise from horizontal.
+
+        Returns:
+            The new line.
+        """
+        return self.add_projectivity(point, [angle_degrees])[0]
+
+    def add_horizon(self, fraction: float) -> LineItem:
+        """Add a horizontal, orientation-locked line across the canvas.
+
+        Args:
+            fraction: Where to place it down the reference frame, from 0 (the
+                top of the canvas) to 1 (the bottom).
+
+        Returns:
+            The new line.
+        """
+        rect = self.reference_rect()
+        y = rect.top() + fraction * rect.height()
+        line = self.add_line(QPointF(rect.left(), y), QPointF(rect.right(), y))
+        line.set_orientation_locked(True)
+        self.on_line_changed(line)
+        self.commit_undo()
+        return line
+
     def _tag(self, item) -> None:
         """Stamp a creation sequence number for stable auto-label ordering."""
         self._seq_counter += 1

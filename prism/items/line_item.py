@@ -93,6 +93,10 @@ class LineItem(Labelable, QGraphicsLineItem):
         self._range_neg = 0.0
         self._range_pos = 0.0
 
+        # When locked, the line's direction is immutable: it can still be
+        # moved, but no gesture rotates it (see set_orientation_locked).
+        self._orientation_locked = False
+
         self._hover_end: int | None = None
         self._drag_end: int | None = None
         self._body_drag = False
@@ -276,6 +280,45 @@ class LineItem(Labelable, QGraphicsLineItem):
         """The closest point on the infinite line to ``scene_pt``."""
         return self.point_at_param(self.param_of(scene_pt))
 
+    def span_in_rect(self, rect: QRectF) -> tuple | None:
+        """Where the infinite line crosses ``rect``, ordered left to right.
+
+        Vertical lines (whose ends share an x) are ordered top to bottom.
+
+        Returns:
+            An ``(a, b)`` pair of scene points, or None if the line misses
+                the rect entirely.
+        """
+        direction = self.scene_direction()
+        if direction is None:
+            return None
+        clipped = _clip_line_to_rect(self.scene_line().p1(), direction, rect)
+        if clipped is None:
+            return None
+        a, b = clipped
+        if (round(a.x(), 9), round(a.y(), 9)) > (round(b.x(), 9), round(b.y(), 9)):
+            a, b = b, a
+        return a, b
+
+    # -- Orientation lock --------------------------------------------------
+
+    def set_orientation_locked(self, locked: bool) -> None:
+        """Freeze (or release) the line's direction.
+
+        A locked line can still be moved, but nothing rotates it: dragging an
+        endpoint slides the whole line through the cursor instead of turning
+        it, and pivot rotation is refused.
+        """
+        self._orientation_locked = bool(locked)
+
+    def is_orientation_locked(self) -> bool:
+        return self._orientation_locked
+
+    def _translate_through(self, scene_pos: QPointF) -> None:
+        """Move the line (keeping its direction) so it passes through a point."""
+        projected = self.project_scene(scene_pos)
+        self._translate(scene_pos.x() - projected.x(), scene_pos.y() - projected.y())
+
     # -- Infinite line / visible range ------------------------------------
 
     def set_visible_range(self, anchor, neg: float, pos: float) -> None:
@@ -382,6 +425,8 @@ class LineItem(Labelable, QGraphicsLineItem):
         """Rotate the line so it points from the pivot toward the cursor,
         keeping each endpoint's distance from the pivot (a full line through
         the point)."""
+        if self._orientation_locked:
+            return
         pivot = self._pivot.center()
         v = cursor_scene - pivot
         length = (v.x() ** 2 + v.y() ** 2) ** 0.5
@@ -550,6 +595,12 @@ class LineItem(Labelable, QGraphicsLineItem):
     def _drag_endpoint(self, scene_pos: QPointF) -> None:
         """Move the active endpoint, snapping/binding to a nearby point."""
         scene = self.scene()
+        if self._orientation_locked:
+            # Direction is frozen: slide the line through the cursor instead.
+            self._translate_through(scene_pos)
+            if scene is not None:
+                scene.hide_snap_indicator()
+            return
         target = None
         if scene is not None and hasattr(scene, "snap_target"):
             target = scene.snap_target(scene_pos, exclude=self._other_bound(self._drag_end))
