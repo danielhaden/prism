@@ -27,8 +27,9 @@ class PointItem(Labelable, QGraphicsEllipseItem):
     by the scene rather than the user.
     """
 
-    RADIUS = 5.0
-    DEFAULT_COLOR = "#1f77b4"
+    RADIUS = 1.0
+    DEFAULT_COLOR = "#000000"
+    DEFAULT_GLOW_RADIUS = 7.0
     DEFAULT_GLOW_COLOR = "#fafafa"  # matches the canvas background
     is_derived = False
 
@@ -36,7 +37,7 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         # Initialise state before super()/setFlag/setPos, any of which can
         # trigger boundingRect()/itemChange() (which read these attributes).
         self._radius = float(self.RADIUS)
-        self._glow_radius = 0.0
+        self._glow_radius = float(self.DEFAULT_GLOW_RADIUS)
         self._glow_color = QColor(self.DEFAULT_GLOW_COLOR)
         # Anchor: a line this point is constrained to lie on.
         self._anchor_line = None

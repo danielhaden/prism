@@ -17,6 +17,7 @@ class IntersectionPointItem(PointItem):
 
     RADIUS = 4.0
     DEFAULT_COLOR = "#2ca02c"
+    DEFAULT_GLOW_RADIUS = 0.0  # derived markers stay glow-free and distinct
     is_derived = True
 
     def __init__(self, center: QPointF):
