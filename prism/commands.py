@@ -1,56 +1,62 @@
-"""Command interpreter for the canvas console.
+"""Command interpreter for the canvas console — a small Lisp.
 
-Commands are S-expressions, so they compose: a form's value can be fed
-straight into another form.
+Commands are S-expressions, evaluated against an environment:
 
     (add horizon 1/3)
-    (add line 260 P1)
-    (add line 260 (point L1 2/3))
+    (define A (add point 1/3 1/3))
+    (add line 30 A)                 ; A is a binding
+    (add line 260 (point 'L1 2/3))  ; 'L1 quotes an element id
 
-Atoms are passed to each form as raw text and interpreted by that form (an
-angle, a fraction, an element name); nested forms are evaluated first and yield
-real elements. Forms return the element they create, which is what allows the
-nesting above.
+Evaluation rules:
+
+* numbers (``260``, ``2/3``, ``0.5``) and string literals evaluate to themselves;
+* a bare symbol is looked up in the environment (``define`` / ``let`` bindings) —
+  an unbound symbol is an error;
+* ``'x`` (``quote``) yields the symbol itself; the construction forms resolve a
+  quoted symbol to the canvas element with that id or label (``'L1``, ``'A``);
+* a form is dispatched on its head; construction forms return the element they
+  make, so forms nest.
 """
 
 from prism.items import LineItem, PointItem
-from prism.sexpr import SexprError, parse
+from prism.sexpr import SexprError, Symbol, parse
 
 
 class CommandError(Exception):
     """A problem the user should see, phrased for them."""
 
 
-def parse_fraction(text: str) -> float | None:
-    """Read a 0-1 position written as a fraction or a decimal.
+class Environment:
+    """A scope: a name→value map chained to an optional parent scope."""
 
-    Accepts forms like ``1/2``, ``2/3``, ``0.5`` or ``.25``.
+    def __init__(self, parent=None):
+        self._values = {}
+        self.parent = parent
 
-    Returns:
-        The value, or None if it can't be read.
-    """
-    text = str(text).strip()
-    if "/" in text:
-        parts = text.split("/")
-        if len(parts) != 2:
-            return None
-        try:
-            numerator, denominator = float(parts[0]), float(parts[1])
-        except ValueError:
-            return None
-        if denominator == 0:
-            return None
-        return numerator / denominator
-    try:
-        return float(text)
-    except ValueError:
-        return None
+    def define(self, name: str, value) -> None:
+        self._values[name] = value
+
+    def lookup(self, name: str):
+        scope = self
+        while scope is not None:
+            if name in scope._values:
+                return scope._values[name]
+            scope = scope.parent
+        raise CommandError(
+            f"Unbound name: {name!r}. Define it first with (define {name} …), "
+            f"or quote an element id like '{name} to reference it."
+        )
 
 
 class CommandInterpreter:
     def __init__(self, scene):
         self.scene = scene
-        self._forms = {
+        #: Top-level scope; bindings persist for the console session.
+        self.env = Environment()
+        self._special = {
+            "quote": self._form_quote,
+            "define": self._form_define,
+            "let": self._form_let,
             "add": self._form_add,
             "point": self._form_point,
             "list": self._form_list,
@@ -61,10 +67,6 @@ class CommandInterpreter:
 
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {"list", "help"}
-
-    def execute(self, text: str) -> str:
-        """Run one or more forms and return the output text."""
-        return self.run(text)[0]
 
     def run(self, text: str) -> tuple:
         """Run one or more forms.
@@ -83,7 +85,7 @@ class CommandInterpreter:
         outputs = []
         for expression in expressions:
             try:
-                value = self._eval(expression)
+                value = self._eval(expression, self.env)
             except CommandError as exc:
                 return str(exc), False
             except Exception as exc:  # keep the console alive on any error
@@ -103,82 +105,85 @@ class CommandInterpreter:
             if (
                 isinstance(expression, list)
                 and expression
-                and isinstance(expression[0], str)
-                and expression[0].lower() not in self.NON_RECORDING
+                and isinstance(expression[0], Symbol)
+                and expression[0].name.lower() not in self.NON_RECORDING
             ):
                 return True
         return False
 
-    def command_names(self):
-        return sorted(self._forms)
-
     # -- Evaluation --------------------------------------------------------
 
-    def _eval(self, expression):
-        if not isinstance(expression, list):
-            raise CommandError(
-                f"Commands are wrapped in parentheses - try ({expression} ...). "
-                "Type (help)."
-            )
-        if not expression:
-            raise CommandError("Empty form ().")
-        head = expression[0]
-        if not isinstance(head, str):
-            raise CommandError("A form must start with a command name.")
-        form = self._forms.get(head.lower())
-        if form is None:
-            raise CommandError(f"Unknown command: {head!r}. Type (help).")
-        return form(expression[1:])
-
-    def _value(self, argument):
-        """Evaluate an argument: nested forms run, atoms pass through as text."""
-        if isinstance(argument, list):
-            return self._eval(argument)
-        return argument
+    def _eval(self, expression, env: Environment):
+        if isinstance(expression, Symbol):
+            return env.lookup(expression.name)
+        if isinstance(expression, list):
+            if not expression:
+                raise CommandError("Empty form ().")
+            head = expression[0]
+            if not isinstance(head, Symbol):
+                raise CommandError("A form must start with a command name.")
+            form = self._special.get(head.name.lower())
+            if form is None:
+                raise CommandError(
+                    f"Unknown command: {head.name!r}. Type (help)."
+                )
+            return form(expression[1:], env)
+        # Numbers and string literals evaluate to themselves.
+        return expression
 
     # -- Argument coercion -------------------------------------------------
+    #
+    # Coercions receive already-evaluated values, not raw text: a number for a
+    # fraction/angle, an element (from a binding or nested form), or a Symbol
+    # (from a quote) to be resolved to an element.
 
-    def _as_float(self, argument, what: str) -> float:
-        value = self._value(argument)
-        try:
+    @staticmethod
+    def _is_number(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def _as_float(self, value, what: str) -> float:
+        if self._is_number(value):
             return float(value)
-        except (TypeError, ValueError):
-            raise CommandError(f"Couldn't read {value!r} as {what}.")
+        raise CommandError(f"Couldn't read {self._show(value)} as {what}.")
 
-    def _as_fraction(self, argument) -> float:
-        value = self._value(argument)
-        fraction = parse_fraction(value)
-        if fraction is None:
+    def _as_fraction(self, value) -> float:
+        if not self._is_number(value):
             raise CommandError(
-                f"Couldn't read {value!r} as a position. Use a fraction like "
-                "1/3 or a decimal like 0.5."
+                f"Couldn't read {self._show(value)} as a position. Use a "
+                "fraction like 1/3 or a decimal like 0.5."
             )
+        fraction = float(value)
         if not 0.0 <= fraction <= 1.0:
             raise CommandError(
                 f"Position must be between 0 and 1 (got {fraction:g})."
             )
         return fraction
 
-    def _as_point(self, argument) -> PointItem:
-        value = self._value(argument)
-        if isinstance(value, PointItem):
-            if value.is_intersection():
+    def _as_point(self, value) -> PointItem:
+        point = self.resolve_point(value.name) if isinstance(value, Symbol) else value
+        if isinstance(point, PointItem):
+            self._require_live(point)
+            if point.is_intersection():
                 raise CommandError(
                     "That is an intersection point. It's computed from its "
                     "lines, so a new line can't anchor to it."
                 )
-            return value
-        if isinstance(value, str):
-            return self.resolve_point(value)
-        raise CommandError(f"Expected a point, got {value!r}.")
+            return point
+        raise CommandError(f"Expected a point, got {self._show(value)}.")
 
-    def _as_line(self, argument) -> LineItem:
-        value = self._value(argument)
-        if isinstance(value, LineItem):
-            return value
-        if isinstance(value, str):
-            return self.resolve_line(value)
-        raise CommandError(f"Expected a line, got {value!r}.")
+    def _as_line(self, value) -> LineItem:
+        line = self.resolve_line(value.name) if isinstance(value, Symbol) else value
+        if isinstance(line, LineItem):
+            self._require_live(line)
+            return line
+        raise CommandError(f"Expected a line, got {self._show(value)}.")
+
+    def _require_live(self, item) -> None:
+        if item.scene() is None:
+            raise CommandError(
+                f"{self._show(item)} no longer exists (it may have been undone "
+                "or deleted)."
+            )
 
     # -- Element access ----------------------------------------------------
 
@@ -197,8 +202,8 @@ class CommandInterpreter:
         match = _match_by_label(points, name) or _match_by_id(points, name, "p")
         if match is None:
             raise CommandError(
-                f"No point named {name!r}. Use a label (e.g. A) or an id from "
-                "(list) (e.g. P1)."
+                f"No point named {name!r}. Quote a label (e.g. 'A) or an id "
+                "from (list) (e.g. 'P1)."
             )
         if match.is_intersection():
             raise CommandError(
@@ -213,58 +218,97 @@ class CommandInterpreter:
         match = _match_by_label(lines, name) or _match_by_id(lines, name, "l")
         if match is None:
             raise CommandError(
-                f"No line named {name!r}. Use a label (e.g. a) or an id from "
-                "(list) (e.g. L1)."
+                f"No line named {name!r}. Quote a label (e.g. 'a) or an id "
+                "from (list) (e.g. 'L1)."
             )
         return match
 
     # -- Forms -------------------------------------------------------------
 
-    def _form_help(self, args) -> str:
+    def _form_quote(self, args, env):
+        if len(args) != 1:
+            raise CommandError("Usage: (quote <x>)  or  'x")
+        return args[0]
+
+    def _form_define(self, args, env):
+        if len(args) != 2:
+            raise CommandError("Usage: (define <name> <value>)")
+        name = args[0]
+        if not isinstance(name, Symbol):
+            raise CommandError("(define <name> <value>): the name must be a bare word.")
+        value = self._eval(args[1], env)
+        env.define(name.name, value)
+        return value
+
+    def _form_let(self, args, env):
+        if not args:
+            raise CommandError("Usage: (let ((<name> <value>) …) <body> …)")
+        bindings = args[0]
+        if not isinstance(bindings, list):
+            raise CommandError(
+                "(let …): the first part is a list of (<name> <value>) pairs."
+            )
+        scope = Environment(env)
+        for pair in bindings:
+            if not (
+                isinstance(pair, list)
+                and len(pair) == 2
+                and isinstance(pair[0], Symbol)
+            ):
+                raise CommandError("Each let binding is (<name> <value>).")
+            scope.define(pair[0].name, self._eval(pair[1], scope))
+        result = None
+        for body in args[1:]:
+            result = self._eval(body, scope)
+        return result
+
+    def _form_help(self, args, env) -> str:
         return (
             "Commands are S-expressions, e.g. (add horizon 1/3).\n"
-            "Forms return the element they make, so they nest:\n"
-            "  (add line 260 (point L1 2/3))\n"
+            "Numbers evaluate to themselves; a bare word is a binding; 'x quotes\n"
+            "a name (element ids and labels are quoted: 'L1, 'A). Forms return the\n"
+            "element they make, so they nest: (add line 260 (point 'L1 2/3))\n"
             "\n"
             "  (add point <across> <down>) a point placed on the canvas;\n"
             "                              0 0 = top-left, 1 1 = bottom-right\n"
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
             "                              0 = top of canvas, 1 = bottom\n"
             "  (add line <angle> <point>)  line through a point, at an angle in\n"
-            "                              degrees clockwise from horizontal;\n"
-            "                              pinned to the point\n"
-            "  (add line <point> <point>)  line through two points, bound to\n"
-            "                              both\n"
+            "                              degrees clockwise from horizontal\n"
+            "  (add line <point> <point>)  line through two points, bound to both\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
+            "  (define <name> <value>)     name a value for later reuse\n"
+            "  (let ((<name> <value>) …)   bind names in a local scope, then\n"
+            "       <body> …)              evaluate the body (returns the last)\n"
             "  (list [-points | -lines])   list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
-            "Elements are named by label (A, a) or by id from (list) (P1, L1)."
+            "Reference an element by quoting its label ('A, 'a) or its id ('P1, 'L1)."
         )
 
-    def _form_add(self, args):
+    def _form_add(self, args, env):
         if not args:
             raise CommandError(
                 "Usage: (add point <across> <down>), (add line <angle> "
                 "<point>), or (add horizon <fraction>)"
             )
         what = args[0]
-        if not isinstance(what, str):
-            raise CommandError("Usage: (add horizon ...) or (add line ...)")
-        what = what.lower()
-        if what == "horizon":
-            return self._add_horizon(args[1:])
-        if what == "line":
-            return self._add_line(args[1:])
-        if what == "point":
-            return self._add_point(args[1:])
+        if not isinstance(what, Symbol):
+            raise CommandError("Usage: (add horizon ...), (add line ...) or (add point ...)")
+        key = what.name.lower()
+        if key == "horizon":
+            return self._add_horizon(args[1:], env)
+        if key == "line":
+            return self._add_line(args[1:], env)
+        if key == "point":
+            return self._add_point(args[1:], env)
         raise CommandError(
-            f"Don't know how to add {args[0]!r}. Try (add point <across> "
+            f"Don't know how to add {what.name!r}. Try (add point <across> "
             "<down>), (add line <angle> <point>) or (add horizon <fraction>)."
         )
 
-    def _add_point(self, args) -> PointItem:
+    def _add_point(self, args, env) -> PointItem:
         if len(args) != 2:
             raise CommandError(
                 "Usage: (add point <across> <down>)\n"
@@ -272,34 +316,35 @@ class CommandInterpreter:
                 "  down:   0 = top of canvas, 1 = bottom\n"
                 "  e.g. (add point 1/3 1/3)"
             )
-        across = self._as_fraction(args[0])
-        down = self._as_fraction(args[1])
+        across = self._as_fraction(self._eval(args[0], env))
+        down = self._as_fraction(self._eval(args[1], env))
         return self.scene.add_point_at(across, down)
 
-    def _add_horizon(self, args) -> LineItem:
+    def _add_horizon(self, args, env) -> LineItem:
         if not args:
             raise CommandError(
                 "Usage: (add horizon <fraction>)\n"
                 "  0 = top of canvas, 1 = bottom. e.g. (add horizon 1/3)"
             )
-        return self.scene.add_horizon(self._as_fraction(args[0]))
+        return self.scene.add_horizon(self._as_fraction(self._eval(args[0], env)))
 
-    def _add_line(self, args) -> LineItem:
+    def _add_line(self, args, env) -> LineItem:
         if len(args) != 2:
             raise CommandError(
                 "Usage: (add line <angle> <point>)  - through a point\n"
                 "   or: (add line <point> <point>)  - through two points\n"
                 "  angle: degrees clockwise from horizontal (e.g. 30, -45)\n"
-                "  point: a label (A), an id (P1), or a form like (point L1 2/3)"
+                "  point: a binding (A), a quoted id ('P1), or a form like "
+                "(point 'L1 2/3)"
             )
-        first = args[0]
-        if isinstance(first, str) and _is_number(first):
+        first = self._eval(args[0], env)
+        if self._is_number(first):
             # (add line <angle> <point>)
-            return self.scene.add_line_through(
-                self._as_point(args[1]), float(first)
-            )
+            point = self._as_point(self._eval(args[1], env))
+            return self.scene.add_line_through(point, float(first))
         # (add line <point> <point>)
-        a, b = self._as_point(args[0]), self._as_point(args[1])
+        a = self._as_point(first)
+        b = self._as_point(self._eval(args[1], env))
         line = self.scene.add_line_between(a, b)
         if line is None:
             raise CommandError(
@@ -307,32 +352,37 @@ class CommandInterpreter:
             )
         return line
 
-    def _form_point(self, args) -> PointItem:
+    def _form_point(self, args, env) -> PointItem:
         if len(args) != 2:
             raise CommandError(
                 "Usage: (point <line> <fraction>)\n"
                 "  0 = the line's left-hand end, 1 = its right-hand end"
             )
-        line = self._as_line(args[0])
-        fraction = self._as_fraction(args[1])
+        line = self._as_line(self._eval(args[0], env))
+        fraction = self._as_fraction(self._eval(args[1], env))
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
         return point
 
-    def _form_list(self, args) -> str:
+    def _form_list(self, args, env) -> str:
         show_points = show_lines = True
         if args:
             show_points = show_lines = False
             for arg in args:
-                key = str(arg).lower().lstrip("-")
+                if not isinstance(arg, Symbol):
+                    raise CommandError(
+                        f"Unknown qualifier: {self._show(arg)}. Use -points or "
+                        "-lines."
+                    )
+                key = arg.name.lower().lstrip("-")
                 if key in ("points", "point", "p"):
                     show_points = True
                 elif key in ("lines", "line", "l"):
                     show_lines = True
                 else:
                     raise CommandError(
-                        f"Unknown qualifier: {arg!r}. Use -points or -lines."
+                        f"Unknown qualifier: {arg.name!r}. Use -points or -lines."
                     )
         blocks = []
         if show_points:
@@ -348,11 +398,27 @@ class CommandInterpreter:
             return ""
         if isinstance(value, str):
             return value
+        if isinstance(value, Symbol):
+            return value.name
+        if self._is_number(value):
+            return f"{value:g}"
         if isinstance(value, PointItem):
             return f"{self._point_name(value)}  {self._describe_point(value)}"
         if isinstance(value, LineItem):
             return f"{self._line_name(value)}  {self._describe_line(value)}"
         return str(value)
+
+    def _show(self, value) -> str:
+        """A short label for a value, for error messages."""
+        if isinstance(value, Symbol):
+            return f"'{value.name}"
+        if isinstance(value, PointItem):
+            return self._point_name(value)
+        if isinstance(value, LineItem):
+            return self._line_name(value)
+        if self._is_number(value):
+            return f"{value:g}"
+        return repr(value)
 
     def _point_name(self, point) -> str:
         points = self._points()
@@ -418,14 +484,6 @@ def _match_by_label(items, name: str):
         if item.label_text().lower() == lowered:
             return item
     return None
-
-
-def _is_number(text: str) -> bool:
-    try:
-        float(text)
-        return True
-    except ValueError:
-        return False
 
 
 def _match_by_id(items, name: str, prefix: str):

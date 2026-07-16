@@ -1,0 +1,2 @@
+# Development / test dependencies (app deps live in requirements.txt).
+pytest>=8

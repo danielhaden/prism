@@ -95,6 +95,7 @@ class ConsolePanel(QDockWidget):
 
         self._output.appendPlainText(
             "Prism console. Commands are S-expressions, e.g. (add horizon 1/3).\n"
+            "Reference an element by quoting its id or label ('L1, 'A). "
             "Type (help) for the list."
         )
 

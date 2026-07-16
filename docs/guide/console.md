@@ -21,7 +21,7 @@ creates, so forms nest. Instead of placing a point and then referring to it,
 you can describe it inline:
 
 ```
-(add line 260 (point L1 2/3))
+(add line 260 (point 'L1 2/3))
 ```
 
 That reads: *add a line at 260°, through the point two-thirds of the way along
@@ -30,17 +30,33 @@ line L1.* The inner form makes the point; the outer form uses it.
 You can also put several forms on one line, which is the seed of scripting:
 
 ```
-(add horizon 1/3) (add line 250 (point L1 1/3))
+(add horizon 1/3) (add line 250 (point 'L1 1/3))
 ```
 
-## Naming elements
+## Values, names, and quoting
 
-Elements are referred to either by their **label** (`A`, `a` — matched
-case-insensitively) or by the **id shown by [`list`](#list)** (`P1`, `L1`).
+The console is a small Lisp. Every argument is a **value**:
+
+- **Numbers** stand for themselves — `260`, `-45`, `2/3`, `0.5`.
+- A **bare word** is a **name**, looked up among the things you've bound with
+  [`define`](#define) or [`let`](#let). An unbound word is an error.
+- **`'x`** (a leading quote) is the name `x` *itself*, unevaluated. This is how
+  you point at an existing element by its **label** (`'A`, `'a`) or by the
+  **id shown by [`list`](#list)** (`'P1`, `'L1`):
+
+```
+(add line 30 'A)      # 30° through the point labelled A
+(point 'L1 2/3)       # two-thirds along line L1
+```
+
+!!! note "Why the quote?"
+    A bare `A` means *the value I named A*; `'A` means *the element called A on
+    the canvas*. Quoting keeps the two apart — so a name you `define` never
+    collides with an element's label or id.
 
 !!! note "Ids are positional"
-    `P1` / `L1` are the numbers `list` prints *right now*; they shift as you
-    add and remove elements. Labels are the stabler handle.
+    `'P1` / `'L1` are the numbers `list` prints *right now*; they shift as you
+    add and remove elements. A `define`d name, or a label, is the stabler handle.
 
 ## Commands
 
@@ -90,14 +106,15 @@ Add an infinite line, in one of two forms.
 **Through a point, at an angle:**
 
 ```
-(add line 30 A)                  # 30° through the point labelled A
-(add line -45 P2)                # -45° through the point listed as P2
-(add line 260 (point L1 2/3))    # through a point defined inline
+(add line 30 'A)                  # 30° through the point labelled A
+(add line -45 'P2)                # -45° through the point listed as P2
+(add line 260 (point 'L1 2/3))    # through a point defined inline
 ```
 
 - **angle** — degrees **clockwise from the horizontal** (the same convention as
   [projectivities](projectivities.md)). `0` is horizontal, `90` vertical.
-- **point** — a label, an id, or a nested form that yields a point.
+- **point** — a bound name, a quoted label or id, or a nested form that yields a
+  point.
 
 The line is **pinned** to the point, so it stays through it and rotates about
 it. Repeating the command on one point builds a [pencil](projectivities.md)
@@ -106,9 +123,9 @@ line by line.
 **Through two points** (the first argument isn't a number):
 
 ```
-(add line A B)                              # through points A and B
-(add line P1 P2)                            # through the listed points
-(add line (point L1 1/4) (point L1 3/4))    # through two inline points
+(add line 'A 'B)                              # through points A and B
+(add line 'P1 'P2)                            # through the listed points
+(add line (point 'L1 1/4) (point 'L1 3/4))    # through two inline points
 ```
 
 Each endpoint is **bound** to its point, so the line follows them as they move.
@@ -119,8 +136,8 @@ Each endpoint is **bound** to its point, so the line follows them as they move.
 Make a point along a line, and return it.
 
 ```
-(point L1 2/3)      # two-thirds along L1
-(point a 0.5)       # the midpoint of line a
+(point 'L1 2/3)     # two-thirds along L1
+(point 'a 0.5)      # the midpoint of line a
 ```
 
 The span is measured where the line crosses the **reference frame**: `0` is its
@@ -130,6 +147,35 @@ it slides along.
 
 This form exists to be nested, so you can build in terms of existing geometry
 rather than bare coordinates.
+
+### `(define <name> <value>)`
+
+Give a value a **name** so you can reuse it, and return that value. The name is
+a bare word; from then on, using it (unquoted) means *this value*:
+
+```
+(define O (add point 1/2 1/2))    # name the centre point O
+(add line 0 O)                    # a horizontal line through O
+(add line 90 O)                   # …and a vertical one, same point
+```
+
+Naming a construction once and referring to it many times is clearer — and
+safer — than chasing its positional id (`'P3`) as the drawing grows. Bindings
+last for the rest of the console session.
+
+### `(let ((<name> <value>) …) <body> …)`
+
+Bind names in a **local scope**, evaluate the body, and return the body's last
+value. Bindings are **sequential**, so a later one can use an earlier one:
+
+```
+(let ((v (add point 1/2 1/3))       ; a vanishing point
+      (base (point 'L1 2/3)))       ; a point on an existing line L1
+  (add line v base))                ; join them (v, base are bindings)
+```
+
+Unlike `define`, the names disappear once the `let` finishes — use it for the
+scaffolding of a single construction without cluttering the session.
 
 ### `(list [-points | -lines])`
 
@@ -181,18 +227,19 @@ Scripts may contain blank lines and `;` comments:
 ```
 ; a horizon with a vanishing point
 (add horizon 1/3)
-(add line 250 (point L1 1/3))   ; the pencil's first ray
+(add line 250 (point 'L1 1/3))   ; the pencil's first ray
 ```
 
 ## Worked example
 
 A horizon with two vanishing points, each carrying a pencil — no coordinates
-and no hand-placed points:
+and no hand-placed points. Naming the two vanishing points with `define` keeps
+each pencil readable:
 
 ```
 (add horizon 1/3)
-(add line 250 (point L1 1/3))
-(add line 265 P1) (add line 280 P1) (add line 295 P1)
-(add line 230 (point L1 2/3))
-(add line 245 P2) (add line 260 P2) (add line 275 P2)
+(define V1 (point 'L1 1/3))
+(add line 250 V1) (add line 265 V1) (add line 280 V1) (add line 295 V1)
+(define V2 (point 'L1 2/3))
+(add line 230 V2) (add line 245 V2) (add line 260 V2) (add line 275 V2)
 ```
