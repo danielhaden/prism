@@ -236,6 +236,8 @@ class CommandInterpreter:
             "  (add line <angle> <point>)  line through a point, at an angle in\n"
             "                              degrees clockwise from horizontal;\n"
             "                              pinned to the point\n"
+            "  (add line <point> <point>)  line through two points, bound to\n"
+            "                              both\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
             "  (list [-points | -lines])   list canvas elements\n"
@@ -286,16 +288,27 @@ class CommandInterpreter:
         return self.scene.add_horizon(self._as_fraction(args[0]))
 
     def _add_line(self, args) -> LineItem:
-        if len(args) < 2:
+        if len(args) != 2:
             raise CommandError(
-                "Usage: (add line <angle> <point>)\n"
+                "Usage: (add line <angle> <point>)  - through a point\n"
+                "   or: (add line <point> <point>)  - through two points\n"
                 "  angle: degrees clockwise from horizontal (e.g. 30, -45)\n"
-                "  point: a label (A), an id (P1), or a form like "
-                "(point L1 2/3)"
+                "  point: a label (A), an id (P1), or a form like (point L1 2/3)"
             )
-        angle = self._as_float(args[0], "an angle in degrees")
-        point = self._as_point(args[1])
-        return self.scene.add_line_through(point, angle)
+        first = args[0]
+        if isinstance(first, str) and _is_number(first):
+            # (add line <angle> <point>)
+            return self.scene.add_line_through(
+                self._as_point(args[1]), float(first)
+            )
+        # (add line <point> <point>)
+        a, b = self._as_point(args[0]), self._as_point(args[1])
+        line = self.scene.add_line_between(a, b)
+        if line is None:
+            raise CommandError(
+                "Can't draw a line: those two points are in the same place."
+            )
+        return line
 
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:
@@ -404,6 +417,14 @@ def _match_by_label(items, name: str):
         if item.label_text().lower() == lowered:
             return item
     return None
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
 
 
 def _match_by_id(items, name: str, prefix: str):

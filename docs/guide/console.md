@@ -85,7 +85,9 @@ rather than tilting it.
 
 ### `(add line <angle> <point>)`
 
-Add an infinite line through a point, at a given angle.
+Add an infinite line, in one of two forms.
+
+**Through a point, at an angle:**
 
 ```
 (add line 30 A)                  # 30° through the point labelled A
@@ -100,6 +102,17 @@ Add an infinite line through a point, at a given angle.
 The line is **pinned** to the point, so it stays through it and rotates about
 it. Repeating the command on one point builds a [pencil](projectivities.md)
 line by line.
+
+**Through two points** (the first argument isn't a number):
+
+```
+(add line A B)                              # through points A and B
+(add line P1 P2)                            # through the listed points
+(add line (point L1 1/4) (point L1 3/4))    # through two inline points
+```
+
+Each endpoint is **bound** to its point, so the line follows them as they move.
+(This is also available by selecting two points and right-clicking.)
 
 ### `(point <line> <fraction>)`
 
