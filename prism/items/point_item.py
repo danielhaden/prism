@@ -136,8 +136,14 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         if snap_action is not None or unsnap_action is not None:
             menu.addSeparator()
 
+        # Pinning uses this point as a pivot; a computed point can't drive
+        # lines (it doesn't notify when it moves), so hide it for derived ones.
         pin_action = unpin_action = None
-        if scene is not None and hasattr(scene, "pin_lines_through"):
+        if (
+            scene is not None
+            and hasattr(scene, "pin_lines_through")
+            and not self.is_derived
+        ):
             pinned = any(
                 line.pivot() is self for line in scene._lines()
             )

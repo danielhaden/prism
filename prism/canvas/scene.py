@@ -266,6 +266,12 @@ class CanvasScene(QGraphicsScene):
     # -- Mouse handling ----------------------------------------------------
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            # A right-click opens a context menu; don't let it change the
+            # selection (otherwise a two-point selection collapses to the one
+            # clicked, and selection-based menu items disappear).
+            event.accept()
+            return
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return

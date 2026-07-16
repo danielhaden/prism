@@ -9,16 +9,23 @@ size at any zoom.
 - **Snapping** — while placing or dragging, a point snaps onto a nearby
   **existing point** or onto a **line** (an orange ring previews the target).
 - **Intersection points** — where two visible lines cross, Prism maintains a
-  derived point automatically (drawn in green). These are computed; you don't
-  place or move them, but you can **select** them like any other point (a
-  selection sticks with a crossing as its lines move).
+  point automatically. It looks and selects **exactly like a point you placed**
+  — same styling, same context menu (you can even label it). The only
+  difference is that its position is *computed*: you don't place, move, or
+  delete it, and a line can't be bound to it. A selection or label sticks with
+  the crossing as its lines move.
 
 ### A line through two points
 
-Select **two points** (click one, ++shift++-click the other) and right-click
-either → **Add Line Through Points**. An infinite line is drawn through both,
-with each endpoint **bound** to its point — so the line stays through them as
-they move.
+Select **two points** — click one, then **++ctrl++-click** the other (or drag a
+**rubber-band box** around both). Right-click either point →
+**Add Line Through Points**. An infinite line is drawn through both, with each
+endpoint **bound** to its point, so the line stays through them as they move.
+
+!!! tip "Selecting more than one thing"
+    A plain click selects just what you clicked — a second click *replaces* the
+    selection. To select several items, ++ctrl++-click each, or drag a box
+    around them with the Select tool.
 
 ### Anchoring a point to a line
 
