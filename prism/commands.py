@@ -53,6 +53,7 @@ class CommandInterpreter:
         self._forms = {
             "add": self._form_add,
             "point": self._form_point,
+            "rm": self._form_rm,
             "list": self._form_list,
             "help": self._form_help,
         }
@@ -207,6 +208,26 @@ class CommandInterpreter:
             )
         return match
 
+    def resolve_element(self, name: str):
+        """Find a point *or* a line by label (``A``, ``a``) or id (``P1``, ``L1``).
+
+        Unlike :meth:`resolve_point`, intersection points resolve here — they
+        are real items on the canvas, and it's up to the caller to decide what
+        may be done with one.
+        """
+        points = self._points()
+        match = _match_by_label(points, name) or _match_by_id(points, name, "p")
+        if match is not None:
+            return match
+        lines = self._lines()
+        match = _match_by_label(lines, name) or _match_by_id(lines, name, "l")
+        if match is None:
+            raise CommandError(
+                f"No element named {name!r}. Use a label (A, a) or an id from "
+                "(list) (P1, L1)."
+            )
+        return match
+
     def resolve_line(self, name: str) -> LineItem:
         """Find a line by label (``a``) or by its ``list`` id (``L1``)."""
         lines = self._lines()
@@ -237,6 +258,8 @@ class CommandInterpreter:
             "                              both\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
+            "  (rm <element>)              remove a point or line; lines left\n"
+            "                              behind simply come free\n"
             "  (list [-points | -lines])   list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
@@ -319,6 +342,29 @@ class CommandInterpreter:
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
         return point
+
+    def _form_rm(self, args) -> str:
+        if len(args) != 1:
+            raise CommandError(
+                "Usage: (rm <element>)\n"
+                "  element: a label (A, a) or an id from (list) (P1, L1)\n"
+                "  e.g. (rm P1)"
+            )
+        element = self._value(args[0])
+        if isinstance(element, str):
+            element = self.resolve_element(element)
+        if not isinstance(element, (PointItem, LineItem)):
+            raise CommandError(f"Expected a point or a line, got {element!r}.")
+        if isinstance(element, PointItem) and element.is_intersection():
+            raise CommandError(
+                "That's an intersection point: it's computed from the lines "
+                "that cross there and would come straight back. Remove one of "
+                "those lines instead."
+            )
+        # Describe it while it's still on the canvas — ids are positional.
+        described = self._render(element)
+        self.scene.remove_element(element)
+        return f"Removed {described}"
 
     def _form_list(self, args) -> str:
         show_points = show_lines = True

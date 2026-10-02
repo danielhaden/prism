@@ -131,6 +131,31 @@ it slides along.
 This form exists to be nested, so you can build in terms of existing geometry
 rather than bare coordinates.
 
+### `(rm <element>)`
+
+Remove a point or a line from the canvas.
+
+```
+(rm P1)             # by id, as (list) shows it
+(rm A)              # by label
+(rm L2)             # a line
+```
+
+Whatever referenced the removed element simply **comes free**, rather than
+being removed in turn — a line bound to a deleted point keeps its position and
+loses the binding, a line's pivot or visible-range anchor is cleared, and a
+point anchored to a deleted line becomes an ordinary free point. This is
+exactly what the ++delete++ key does on the canvas, so the console and the
+canvas agree. One ++ctrl+z++ puts it back.
+
+**Intersection points can't be removed.** They are computed from the lines that
+cross there and would reappear immediately; remove one of those lines instead.
+
+!!! warning "Ids shift"
+    Ids are positional — `P1` is simply the first point. Removing `P1` renumbers
+    everything after it, so re-run `(list)` before leaning on an id again.
+    Labels are stable, and worth using in a script that removes things.
+
 ### `(list [-points | -lines])`
 
 List the elements on the canvas.
