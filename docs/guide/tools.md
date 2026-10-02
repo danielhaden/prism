@@ -78,6 +78,10 @@ top. Open it again and you get the canvas back the shape you left it.
 
 Size the Book panel once for comfortable reading and it stays that way.
 
+If a layout ever comes back awkwardly, **Settings → Reset Window Layout** puts
+the window and its panels back to the size and places Prism ships with, both
+straight away and on the next launch.
+
 !!! note "When it won't come back exactly"
     A window larger than the display it reopens on is fitted to that display —
     so unplugging an external monitor leaves you with a usable window rather

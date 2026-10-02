@@ -159,6 +159,15 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   won't be restored.
 - `LAYOUT_VERSION` guards the state: bump it when the set of docks changes and
   Qt will ignore older saved layouts rather than restoring them badly.
+- **Settings → Reset Window Layout** restores `_default_geometry`/
+  `_default_state`, snapshotted in `__init__` *before* any saved layout is
+  applied, and clears the stored keys.
+- Testing gotcha: in a tabbed dock group **only the raised tab reports the
+  group's width** — a hidden tab keeps a stale one, which reads as a layout bug
+  that isn't there. Measure the dock whose `visibleRegion()` is non-empty. The
+  offscreen platform's screen is 800x800 and Qt fits restored windows to the
+  screen, so pass `offscreen:configfile=<json>` with a bigger screen when
+  testing anything at realistic window sizes.
 - Qt fits a restored window to the screen it reopens on, so a layout saved on a
   big display comes back usable on a small one (and headless tests see the
   offscreen 800x800 virtual screen clamp anything larger).

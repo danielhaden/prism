@@ -141,3 +141,10 @@ def window_state() -> QByteArray | None:
 
 def set_window_state(data: QByteArray) -> None:
     QSettings().setValue(_WINDOW_STATE_KEY, data)
+
+
+def clear_window_layout() -> None:
+    """Forget the saved window layout, so the next launch uses the defaults."""
+    stored = QSettings()
+    stored.remove(_WINDOW_GEOMETRY_KEY)
+    stored.remove(_WINDOW_STATE_KEY)

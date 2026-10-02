@@ -11,6 +11,7 @@ from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
 from prism.selection_panel import SelectionPanel
 from prism.settings import (
+    clear_window_layout,
     scripts_dir,
     set_scripts_dir,
     set_window_geometry,
@@ -63,6 +64,10 @@ class MainWindow(QMainWindow):
         self.scene.historyChanged.connect(self._update_history_actions)
         self.scene.init_history()
         self._select_tool(Tool.SELECT)
+        # Snapshot the built-in layout before any saved one lands on top of it,
+        # so "Reset Window Layout" has something exact to go back to.
+        self._default_geometry = self.saveGeometry()
+        self._default_state = self.saveState(self.LAYOUT_VERSION)
         self._restore_layout()
 
     # -- Window layout -----------------------------------------------------
@@ -70,9 +75,8 @@ class MainWindow(QMainWindow):
     def _restore_layout(self) -> None:
         """Put the window back the size and shape it was last left.
 
-        Called once the docks exist, so their saved widths and tab order can
-        be applied; a first run has nothing saved and keeps the defaults set
-        above.
+        Called once the docks exist, so their saved widths and tab order can be
+        applied; a first run has nothing saved and keeps the defaults.
         """
         geometry = window_geometry()
         if geometry:
@@ -80,6 +84,13 @@ class MainWindow(QMainWindow):
         state = window_state()
         if state:
             self.restoreState(state, self.LAYOUT_VERSION)
+
+    def reset_layout(self) -> None:
+        """Go back to the layout Prism ships with, now and on the next launch."""
+        clear_window_layout()
+        self.restoreGeometry(self._default_geometry)
+        self.restoreState(self._default_state, self.LAYOUT_VERSION)
+        self.statusBar().showMessage("Window layout reset.", 4000)
 
     def closeEvent(self, event):
         set_window_geometry(self.saveGeometry())
@@ -221,6 +232,14 @@ class MainWindow(QMainWindow):
         book_action.setToolTip("Choose the PDF the Book panel reads")
         book_action.triggered.connect(self._choose_book)
         settings_menu.addAction(book_action)
+
+        settings_menu.addSeparator()
+        reset_layout_action = QAction("Reset Window Layout", self)
+        reset_layout_action.setToolTip(
+            "Put the window and its panels back to their default size and places"
+        )
+        reset_layout_action.triggered.connect(self.reset_layout)
+        settings_menu.addAction(reset_layout_action)
 
     # -- Tool switching ----------------------------------------------------
 
