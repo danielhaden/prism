@@ -868,15 +868,17 @@ class CanvasScene(QGraphicsScene):
     def auto_label(self) -> tuple[int, int]:
         """Label points A, B, C… (upright) and lines a, b, c… (italic).
 
+        Every point is labelled, including the ones that mark where lines
+        cross: a crossing is a point of the figure like any other, and in a
+        construction it is usually the one you most need to name. An
+        intersection marker keeps the same identity as its lines move, so its
+        label stays with it.
+
         Returns:
             How many points and lines were labelled.
         """
         points = sorted(
-            (
-                it
-                for it in self.items()
-                if isinstance(it, PointItem) and not it.is_intersection()
-            ),
+            (it for it in self.items() if isinstance(it, PointItem)),
             key=lambda it: getattr(it, "_seq", 0),
         )
         lines = sorted(

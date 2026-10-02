@@ -155,9 +155,16 @@ labelled — the label sticks across recomputes.
 (label -clear)      # remove every label on the canvas
 ```
 
-`-auto` skips intersection points. Both are a single undo step. They are the
-console equivalent of **Auto-label Scene** and **Clear All Labels** on the
-canvas's right-click menu.
+`-auto` labels **every** point, including the ones marking where lines cross —
+in a construction those are usually the points you most need to name. Both
+forms are a single undo step, and both are the console equivalent of
+**Auto-label Scene** and **Clear All Labels** on the canvas's right-click menu.
+
+!!! note "A crossing's label lives as long as the crossing"
+    An intersection marker keeps its identity while its lines move, so its
+    label moves with it and survives undo and redo. But if the lines stop
+    crossing the marker is gone, and bringing them back together produces a
+    fresh, unlabelled one — the crossing is derived from the lines, not stored.
 
 !!! tip "Labels outlast ids"
     Ids are positional, so `(rm P1)` renumbers everything after it. A label

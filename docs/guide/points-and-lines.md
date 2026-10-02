@@ -96,7 +96,7 @@ releases anything anchored to it.
   through the point into a [pencil](projectivities.md) (or release them). This
   one draws nothing; use **Add Line(s) Through Point** to create lines.
 - **Add / Edit / Remove Label**, **Label Properties…** — see
-  [Labels](#labels).
+  [Labels](#labels). Intersection points can be labelled like any other.
 
 ### Display properties
 

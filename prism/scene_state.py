@@ -4,7 +4,9 @@ Used by undo/redo: rather than modelling every mutation as its own reversible
 command, the scene is snapshotted after each action and rebuilt on undo. The
 format is plain data (JSON-able), so it can also back save/load later.
 
-Derived geometry (intersection markers) is not stored - it is recomputed.
+Derived geometry (intersection markers) is not stored - it is recomputed. A
+*label* put on one is the user's work rather than derived, so that much is
+kept, keyed by the pair of lines whose crossing it marks.
 """
 
 from PySide6.QtCore import QPointF, Qt
@@ -148,6 +150,24 @@ def capture(scene) -> dict:
             }
         )
 
+    # Intersection markers are rebuilt by the recompute, so only their labels
+    # need keeping — against the lines that produce them, since the markers
+    # themselves won't be the same objects afterwards.
+    crossing_labels = []
+    for marker in getattr(scene, "_intersections", {}).values():
+        anchor = marker.anchor()
+        if anchor is None or anchor.kind != "intersection":
+            continue
+        label = _capture_label(marker)
+        if label is None:
+            continue
+        first, second = l_index.get(id(anchor.a)), l_index.get(id(anchor.b))
+        if first is None or second is None:
+            continue
+        crossing_labels.append(
+            {"lines": sorted((first, second)), "label": label}
+        )
+
     groups = []
     for group in (it for it in scene.items() if isinstance(it, GroupItem)):
         members = []
@@ -163,6 +183,7 @@ def capture(scene) -> dict:
         "points": point_data,
         "lines": line_data,
         "groups": groups,
+        "crossings": crossing_labels,
         "point_style": _capture_point_style(getattr(scene, "_point_style", None)),
     }
 
@@ -229,3 +250,28 @@ def restore(scene, state: dict) -> None:
 
     scene._point_style = _restore_point_style(state.get("point_style"))
     scene.recompute_intersections()
+    _restore_crossing_labels(scene, lines, state.get("crossings", []))
+
+
+def _restore_crossing_labels(scene, lines, entries) -> None:
+    """Put labels back on the intersection markers the recompute just made.
+
+    Args:
+        scene: The scene being rebuilt.
+        lines: The restored lines, in snapshot order.
+        entries: ``{"lines": [i, j], "label": …}`` records from the snapshot.
+    """
+    if not entries:
+        return
+    markers = {}
+    for marker in getattr(scene, "_intersections", {}).values():
+        anchor = marker.anchor()
+        if anchor is not None and anchor.kind == "intersection":
+            markers[frozenset((id(anchor.a), id(anchor.b)))] = marker
+    for entry in entries:
+        first, second = entry["lines"]
+        if first >= len(lines) or second >= len(lines):
+            continue
+        marker = markers.get(frozenset((id(lines[first]), id(lines[second]))))
+        if marker is not None:
+            _restore_label(marker, entry["label"])

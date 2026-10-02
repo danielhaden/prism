@@ -121,12 +121,19 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   ordered line-id pair). Reused across recomputes (so selection/label sticks);
   removed when the crossing is gone; a crossing coincident with a placed point
   is skipped.
+- `auto_label` labels intersection points **too** (it used to skip them). A
+  label follows its marker as the lines move and through undo/redo, but a
+  crossing that stops existing takes its label with it — the marker that comes
+  back is a new one.
 
 ### Undo/redo & persistence
 
 - `prism/scene_state.py` snapshots/restores the **whole scene** as plain data
   (also groundwork for save/load). Undo = snapshot after each action + rebuild.
-  Intersections are recomputed, not stored. `CanvasScene.commit_undo()` is
+  Intersections are recomputed, not stored — **except their labels**, which are
+  the user's work: `capture` stores them under `"crossings"` keyed by the pair
+  of line indices, and `_restore_crossing_labels` re-applies them after the
+  recompute. Without that, labelling a crossing didn't survive undo/redo. `CanvasScene.commit_undo()` is
   called from actions/drags/dialogs; it no-ops when state is unchanged.
 
 ## The console (S-expression CLI)
