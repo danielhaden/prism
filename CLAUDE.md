@@ -68,9 +68,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - Default point styling: **radius 1, glow 7, black** (glow = a background-color
   disc drawn behind the dot but over the lines, so converging lines are cut
   away — the harmonic-net look).
-- **Boundary**: operations that build *hard dependencies* (endpoint binding,
-  pin, add-line-through, grouping) **exclude intersection points**, because a
-  computed point can't yet propagate its motion. See "Next steps".
+- **Geometry can now be built on a computed point** — endpoint binding, pin,
+  add-line-through, joining two crossings, console `(add line … X)`. Updates
+  run in dependency order (see **Propagation**), so what you build follows.
+  Still excluded, deliberately: **grouping** (a group moves its children, and a
+  computed point can't be moved), anchoring a crossing to a line (its position
+  is already determined), `rm` of a crossing (it would come straight back), and
+  storing crossings in snapshots/templates (they're recomputed).
 
 ### Lines (`LineItem`)
 
@@ -102,8 +106,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `PointItem.NEW_LINE_ANGLE`, 45°) and **Add Lines Through Point…** (the
   `ProjectivityDialog` angles). Both go through `add_projectivity`, so the
   lines are **pinned** to the point and it commits undo for them. Both are
-  hidden on intersection points, like pinning, since a computed point can't
-  drive what hangs off it. Note "Pin Lines Through Point" only pins *existing*
+  available on intersection points too: the lines are new, so nothing can
+  depend on them yet and no cycle is possible. Note "Pin Lines Through Point" only pins *existing*
   lines — before this there was no way to *create* a line through a single
   point except the console.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
@@ -264,10 +268,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    A marker whose crossing is gone is now **kept** (undefined) when anything
    depends on it — dropping it would strand them. Undefined-ness is derived,
    never stored.
-   Remaining: (3) refuse cycles at bind time with `would_cycle`; (4) lift the
-   intersection guards in `resolve_point` / `_as_point`, `selected_points`,
-   `selected_point_line_pair`, `snap_target`, pin and group — until then the
-   capability exists but the UI still refuses to let you use it.
+   (3) `CanvasScene.would_cycle()` guards the three places an existing item
+   gains a dependency: `pin_lines_through`, `anchor_points_to_line` and
+   endpoint-drag binding in `LineItem`. Making *new* geometry never needs the
+   check — nothing can depend on it yet. (4) Guards lifted in `resolve_point`,
+   `_as_point`, `selected_points`, `snap_target` and the point context menu.
+   **This item is done.** What is left is polish, not plumbing: marker
+   visibility control for dense nets, and deciding whether a crossing's label
+   should outlive the crossing.
    Why it's blocked today, measured: a crossing marker is repositioned by
    `recompute_intersections` **last** and its movement notifies nobody, so a
    line force-bound to a crossing never moves at all (not even one update

@@ -19,7 +19,12 @@ from PySide6.QtWidgets import (
 )
 
 from prism.anchors import IntersectionAnchor
-from prism.dependencies import Changed, DependencyGraph, dependencies_of
+from prism.dependencies import (
+    Changed,
+    DependencyGraph,
+    Geometry,
+    dependencies_of,
+)
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
@@ -223,8 +228,9 @@ class CanvasScene(QGraphicsScene):
     def snap_target(self, scene_pos: QPointF, exclude=()) -> PointItem | None:
         """The nearest point a line endpoint may bind to, or None.
 
-        Intersection points are excluded: a binding to a computed point can't
-        propagate, so lines don't bind to them.
+        Crossings count: updates now run in dependency order, so a line bound
+        to a computed point follows it. Points with no current position are
+        skipped — there is nothing there to snap to.
         """
         radius = self.snap_radius()
         best = None
@@ -232,7 +238,6 @@ class CanvasScene(QGraphicsScene):
         for item in self.items():
             if (
                 isinstance(item, PointItem)
-                and not item.is_intersection()
                 and not item.position_undefined()
                 and item not in exclude
             ):
@@ -507,15 +512,11 @@ class CanvasScene(QGraphicsScene):
     def selected_points(self):
         """Selected points a line can be built on, in order.
 
-        Intersection points are excluded (a line can't bind to a computed
-        point).
+        Crossings included: a line can now be bound to a computed point, and
+        joining two crossings is a staple of projective construction.
         """
         return sorted(
-            (
-                it
-                for it in self.selectedItems()
-                if isinstance(it, PointItem) and not it.is_intersection()
-            ),
+            (it for it in self.selectedItems() if isinstance(it, PointItem)),
             key=lambda it: getattr(it, "_seq", 0),
         )
 
@@ -623,6 +624,23 @@ class CanvasScene(QGraphicsScene):
         self.recompute_intersections()
         self.settle_definitions()
 
+    def would_cycle(self, dependent: Geometry, dependency: Geometry) -> bool:
+        """Whether computing ``dependent`` from ``dependency`` would be circular.
+
+        Ask before creating a dependency on something that already exists —
+        binding an endpoint, pinning, anchoring. Making new geometry is always
+        safe, since nothing can depend on it yet.
+
+        Args:
+            dependent: The item that would be computed from the other.
+            dependency: The item it would be computed from.
+
+        Returns:
+            Whether the relationship would define a position in terms of
+                itself.
+        """
+        return DependencyGraph(self).would_cycle(dependent, dependency)
+
     def settle_definitions(self) -> None:
         """Re-decide across the whole scene what currently has a position.
 
@@ -694,6 +712,7 @@ class CanvasScene(QGraphicsScene):
         """
         radius = self.snap_radius()
         count = 0
+        skipped = 0
         for line in self._lines():
             if line.has_pivot():
                 continue
@@ -701,8 +720,16 @@ class CanvasScene(QGraphicsScene):
             # qualifies, not just one whose defining endpoints straddle it.
             proj = _closest_on_segment(point.center(), line.display_line())
             if QLineF(point.center(), proj).length() <= radius:
+                if self.would_cycle(line, point):
+                    skipped += 1
+                    continue
                 line.set_pivot(point)
                 count += 1
+        if skipped:
+            self.statusMessage.emit(
+                f"Skipped {skipped} line(s): the point is computed from them, "
+                "so pinning them to it would be circular."
+            )
         return count
 
     def unpin_lines_through(self, point: PointItem) -> int:
@@ -734,11 +761,23 @@ class CanvasScene(QGraphicsScene):
 
     def anchor_points_to_line(self, points, line: LineItem) -> int:
         """Constrain each point to lie on ``line``. Returns how many anchored."""
+        anchored = 0
+        skipped = 0
         for point in points:
+            if self.would_cycle(point, line):
+                skipped += 1
+                continue
             point.set_anchor_line(line)
+            anchored += 1
+        if skipped:
+            self.statusMessage.emit(
+                f"Skipped {skipped} point(s): that line is computed from them, "
+                "so anchoring them to it would be circular."
+            )
         self.recompute_intersections()
+        self.settle_definitions()
         self.commit_undo()
-        return len(points)
+        return anchored
 
     def _points_anchored_to(self, line: LineItem):
         # Line-anchored points only; intersection markers are cleaned up by the

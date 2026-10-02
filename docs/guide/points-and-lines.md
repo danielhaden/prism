@@ -23,8 +23,17 @@ it.
   line](#anchoring-a-point-to-a-line) is one anchored to slide along it.
   **Dragging** an intersection point **detaches** it — it becomes an ordinary
   free point, and a fresh point re-marks the crossing. (A line-anchored point,
-  by contrast, slides along its line when dragged.) A line can't be *bound* to
-  an anchored point, since its position is computed.
+  by contrast, slides along its line when dragged.) Geometry **can** be built
+  on a computed point: bind a line to a crossing, pin a pencil through it, join
+  two crossings — updates run in dependency order, so what you build follows.
+
+- **When a definition fails.** A crossing exists only while its two lines
+  actually meet on the canvas. Slide them apart and the crossing — and
+  everything built on it — **disappears**, rather than lingering somewhere
+  meaningless. Nothing is lost: bring the lines back together and it all
+  returns, still attached. Prism refuses a relationship that would be circular
+  (pinning a line to a crossing that line helps make, say) and says so in the
+  status bar.
 
 ### A line through two points
 

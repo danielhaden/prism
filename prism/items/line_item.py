@@ -647,6 +647,8 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         target = None
         if scene is not None and hasattr(scene, "snap_target"):
             target = scene.snap_target(scene_pos, exclude=self._other_bound(self._drag_end))
+            if target is not None and scene.would_cycle(self, target):
+                target = None  # this line helps define that point
 
         if target is not None:
             self._bindings[self._drag_end] = target

@@ -128,11 +128,11 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             line_action = menu.addAction("Add Line Through Points")
             menu.addSeparator()
 
-        # Lines drawn *through* this point. Each is pinned to it, so a
-        # computed point is excluded for the same reason pinning is: it can't
-        # drive the lines that hang off it.
+        # Lines drawn *through* this point. The lines are new, so nothing can
+        # depend on them yet and no cycle is possible — a crossing is as good a
+        # centre for a pencil as any other point.
         one_line_action = pencil_action = None
-        if scene is not None and not self.is_intersection():
+        if scene is not None:
             one_line_action = menu.addAction("Add Line Through Point")
             pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()
@@ -151,14 +151,11 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if snap_action is not None or unsnap_action is not None:
             menu.addSeparator()
 
-        # Pinning uses this point as a pivot; an intersection point is computed
-        # and doesn't drive lines, so hide it there.
+        # Pinning uses this point as a pivot. A computed point can drive lines
+        # now; pin_lines_through() skips any line this point is itself computed
+        # from, which would be circular.
         pin_action = unpin_action = None
-        if (
-            scene is not None
-            and hasattr(scene, "pin_lines_through")
-            and not self.is_intersection()
-        ):
+        if scene is not None and hasattr(scene, "pin_lines_through"):
             pinned = any(
                 line.pivot() is self for line in scene._lines()
             )

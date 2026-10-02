@@ -164,11 +164,6 @@ class CommandInterpreter:
     def _as_point(self, argument) -> PointItem:
         value = self._value(argument)
         if isinstance(value, PointItem):
-            if value.is_intersection():
-                raise CommandError(
-                    "That is an intersection point. It's computed from its "
-                    "lines, so a new line can't anchor to it."
-                )
             return value
         if isinstance(value, str):
             return self.resolve_point(value)
@@ -203,18 +198,16 @@ class CommandInterpreter:
         return sorted(self.scene._lines(), key=lambda ln: getattr(ln, "_seq", 0))
 
     def resolve_point(self, name: str) -> PointItem:
-        """Find a point by label (``A``) or by its ``list`` id (``P1``)."""
+        """Find a point by label (``A``) or by its ``list`` id (``P1``).
+
+        Crossings count as points here: geometry can be built on them.
+        """
         points = self._points()  # same order/numbering as the (list) command
         match = _match_by_label(points, name) or _match_by_id(points, name, "p")
         if match is None:
             raise CommandError(
                 f"No point named {name!r}. Use a label (e.g. A) or an id from "
                 "(list) (e.g. P1)."
-            )
-        if match.is_intersection():
-            raise CommandError(
-                f"{name!r} is an intersection point. It's computed from its "
-                "lines, so a new line can't anchor to it."
             )
         return match
 
