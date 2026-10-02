@@ -92,9 +92,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   point where you clicked (`CanvasScene.add_point_on_line_at`, which projects
   the click with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it
   takes a position, not a fraction, so it works past the reference frame. The
-  entry is gated on `isSelected()` and `click_is_on_line()`; note the second
-  gate rarely bites on its own, since the line's menu only opens inside the
-  same band.
+  entry is gated on `isSelected()` and `click_is_on_line()`.
+- The same entry appears in the **canvas** menu when the click is blank space
+  within `CanvasScene.NEAR_LINE_PX` (40 screen px) of a selected line
+  (`nearest_selected_line`, nearest wins). Without it the command is
+  unreachable unless you hit the line's ~6px band, since a miss opens the
+  canvas menu instead — which is what "the command doesn't appear" meant.
 - A point's menu offers **Add Line Through Point** (one line at
   `PointItem.NEW_LINE_ANGLE`, 45°) and **Add Lines Through Point…** (the
   `ProjectivityDialog` angles). Both go through `add_projectivity`, so the

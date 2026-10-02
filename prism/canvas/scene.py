@@ -59,6 +59,12 @@ class CanvasScene(QGraphicsScene):
     #: On-screen pixel radius within which an endpoint snaps to a point.
     SNAP_PX = 12.0
 
+    #: How near a *selected* line a right-click on blank canvas may land and
+    #: still offer to put a point on it, in screen pixels. Deliberately far
+    #: more generous than the line's own clickable band: you have already said
+    #: which line you mean by selecting it, so aim is not the point.
+    NEAR_LINE_PX = 40.0
+
     #: Side length of the reference frame: the working area the canvas shows
     #: when fully zoomed out. Deliberately much smaller than the scene rect,
     #: which only needs to be big enough that infinite lines always run past
@@ -181,6 +187,31 @@ class CanvasScene(QGraphicsScene):
         """The working area shown when the canvas is fully zoomed out."""
         half = self.REFERENCE_SIZE / 2
         return QRectF(-half, -half, self.REFERENCE_SIZE, self.REFERENCE_SIZE)
+
+    def nearest_selected_line(self, scene_pos: QPointF) -> LineItem | None:
+        """The selected line nearest ``scene_pos``, if one is within reach.
+
+        "Within reach" is :attr:`NEAR_LINE_PX` on screen, so it means the same
+        distance however far you are zoomed out.
+
+        Args:
+            scene_pos: A position in scene coordinates, e.g. a click.
+
+        Returns:
+            The nearest selected line, or None if none is close enough.
+        """
+        views = self.views()
+        scale = abs(views[0].transform().m11()) if views else 1.0
+        limit = self.NEAR_LINE_PX / (scale or 1.0)
+        best = None
+        for line in self._lines():
+            if not line.isSelected():
+                continue
+            offset = QLineF(scene_pos, line.closest_scene_point(scene_pos)).length()
+            if offset <= limit:
+                limit = offset
+                best = line
+        return best
 
     def snap_radius(self) -> float:
         """Snap threshold in scene units (constant on screen across zoom)."""
@@ -798,12 +829,20 @@ class CanvasScene(QGraphicsScene):
             return
 
         menu = QMenu()
+        # A click out here, but near a line you have selected, almost certainly
+        # means that line — so offer both and let the menu ask.
+        near_line = self.nearest_selected_line(event.scenePos())
+        line_point_action = (
+            menu.addAction("Add Point to Line") if near_line is not None else None
+        )
         free_point_action = menu.addAction("Add Free Point")
         menu.addSeparator()
         auto_action = menu.addAction("Auto-label Scene")
         clear_action = menu.addAction("Clear All Labels")
         chosen = menu.exec(event.screenPos())
-        if chosen is free_point_action:
+        if line_point_action is not None and chosen is line_point_action:
+            self.add_point_on_line_at(near_line, event.scenePos())
+        elif chosen is free_point_action:
             self.add_free_point(event.scenePos())
         elif chosen is auto_action:
             self.auto_label()

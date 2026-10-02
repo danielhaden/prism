@@ -49,15 +49,16 @@ appears at that spot, already anchored to the line. The click is projected onto
 the line, so the point sits exactly on it however roughly you aimed, and it
 works anywhere along the line — including out past the reference frame.
 
-The entry only appears on a **selected** line, and only for a click that landed
-on the line itself, so it can't fire on a line you merely brushed past. Since
-right-clicking never changes the selection, select the line with a left click
-first.
+The entry needs the line to be **selected** — right-clicking never changes the
+selection, so select the line with a left click first. After that your aim is
+forgiving: right-click *near* a selected line, up to about 40 pixels away, and
+the canvas menu offers **Add Point to Line** alongside **Add Free Point**. You
+have already said which line you mean, so you don't have to hit it again.
 
-Lines are thin, so they carry an invisible band about 6 pixels either side that
-still counts as a hit — the same width at every zoom. Click within it and the
-line selects; stray outside and you are clicking the canvas, which has its own
-menu.
+With several lines selected, the point goes on the nearest one.
+
+(Clicking the line itself — within about 6 pixels — opens the line's own menu
+instead, which carries the same entry along with its other commands.)
 
 !!! tip "Vanishing points"
     Put a point on the horizon this way, then right-click *that point* →
