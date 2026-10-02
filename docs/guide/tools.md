@@ -48,11 +48,22 @@ updating live as you move things. Lines also show their endpoints and any
 
 - **Zoom** — mouse wheel (anchored under the cursor).
 - **Pan** — drag with the **middle mouse button**.
+- **Fit to Frame** — ++ctrl+0++, or **View → Fit to Frame**.
 
 The canvas opens **fully zoomed out**, fitted to the *reference frame* — the
 working area. You can zoom **in** from there, but not further out, so the frame
 always fills the viewport (and infinite lines always run off the edges rather
 than showing their ends).
+
+!!! tip "If the canvas looks empty when it shouldn't"
+    The scene is much larger than the reference frame, so panning (or zooming
+    in at one spot and out at another) can leave you looking at empty space
+    well outside the frame — and with no grid to steer by, that looks exactly
+    like a blank canvas. Console commands place geometry by *canvas fraction*,
+    measured against the frame, so they can land somewhere you aren't looking.
+
+    Two ways back: press ++ctrl+0++, or just keep **zooming out** — once you
+    are at the frame's zoom floor, another notch out re-centres on the frame.
 
 There is deliberately **no grid and no origin axes** — a metric has no place on
 a projective canvas. If you want a scale, construct one projectively from the

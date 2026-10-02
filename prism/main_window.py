@@ -100,6 +100,14 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(False)
         self.addAction(self.redo_action)
 
+        self.fit_action = QAction("Fit to Frame", self)
+        self.fit_action.setShortcut(QKeySequence("Ctrl+0"))
+        self.fit_action.setToolTip(
+            "Zoom fully out and re-centre on the reference frame (Ctrl+0)"
+        )
+        self.fit_action.triggered.connect(self.view.fit_reference_frame)
+        self.addAction(self.fit_action)
+
         self.group_action = QAction("Group", self)
         self.group_action.setShortcut(QKeySequence("Ctrl+G"))
         self.group_action.setToolTip("Group selected objects (Ctrl+G)")
@@ -125,6 +133,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.undo_action)
         toolbar.addAction(self.redo_action)
         toolbar.addSeparator()
+        toolbar.addAction(self.fit_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.group_action)
         toolbar.addAction(self.ungroup_action)
         toolbar.addSeparator()
@@ -143,6 +153,8 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.clear_action)
 
         view_menu = self.menuBar().addMenu("&View")
+        view_menu.addAction(self.fit_action)
+        view_menu.addSeparator()
         toggle_library = self.library.toggleViewAction()
         toggle_library.setText("Show Library")
         view_menu.addAction(toggle_library)
