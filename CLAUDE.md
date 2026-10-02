@@ -128,6 +128,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - Opens **fully zoomed out** to a **reference frame** (`REFERENCE_SIZE = 1200`,
   separate from the 4000-unit scene rect so infinite-line ends stay off-screen);
   can zoom in but **not out** past it.
+- **The view can still be panned off the frame** — the scene rect is 4000 units
+  and scrolling isn't clamped — and with no grid, a drifted view looks exactly
+  like an empty canvas. Console commands place geometry by fraction *of the
+  frame*, so a successful `(add horizon 1/3)` can land off-screen and read as
+  "nothing happened". Two ways back: `CanvasView.recenter_if_lost()` (a wheel
+  notch out at the zoom floor) and **View → Fit to Frame** (Ctrl+0,
+  `fit_reference_frame`). Suspect this first for any "it ran but I see
+  nothing" report.
 - **Right-click never changes the selection** (swallowed in
   `CanvasScene.mousePressEvent`) so selection-based menus survive.
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).

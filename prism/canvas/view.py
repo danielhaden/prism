@@ -63,6 +63,24 @@ class CanvasView(QGraphicsView):
             factor = minimum / current
             self.scale(factor, factor)
 
+    # -- Staying within sight of the frame ---------------------------------
+
+    def frame_in_view(self) -> bool:
+        """Whether any part of the reference frame is on screen."""
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        return visible.intersects(self.reference_frame())
+
+    def recenter_if_lost(self) -> bool:
+        """Re-centre on the reference frame if it has scrolled out of sight.
+
+        Returns:
+            Whether the view had to be moved.
+        """
+        if self.frame_in_view():
+            return False
+        self.centerOn(self.reference_frame().center())
+        return True
+
     def showEvent(self, event):
         super().showEvent(event)
         if not self._fitted:
@@ -121,22 +139,24 @@ class CanvasView(QGraphicsView):
     # -- Zoom --------------------------------------------------------------
 
     def wheelEvent(self, event):
-        zooming_in = event.angleDelta().y() > 0
-        factor = 1.15 if zooming_in else 1 / 1.15
         current = self.transform().m11()
-        minimum = self.min_scale()
 
-        if zooming_in:
+        if event.angleDelta().y() > 0:
             if current >= self.MAX_SCALE:
                 return
-            factor = min(factor, self.MAX_SCALE / current)
-        else:
-            # Never zoom out past the reference frame.
-            if current <= minimum * 1.0001:
-                return
-            factor = max(factor, minimum / current)
+            factor = min(1.15, self.MAX_SCALE / current)
+            self.scale(factor, factor)
+            return
 
-        self.scale(factor, factor)
+        # Never zoom out past the reference frame — and once at that floor,
+        # read another notch out as "take me back". The scene is far wider than
+        # the frame and there's no grid to steer by, so a view panned into the
+        # void is indistinguishable from an empty canvas.
+        minimum = self.min_scale()
+        if current > minimum * 1.0001:
+            factor = max(1 / 1.15, minimum / current)
+            self.scale(factor, factor)
+        self.recenter_if_lost()
 
     # -- Pan (middle mouse drag) ------------------------------------------
 
