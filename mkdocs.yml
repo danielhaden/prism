@@ -69,6 +69,7 @@ nav:
       - Overview: reference/index.md
       - Items: reference/items.md
       - Anchors: reference/anchors.md
+      - Dependencies: reference/dependencies.md
       - Canvas: reference/canvas.md
       - Templates: reference/templates.md
       - Console Commands: reference/commands.md

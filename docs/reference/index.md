@@ -39,6 +39,7 @@ clarity. mkdocstrings renders them here automatically.
 ## Modules
 
 - [Items](items.md) — points, lines, intersections, groups, labels
+- [Dependencies](dependencies.md) — what is computed from what
 - [Canvas](canvas.md) — the scene and view
 - [Templates](templates.md) — the Library's figures and persistence
 - [Console Commands](commands.md) — the CLI interpreter

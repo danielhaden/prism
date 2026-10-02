@@ -247,9 +247,22 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 1. **Propagation engine** — let geometry stay attached to *live intersection
    points* (lines through intersections that update): the real harmonic-net
-   enabler. Needs a dependency DAG with topological update + cycle handling.
-   Currently intersection points are excluded from binding/pin/etc. for this
-   reason.
+   enabler. **Step 1 of 4 is done**: `prism/dependencies.py` reads the graph
+   out of the scene (`DependencyGraph`: `dependencies`/`dependents`,
+   `affected_by`, `update_order`, `cycles`, `would_cycle`). It is pure
+   observation — nothing consumes it yet, so behaviour is unchanged. Remaining:
+   (2) drive updates from `update_order` instead of the fixed sweep in
+   `on_point_moved`/`on_line_changed`/`_sync_anchored_points`; (3) refuse
+   cycles at bind time with `would_cycle`; (4) lift the intersection guards in
+   `resolve_point`/`_as_point`, `selected_points`,
+   `selected_point_line_pair`, `snap_target`, pin and group.
+   Why it's blocked today, measured: a crossing marker is repositioned by
+   `recompute_intersections` **last** and its movement notifies nobody, so a
+   line force-bound to a crossing never moves at all (not even one update
+   late). Decide before step 2: a crossing only exists where the *clipped*
+   display segments meet (`_intersection_of` uses `BoundedIntersection`), so
+   near-parallel lines meeting off-canvas have no marker — what should a line
+   depending on a vanished crossing do?
 2. **Higher-order console forms** — `fold`/map to build pencils/projectivities
    programmatically.
 3. Intersection-marker **visibility control** (dense nets get busy).
