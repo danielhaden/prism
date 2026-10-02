@@ -4,10 +4,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem, QMenu
 
+from prism.items.definable import Definable
 from prism.items.label import Labelable
 
 
-class PointItem(Labelable, QGraphicsEllipseItem):
+class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     """A point rendered as a small filled circle.
 
     The point is positioned by its center. It is drawn at a fixed on-screen
@@ -32,6 +33,12 @@ class PointItem(Labelable, QGraphicsEllipseItem):
     DEFAULT_COLOR = "#000000"
     DEFAULT_GLOW_RADIUS = 7.0
     DEFAULT_GLOW_COLOR = "#fafafa"  # matches the canvas background
+
+    #: Angle for "Add Line Through Point", in degrees clockwise from
+    #: horizontal. A diagonal, so the new line reads as distinct from a horizon
+    #: or an upright however the point was placed; it is pinned to the point,
+    #: so dragging it rotates it to wherever you want.
+    NEW_LINE_ANGLE = 45.0
 
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
@@ -121,6 +128,15 @@ class PointItem(Labelable, QGraphicsEllipseItem):
             line_action = menu.addAction("Add Line Through Points")
             menu.addSeparator()
 
+        # Lines drawn *through* this point. The lines are new, so nothing can
+        # depend on them yet and no cycle is possible — a crossing is as good a
+        # centre for a pencil as any other point.
+        one_line_action = pencil_action = None
+        if scene is not None:
+            one_line_action = menu.addAction("Add Line Through Point")
+            pencil_action = menu.addAction("Add Lines Through Point…")
+            menu.addSeparator()
+
         # Anchor a point to a line when the selection is one line + point(s).
         snap_action = unsnap_action = None
         sel_points, sel_line = (
@@ -135,14 +151,11 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         if snap_action is not None or unsnap_action is not None:
             menu.addSeparator()
 
-        # Pinning uses this point as a pivot; an intersection point is computed
-        # and doesn't drive lines, so hide it there.
+        # Pinning uses this point as a pivot. A computed point can drive lines
+        # now; pin_lines_through() skips any line this point is itself computed
+        # from, which would be circular.
         pin_action = unpin_action = None
-        if (
-            scene is not None
-            and hasattr(scene, "pin_lines_through")
-            and not self.is_intersection()
-        ):
+        if scene is not None and hasattr(scene, "pin_lines_through"):
             pinned = any(
                 line.pivot() is self for line in scene._lines()
             )
@@ -159,6 +172,10 @@ class PointItem(Labelable, QGraphicsEllipseItem):
             self.open_display_dialog()
         elif line_action is not None and chosen is line_action:
             scene.add_line_between(two_points[0], two_points[1])
+        elif one_line_action is not None and chosen is one_line_action:
+            scene.add_line_through(self, self.NEW_LINE_ANGLE)
+        elif pencil_action is not None and chosen is pencil_action:
+            self._add_lines_through()
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
         elif unsnap_action is not None and chosen is unsnap_action:
@@ -170,6 +187,18 @@ class PointItem(Labelable, QGraphicsEllipseItem):
         else:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _add_lines_through(self) -> None:
+        """Draw a pencil of lines through this point, at angles you choose."""
+        from prism.projectivity_dialog import ProjectivityDialog
+
+        scene = self.scene()
+        if scene is None:
+            return
+        parent = scene.views()[0] if scene.views() else None
+        angles = ProjectivityDialog.get_angles(parent)
+        if angles:
+            scene.add_projectivity(self, angles)
 
     def open_display_dialog(self) -> None:
         """Edit this point's display properties (optionally applying to all)."""

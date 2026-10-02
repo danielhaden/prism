@@ -4,16 +4,29 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMainWindow
 
+from prism.book_panel import BookPanel
 from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
 from prism.selection_panel import SelectionPanel
-from prism.settings import scripts_dir, set_scripts_dir
+from prism.settings import (
+    clear_window_layout,
+    scripts_dir,
+    set_scripts_dir,
+    set_window_geometry,
+    set_window_state,
+    window_geometry,
+    window_state,
+)
 from prism.tools import Tool
 
 
 class MainWindow(QMainWindow):
+    #: Bumped when the set of docks changes enough that an older saved layout
+    #: would restore badly; Qt then ignores states saved under a lower number.
+    LAYOUT_VERSION = 1
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Prism")
@@ -35,6 +48,10 @@ class MainWindow(QMainWindow):
         self.scripts = ScriptsPanel(self.console.run_script, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.scripts)
         self.tabifyDockWidget(self.library, self.scripts)
+
+        self.book = BookPanel(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.book)
+        self.tabifyDockWidget(self.library, self.book)
         self.library.raise_()
         self.console.scriptSaved.connect(self.scripts.refresh)
 
@@ -47,6 +64,38 @@ class MainWindow(QMainWindow):
         self.scene.historyChanged.connect(self._update_history_actions)
         self.scene.init_history()
         self._select_tool(Tool.SELECT)
+        # Snapshot the built-in layout before any saved one lands on top of it,
+        # so "Reset Window Layout" has something exact to go back to.
+        self._default_geometry = self.saveGeometry()
+        self._default_state = self.saveState(self.LAYOUT_VERSION)
+        self._restore_layout()
+
+    # -- Window layout -----------------------------------------------------
+
+    def _restore_layout(self) -> None:
+        """Put the window back the size and shape it was last left.
+
+        Called once the docks exist, so their saved widths and tab order can be
+        applied; a first run has nothing saved and keeps the defaults.
+        """
+        geometry = window_geometry()
+        if geometry:
+            self.restoreGeometry(geometry)
+        state = window_state()
+        if state:
+            self.restoreState(state, self.LAYOUT_VERSION)
+
+    def reset_layout(self) -> None:
+        """Go back to the layout Prism ships with, now and on the next launch."""
+        clear_window_layout()
+        self.restoreGeometry(self._default_geometry)
+        self.restoreState(self._default_state, self.LAYOUT_VERSION)
+        self.statusBar().showMessage("Window layout reset.", 4000)
+
+    def closeEvent(self, event):
+        set_window_geometry(self.saveGeometry())
+        set_window_state(self.saveState(self.LAYOUT_VERSION))
+        super().closeEvent(event)
 
     # -- Actions -----------------------------------------------------------
 
@@ -124,6 +173,8 @@ class MainWindow(QMainWindow):
 
     def _build_toolbar(self) -> None:
         toolbar = self.addToolBar("Tools")
+        # saveState() skips (and warns about) anything unnamed.
+        toolbar.setObjectName("ToolsToolbar")
         toolbar.setMovable(False)
 
         for tool in (Tool.SELECT, Tool.POINT, Tool.LINE):
@@ -167,12 +218,28 @@ class MainWindow(QMainWindow):
         toggle_selection = self.selection.toggleViewAction()
         toggle_selection.setText("Show Selection")
         view_menu.addAction(toggle_selection)
+        toggle_book = self.book.toggleViewAction()
+        toggle_book.setText("Show Book")
+        view_menu.addAction(toggle_book)
 
         settings_menu = self.menuBar().addMenu("&Settings")
         scripts_folder_action = QAction("Scripts Folder…", self)
         scripts_folder_action.setToolTip("Choose where scripts are saved")
         scripts_folder_action.triggered.connect(self._choose_scripts_folder)
         settings_menu.addAction(scripts_folder_action)
+
+        book_action = QAction("Book (PDF)…", self)
+        book_action.setToolTip("Choose the PDF the Book panel reads")
+        book_action.triggered.connect(self._choose_book)
+        settings_menu.addAction(book_action)
+
+        settings_menu.addSeparator()
+        reset_layout_action = QAction("Reset Window Layout", self)
+        reset_layout_action.setToolTip(
+            "Put the window and its panels back to their default size and places"
+        )
+        reset_layout_action.triggered.connect(self.reset_layout)
+        settings_menu.addAction(reset_layout_action)
 
     # -- Tool switching ----------------------------------------------------
 
@@ -192,3 +259,8 @@ class MainWindow(QMainWindow):
         if chosen:
             set_scripts_dir(chosen)
             self.scripts.refresh()
+
+    def _choose_book(self) -> None:
+        self.book.choose_book()
+        self.book.show()
+        self.book.raise_()

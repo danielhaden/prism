@@ -10,6 +10,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem, QMenu
 
+from prism.items.definable import Definable
 from prism.items.label import Labelable
 
 
@@ -43,7 +44,7 @@ def _clip_line_to_rect(p0: QPointF, d: QPointF, rect):
     )
 
 
-class LineItem(Labelable, QGraphicsLineItem):
+class LineItem(Definable, Labelable, QGraphicsLineItem):
     """A straight line segment between two scene points.
 
     The whole segment can be selected and dragged. Hovering near either
@@ -57,9 +58,12 @@ class LineItem(Labelable, QGraphicsLineItem):
     next iteration.
     """
 
-    #: Width (scene units) of the invisible band around the line that still
-    #: counts as a "hit", so the thin line is easy to click and drag.
-    HIT_WIDTH = 12.0
+    #: Width of the invisible band around the line that still counts as a
+    #: "hit", in **screen pixels**, so a thin line stays easy to click and drag.
+    #: Scene units would shrink with the zoom — at the fully-zoomed-out default
+    #: that left barely two pixels to aim at, and a line was nearly
+    #: unselectable.
+    HIT_PX = 12.0
 
     #: On-screen pixel radius for grabbing an endpoint / drawing its handle.
     ENDPOINT_GRAB_PX = 10.0
@@ -114,6 +118,12 @@ class LineItem(Labelable, QGraphicsLineItem):
 
     def contextMenuEvent(self, event):
         menu = QMenu()
+        # Offered only on a selected line, and only for a click that actually
+        # landed on it — the line has to be the thing you meant.
+        add_point_action = None
+        if self.isSelected() and self.click_is_on_line(event.pos()):
+            add_point_action = menu.addAction("Add Point to Line")
+            menu.addSeparator()
         line_props_action = menu.addAction("Line Properties…")
         proj_action = menu.addAction("Add Projectivity…")
         range_action = menu.addAction("Define Visible Range…")
@@ -137,7 +147,10 @@ class LineItem(Labelable, QGraphicsLineItem):
         label_actions = self.add_label_actions(menu)
 
         chosen = menu.exec(event.screenPos())
-        if chosen is line_props_action:
+        if add_point_action is not None and chosen is add_point_action:
+            if scene is not None:
+                scene.add_point_on_line_at(self, event.scenePos())
+        elif chosen is line_props_action:
             self.open_line_style_dialog()
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
@@ -352,6 +365,36 @@ class LineItem(Labelable, QGraphicsLineItem):
             return None
         return QPointF(dx / length, dy / length)
 
+    def click_is_on_line(self, local_pos: QPointF) -> bool:
+        """Whether a click landed on the line itself.
+
+        Measured against the clickable band (:attr:`HIT_PX`), so "on the
+        line" means what it looks like on screen rather than what the item's
+        bounding box — fattened by the endpoint handles — would allow.
+
+        Args:
+            local_pos: The click, in this item's coordinates.
+
+        Returns:
+            Whether it is within the band.
+        """
+        offset = QLineF(local_pos, self._project_local(local_pos)).length()
+        return offset <= self._px(self.HIT_PX) / 2
+
+    def closest_scene_point(self, scene_pos: QPointF) -> QPointF:
+        """The place on this line nearest ``scene_pos``, in scene coordinates.
+
+        The line is infinite, so this is a perpendicular projection rather than
+        a clamp to the drawn segment.
+
+        Args:
+            scene_pos: A position in scene coordinates, e.g. a click.
+
+        Returns:
+            The nearest position on the line.
+        """
+        return self.mapToScene(self._project_local(self.mapFromScene(scene_pos)))
+
     def _project_local(self, local_pt: QPointF) -> QPointF:
         line = self.line()
         p1 = line.p1()
@@ -486,7 +529,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         path.moveTo(seg[0])
         path.lineTo(seg[1])
         stroker = QPainterPathStroker()
-        stroker.setWidth(self.HIT_WIDTH)
+        stroker.setWidth(self._px(self.HIT_PX))
         return stroker.createStroke(path)
 
     def boundingRect(self) -> QRectF:
@@ -498,7 +541,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         xs = [p.x() for p in pts]
         ys = [p.y() for p in pts]
         margin = (
-            max(self.HIT_WIDTH / 2, self._px(self.ENDPOINT_GRAB_PX))
+            max(self._px(self.HIT_PX) / 2, self._px(self.ENDPOINT_GRAB_PX))
             + self._px(self.HANDLE_PX)
         )
         return QRectF(
@@ -604,6 +647,8 @@ class LineItem(Labelable, QGraphicsLineItem):
         target = None
         if scene is not None and hasattr(scene, "snap_target"):
             target = scene.snap_target(scene_pos, exclude=self._other_bound(self._drag_end))
+            if target is not None and scene.would_cycle(self, target):
+                target = None  # this line helps define that point
 
         if target is not None:
             self._bindings[self._drag_end] = target

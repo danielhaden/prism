@@ -19,6 +19,12 @@ from PySide6.QtWidgets import (
 )
 
 from prism.anchors import IntersectionAnchor
+from prism.dependencies import (
+    Changed,
+    DependencyGraph,
+    Geometry,
+    dependencies_of,
+)
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
@@ -58,6 +64,12 @@ class CanvasScene(QGraphicsScene):
 
     #: On-screen pixel radius within which an endpoint snaps to a point.
     SNAP_PX = 12.0
+
+    #: How near a *selected* line a right-click on blank canvas may land and
+    #: still offer to put a point on it, in screen pixels. Deliberately far
+    #: more generous than the line's own clickable band: you have already said
+    #: which line you mean by selecting it, so aim is not the point.
+    NEAR_LINE_PX = 40.0
 
     #: Side length of the reference frame: the working area the canvas shows
     #: when fully zoomed out. Deliberately much smaller than the scene rect,
@@ -182,6 +194,31 @@ class CanvasScene(QGraphicsScene):
         half = self.REFERENCE_SIZE / 2
         return QRectF(-half, -half, self.REFERENCE_SIZE, self.REFERENCE_SIZE)
 
+    def nearest_selected_line(self, scene_pos: QPointF) -> LineItem | None:
+        """The selected line nearest ``scene_pos``, if one is within reach.
+
+        "Within reach" is :attr:`NEAR_LINE_PX` on screen, so it means the same
+        distance however far you are zoomed out.
+
+        Args:
+            scene_pos: A position in scene coordinates, e.g. a click.
+
+        Returns:
+            The nearest selected line, or None if none is close enough.
+        """
+        views = self.views()
+        scale = abs(views[0].transform().m11()) if views else 1.0
+        limit = self.NEAR_LINE_PX / (scale or 1.0)
+        best = None
+        for line in self._lines():
+            if not line.isSelected():
+                continue
+            offset = QLineF(scene_pos, line.closest_scene_point(scene_pos)).length()
+            if offset <= limit:
+                limit = offset
+                best = line
+        return best
+
     def snap_radius(self) -> float:
         """Snap threshold in scene units (constant on screen across zoom)."""
         views = self.views()
@@ -191,8 +228,9 @@ class CanvasScene(QGraphicsScene):
     def snap_target(self, scene_pos: QPointF, exclude=()) -> PointItem | None:
         """The nearest point a line endpoint may bind to, or None.
 
-        Intersection points are excluded: a binding to a computed point can't
-        propagate, so lines don't bind to them.
+        Crossings count: updates now run in dependency order, so a line bound
+        to a computed point follows it. Points with no current position are
+        skipped — there is nothing there to snap to.
         """
         radius = self.snap_radius()
         best = None
@@ -200,7 +238,7 @@ class CanvasScene(QGraphicsScene):
         for item in self.items():
             if (
                 isinstance(item, PointItem)
-                and not item.is_intersection()
+                and not item.position_undefined()
                 and item not in exclude
             ):
                 d = QLineF(scene_pos, item.center()).length()
@@ -415,6 +453,47 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def add_free_point(self, scene_pos: QPointF) -> PointItem:
+        """Add a point at a position on the canvas, attached to nothing.
+
+        The counterpart to :meth:`add_point_on_line_at`: the point is free to
+        be dragged anywhere, rather than anchored to a line.
+
+        Args:
+            scene_pos: Where to put it, in scene coordinates.
+
+        Returns:
+            The new point.
+        """
+        point = self.add_point(scene_pos)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
+    def add_point_on_line_at(
+        self, line: LineItem, scene_pos: QPointF
+    ) -> PointItem:
+        """Add a point on a line, where a click lands on it.
+
+        The click is projected onto the line, so the point sits exactly on it
+        rather than merely near it, and is anchored there — dragging it slides
+        it along, as with :meth:`add_point_on_line`. Unlike that method this
+        takes a position rather than a fraction, so it works anywhere along an
+        infinite line, including outside the reference frame.
+
+        Args:
+            line: The line to place the point on.
+            scene_pos: Where the user clicked, in scene coordinates.
+
+        Returns:
+            The new point.
+        """
+        point = self.add_point(line.closest_scene_point(scene_pos))
+        point.set_anchor_line(line)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
     def add_line_between(self, a: PointItem, b: PointItem) -> LineItem | None:
         """Add an infinite line through two points, bound to both.
 
@@ -433,15 +512,11 @@ class CanvasScene(QGraphicsScene):
     def selected_points(self):
         """Selected points a line can be built on, in order.
 
-        Intersection points are excluded (a line can't bind to a computed
-        point).
+        Crossings included: a line can now be bound to a computed point, and
+        joining two crossings is a staple of projective construction.
         """
         return sorted(
-            (
-                it
-                for it in self.selectedItems()
-                if isinstance(it, PointItem) and not it.is_intersection()
-            ),
+            (it for it in self.selectedItems() if isinstance(it, PointItem)),
             key=lambda it: getattr(it, "_seq", 0),
         )
 
@@ -522,38 +597,100 @@ class CanvasScene(QGraphicsScene):
     # -- Dependency propagation -------------------------------------------
 
     def on_point_moved(self, point: PointItem) -> None:
-        """A point moved: update bound endpoints, pinned lines, intersections."""
-        for item in self._lines():
-            item.sync_from_point(point)
-            if item.pivot() is point:
-                item.sync_from_pivot()
-            if item.range_anchor() is point:
-                item.prepareGeometryChange()
-                item.update()
-        # Lines bound to (or pivoting on) this point just changed shape, so
-        # carry any points anchored to them.
-        self._sync_anchored_points(exclude=point)
-        self.recompute_intersections()
+        """A point moved: bring everything computed from it up to date."""
+        self.propagate_from(point)
 
-    def _sync_anchored_points(self, exclude=None) -> None:
-        """Re-place line-anchored points on their line (re-entrancy guarded).
+    def propagate_from(self, changed: Changed) -> None:
+        """Re-place everything downstream of ``changed``, in dependency order.
 
-        Intersection points are handled by :meth:`recompute_intersections`.
+        The order comes from :class:`~prism.dependencies.DependencyGraph`, so
+        each item is re-placed only once everything it is computed from has
+        been. That replaces the old fixed sweep (points drive lines, lines
+        drive anchored points, crossings last), which could only ever leave
+        crossings as leaves.
+
+        Args:
+            changed: The item that moved, or several of them.
         """
         if self._syncing_anchors:
             return
         self._syncing_anchors = True
         try:
-            for item in self.items():
-                if (
-                    isinstance(item, PointItem)
-                    and item is not exclude
-                    and item.has_anchor()
-                    and not item.is_intersection()
-                ):
-                    item.sync_to_anchor()
+            graph = DependencyGraph(self)
+            for item in graph.update_order(changed):
+                self._replace(item, graph)
         finally:
             self._syncing_anchors = False
+        self.recompute_intersections()
+        self.settle_definitions()
+
+    def would_cycle(self, dependent: Geometry, dependency: Geometry) -> bool:
+        """Whether computing ``dependent`` from ``dependency`` would be circular.
+
+        Ask before creating a dependency on something that already exists —
+        binding an endpoint, pinning, anchoring. Making new geometry is always
+        safe, since nothing can depend on it yet.
+
+        Args:
+            dependent: The item that would be computed from the other.
+            dependency: The item it would be computed from.
+
+        Returns:
+            Whether the relationship would define a position in terms of
+                itself.
+        """
+        return DependencyGraph(self).would_cycle(dependent, dependency)
+
+    def settle_definitions(self) -> None:
+        """Re-decide across the whole scene what currently has a position.
+
+        The targeted walk in :meth:`propagate_from` settles everything
+        downstream of a move; this catches the rest — markers created, revived
+        or retired by :meth:`recompute_intersections` afterwards, and the state
+        of a scene just rebuilt from a snapshot.
+        """
+        graph = DependencyGraph(self)
+        for item in graph.full_order():
+            self._set_defined(item, graph)
+
+    def _set_defined(self, item, graph: DependencyGraph) -> bool:
+        """Decide whether ``item`` still has a position, and mark it.
+
+        Undefined-ness cascades: whatever is computed from something that has
+        no position has none either.
+
+        Args:
+            item: The point or line to judge.
+            graph: The dependency graph it belongs to.
+
+        Returns:
+            Whether the item is defined.
+        """
+        undefined = any(
+            dependency.position_undefined()
+            for dependency in graph.dependencies(item)
+        )
+        if not undefined and isinstance(item, PointItem) and item.has_anchor():
+            undefined = item.anchor().position() is None
+        item.set_position_undefined(undefined)
+        return not undefined
+
+    def _replace(self, item, graph: DependencyGraph) -> None:
+        """Put one item back where its dependencies now say it belongs."""
+        if not self._set_defined(item, graph):
+            return  # nowhere to put it; it is hidden until its definition holds
+        if isinstance(item, LineItem):
+            for end in (1, 2):
+                bound = item.bound_point(end)
+                if bound is not None:
+                    item.sync_from_point(bound)
+            if item.pivot() is not None:
+                item.sync_from_pivot()
+            if item.range_anchor() is not None:
+                item.prepareGeometryChange()
+                item.update()
+        elif isinstance(item, PointItem) and item.has_anchor():
+            item.sync_to_anchor()
 
     def on_point_detached(self, point: PointItem) -> None:
         """A point's anchor released (e.g. an intersection point was dragged).
@@ -575,6 +712,7 @@ class CanvasScene(QGraphicsScene):
         """
         radius = self.snap_radius()
         count = 0
+        skipped = 0
         for line in self._lines():
             if line.has_pivot():
                 continue
@@ -582,8 +720,16 @@ class CanvasScene(QGraphicsScene):
             # qualifies, not just one whose defining endpoints straddle it.
             proj = _closest_on_segment(point.center(), line.display_line())
             if QLineF(point.center(), proj).length() <= radius:
+                if self.would_cycle(line, point):
+                    skipped += 1
+                    continue
                 line.set_pivot(point)
                 count += 1
+        if skipped:
+            self.statusMessage.emit(
+                f"Skipped {skipped} line(s): the point is computed from them, "
+                "so pinning them to it would be circular."
+            )
         return count
 
     def unpin_lines_through(self, point: PointItem) -> int:
@@ -615,11 +761,23 @@ class CanvasScene(QGraphicsScene):
 
     def anchor_points_to_line(self, points, line: LineItem) -> int:
         """Constrain each point to lie on ``line``. Returns how many anchored."""
+        anchored = 0
+        skipped = 0
         for point in points:
+            if self.would_cycle(point, line):
+                skipped += 1
+                continue
             point.set_anchor_line(line)
+            anchored += 1
+        if skipped:
+            self.statusMessage.emit(
+                f"Skipped {skipped} point(s): that line is computed from them, "
+                "so anchoring them to it would be circular."
+            )
         self.recompute_intersections()
+        self.settle_definitions()
         self.commit_undo()
-        return len(points)
+        return anchored
 
     def _points_anchored_to(self, line: LineItem):
         # Line-anchored points only; intersection markers are cleaned up by the
@@ -655,9 +813,8 @@ class CanvasScene(QGraphicsScene):
         return created
 
     def on_line_changed(self, line: LineItem) -> None:
-        """A line's geometry changed: carry anchored points, recompute."""
-        self._sync_anchored_points()
-        self.recompute_intersections()
+        """A line's geometry changed: bring everything computed from it up to date."""
+        self.propagate_from(line)
 
     def _lines(self):
         return [
@@ -701,7 +858,8 @@ class CanvasScene(QGraphicsScene):
             return
         self._updating = True
         try:
-            lines = self._lines()
+            # An undefined line has no position, so it crosses nothing.
+            lines = [ln for ln in self._lines() if not ln.position_undefined()]
             seen: set[tuple[int, int]] = set()
             for i in range(len(lines)):
                 for j in range(i + 1, len(lines)):
@@ -720,12 +878,32 @@ class CanvasScene(QGraphicsScene):
                         self.addItem(marker)
                         self._intersections[key] = marker
                     else:
+                        # The crossing is back (or never left).
+                        existing.set_position_undefined(False)
                         existing.sync_to_anchor()
             for key in list(self._intersections):
-                if key not in seen:
+                if key in seen:
+                    continue
+                marker = self._intersections[key]
+                if self._is_depended_on(marker):
+                    # Something is built on this crossing, so the marker has to
+                    # outlive it: keep it undefined, ready to come back when
+                    # the lines meet again. Dropping it would strand whatever
+                    # depends on it.
+                    marker.set_position_undefined(True)
+                else:
                     self.removeItem(self._intersections.pop(key))
         finally:
             self._updating = False
+
+    def _is_depended_on(self, item) -> bool:
+        """Whether any geometry in the scene is computed from ``item``."""
+        for other in self.items():
+            if other is item or not isinstance(other, (PointItem, LineItem)):
+                continue
+            if any(d is item for d in dependencies_of(other)):
+                return True
+        return False
 
     def _intersection_of(self, a: LineItem, b: LineItem) -> QPointF | None:
         # Use the visible (drawn) segment so markers appear where lines cross.
@@ -757,23 +935,56 @@ class CanvasScene(QGraphicsScene):
             return
 
         menu = QMenu()
+        # A click out here, but near a line you have selected, almost certainly
+        # means that line — so offer both and let the menu ask.
+        near_line = self.nearest_selected_line(event.scenePos())
+        line_point_action = (
+            menu.addAction("Add Point to Line") if near_line is not None else None
+        )
+        free_point_action = menu.addAction("Add Free Point")
+        menu.addSeparator()
         auto_action = menu.addAction("Auto-label Scene")
         clear_action = menu.addAction("Clear All Labels")
         chosen = menu.exec(event.screenPos())
-        if chosen is auto_action:
+        if line_point_action is not None and chosen is line_point_action:
+            self.add_point_on_line_at(near_line, event.scenePos())
+        elif chosen is free_point_action:
+            self.add_free_point(event.scenePos())
+        elif chosen is auto_action:
             self.auto_label()
         elif chosen is clear_action:
             self.clear_labels()
         event.accept()
 
-    def auto_label(self) -> None:
-        """Label points A, B, C… (upright) and lines a, b, c… (italic)."""
+    def label_element(self, item: PointItem | LineItem, text: str) -> None:
+        """Label one point or line, in the scene's convention.
+
+        Points are set upright and lines italic, matching
+        :meth:`auto_label`, so a labelled-by-hand element sits beside
+        auto-labelled ones without looking out of place.
+
+        Args:
+            item: The point or line to label.
+            text: The label; an empty string removes it.
+        """
+        item.set_label(text)
+        self._set_label_italic(item, isinstance(item, LineItem))
+        self.commit_undo()
+
+    def auto_label(self) -> tuple[int, int]:
+        """Label points A, B, C… (upright) and lines a, b, c… (italic).
+
+        Every point is labelled, including the ones that mark where lines
+        cross: a crossing is a point of the figure like any other, and in a
+        construction it is usually the one you most need to name. An
+        intersection marker keeps the same identity as its lines move, so its
+        label stays with it.
+
+        Returns:
+            How many points and lines were labelled.
+        """
         points = sorted(
-            (
-                it
-                for it in self.items()
-                if isinstance(it, PointItem) and not it.is_intersection()
-            ),
+            (it for it in self.items() if isinstance(it, PointItem)),
             key=lambda it: getattr(it, "_seq", 0),
         )
         lines = sorted(
@@ -790,11 +1001,22 @@ class CanvasScene(QGraphicsScene):
         for i, line in enumerate(lines):
             line.set_label(_letters(i))
             self._set_label_italic(line, True)
+        self.commit_undo()
+        return len(points), len(lines)
 
-    def clear_labels(self) -> None:
+    def clear_labels(self) -> int:
+        """Remove every label on the canvas.
+
+        Returns:
+            How many labels were removed.
+        """
+        cleared = 0
         for item in self.items():
-            if isinstance(item, (PointItem, LineItem)):
+            if isinstance(item, (PointItem, LineItem)) and item.label_text():
                 item.set_label("")
+                cleared += 1
+        self.commit_undo()
+        return cleared
 
     @staticmethod
     def _set_label_italic(item, italic: bool) -> None:

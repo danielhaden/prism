@@ -2,8 +2,13 @@
 
 ## Points
 
-Place points with the **Point** tool (++p++). Points stay a constant on-screen
-size at any zoom.
+Place points with the **Point** tool (++p++), or **right-click blank canvas →
+Add Free Point** to drop one where you clicked without leaving the Select tool.
+Points stay a constant on-screen size at any zoom.
+
+A *free* point is attached to nothing and can be dragged anywhere — as opposed
+to one [anchored to a line](#anchoring-a-point-to-a-line), which slides along
+it.
 
 - **Drag** a point (Select tool) to move it. Anything attached to it follows.
 - **Snapping** — while placing or dragging, a point snaps onto a nearby
@@ -18,8 +23,17 @@ size at any zoom.
   line](#anchoring-a-point-to-a-line) is one anchored to slide along it.
   **Dragging** an intersection point **detaches** it — it becomes an ordinary
   free point, and a fresh point re-marks the crossing. (A line-anchored point,
-  by contrast, slides along its line when dragged.) A line can't be *bound* to
-  an anchored point, since its position is computed.
+  by contrast, slides along its line when dragged.) Geometry **can** be built
+  on a computed point: bind a line to a crossing, pin a pencil through it, join
+  two crossings — updates run in dependency order, so what you build follows.
+
+- **When a definition fails.** A crossing exists only while its two lines
+  actually meet on the canvas. Slide them apart and the crossing — and
+  everything built on it — **disappears**, rather than lingering somewhere
+  meaningless. Nothing is lost: bring the lines back together and it all
+  returns, still attached. Prism refuses a relationship that would be circular
+  (pinning a line to a crossing that line helps make, say) and says so in the
+  status bar.
 
 ### A line through two points
 
@@ -36,7 +50,31 @@ endpoint **bound** to its point, so the line stays through them as they move.
 ### Anchoring a point to a line
 
 Snapping is transient — it releases as soon as you drag away. To make a point
-*stay* on a line, **anchor** it:
+*stay* on a line, **anchor** it. The quickest way is to make it there in the
+first place:
+
+**Select the line, then right-click on it → Add Point to Line.** A new point
+appears at that spot, already anchored to the line. The click is projected onto
+the line, so the point sits exactly on it however roughly you aimed, and it
+works anywhere along the line — including out past the reference frame.
+
+The entry needs the line to be **selected** — right-clicking never changes the
+selection, so select the line with a left click first. After that your aim is
+forgiving: right-click *near* a selected line, up to about 40 pixels away, and
+the canvas menu offers **Add Point to Line** alongside **Add Free Point**. You
+have already said which line you mean, so you don't have to hit it again.
+
+With several lines selected, the point goes on the nearest one.
+
+(Clicking the line itself — within about 6 pixels — opens the line's own menu
+instead, which carries the same entry along with its other commands.)
+
+!!! tip "Vanishing points"
+    Put a point on the horizon this way, then right-click *that point* →
+    **Add Lines Through Point…** to fan a pencil out of it. The lines are
+    pinned to the point, so they keep meeting there as you rotate them.
+
+To anchor a point you already have:
 
 1. Select **one line and one (or more) points** — click one, then ++shift++-click
    the other.
@@ -53,12 +91,21 @@ releases anything anchored to it.
 ### Point context menu (right-click)
 
 - **Modify Display Properties…** — see [Display properties](#display-properties).
+- **Add Line Through Point** — draw one line through it, at 45°, **pinned** to
+  the point so dragging the line rotates it about the point rather than moving
+  it away.
+- **Add Lines Through Point…** — the same, for a whole
+  [pencil](projectivities.md): choose a start angle, an end angle and how many
+  lines. This is the quick way to fan lines out of a vanishing point.
+- **Add Line Through Points** — appears when **two** points are selected, and
+  joins them; each endpoint is bound to its point.
 - **Snap Point to Line** / **Remove Anchor** — see
   [Anchoring](#anchoring-a-point-to-a-line).
-- **Pin Lines Through Point / Unpin** — turn the lines currently passing
-  through the point into a [pencil](projectivities.md) (or release them).
+- **Pin Lines Through Point / Unpin** — turn the lines *already* passing
+  through the point into a [pencil](projectivities.md) (or release them). This
+  one draws nothing; use **Add Line(s) Through Point** to create lines.
 - **Add / Edit / Remove Label**, **Label Properties…** — see
-  [Labels](#labels).
+  [Labels](#labels). Intersection points can be labelled like any other.
 
 ### Display properties
 
@@ -91,6 +138,8 @@ its **defining handles**.
 - **Drag an endpoint handle** (shown on hover/selection) to reorient it.
 - **Snapping** — dragging an endpoint onto a point **binds** it there; the
   endpoint then follows that point when it moves.
+- **Select it, then right-click → Add Point to Line** puts a new point on the
+  line where you clicked, [anchored](#anchoring-a-point-to-a-line) to it.
 
 ### Visible range
 

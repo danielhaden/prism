@@ -54,6 +54,7 @@ class CommandInterpreter:
             "add": self._form_add,
             "point": self._form_point,
             "rm": self._form_rm,
+            "label": self._form_label,
             "list": self._form_list,
             "help": self._form_help,
         }
@@ -163,11 +164,6 @@ class CommandInterpreter:
     def _as_point(self, argument) -> PointItem:
         value = self._value(argument)
         if isinstance(value, PointItem):
-            if value.is_intersection():
-                raise CommandError(
-                    "That is an intersection point. It's computed from its "
-                    "lines, so a new line can't anchor to it."
-                )
             return value
         if isinstance(value, str):
             return self.resolve_point(value)
@@ -181,6 +177,15 @@ class CommandInterpreter:
             return self.resolve_line(value)
         raise CommandError(f"Expected a line, got {value!r}.")
 
+    def _as_element(self, argument):
+        """Resolve an argument to a point or a line, whichever it names."""
+        value = self._value(argument)
+        if isinstance(value, (PointItem, LineItem)):
+            return value
+        if isinstance(value, str):
+            return self.resolve_element(value)
+        raise CommandError(f"Expected a point or a line, got {value!r}.")
+
     # -- Element access ----------------------------------------------------
 
     def _points(self):
@@ -193,18 +198,16 @@ class CommandInterpreter:
         return sorted(self.scene._lines(), key=lambda ln: getattr(ln, "_seq", 0))
 
     def resolve_point(self, name: str) -> PointItem:
-        """Find a point by label (``A``) or by its ``list`` id (``P1``)."""
+        """Find a point by label (``A``) or by its ``list`` id (``P1``).
+
+        Crossings count as points here: geometry can be built on them.
+        """
         points = self._points()  # same order/numbering as the (list) command
         match = _match_by_label(points, name) or _match_by_id(points, name, "p")
         if match is None:
             raise CommandError(
                 f"No point named {name!r}. Use a label (e.g. A) or an id from "
                 "(list) (e.g. P1)."
-            )
-        if match.is_intersection():
-            raise CommandError(
-                f"{name!r} is an intersection point. It's computed from its "
-                "lines, so a new line can't anchor to it."
             )
         return match
 
@@ -260,6 +263,11 @@ class CommandInterpreter:
             "                              end, 1 = its right; anchored to it\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
+            "  (label <element> <text>)    name a point or line; quote text\n"
+            "                              with spaces, \"\" removes the label\n"
+            "  (label -auto)               label everything: points A, B, C…\n"
+            "                              and lines a, b, c…\n"
+            "  (label -clear)              remove every label\n"
             "  (list [-points | -lines])   list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
@@ -350,11 +358,7 @@ class CommandInterpreter:
                 "  element: a label (A, a) or an id from (list) (P1, L1)\n"
                 "  e.g. (rm P1)"
             )
-        element = self._value(args[0])
-        if isinstance(element, str):
-            element = self.resolve_element(element)
-        if not isinstance(element, (PointItem, LineItem)):
-            raise CommandError(f"Expected a point or a line, got {element!r}.")
+        element = self._as_element(args[0])
         if isinstance(element, PointItem) and element.is_intersection():
             raise CommandError(
                 "That's an intersection point: it's computed from the lines "
@@ -365,6 +369,31 @@ class CommandInterpreter:
         described = self._render(element)
         self.scene.remove_element(element)
         return f"Removed {described}"
+
+    def _form_label(self, args):
+        if not args:
+            raise CommandError(_LABEL_USAGE)
+        first = args[0]
+        if isinstance(first, str) and first.startswith("-"):
+            if len(args) != 1:
+                raise CommandError(f"{first} takes nothing else.")
+            key = first.lstrip("-").lower()
+            if key == "auto":
+                points, lines = self.scene.auto_label()
+                return (
+                    f"Labelled {_count(points, 'point')} "
+                    f"and {_count(lines, 'line')}."
+                )
+            if key == "clear":
+                return f"Cleared {_count(self.scene.clear_labels(), 'label')}."
+            raise CommandError(
+                f"Unknown qualifier: {first!r}. Use -auto or -clear."
+            )
+        if len(args) != 2:
+            raise CommandError(_LABEL_USAGE)
+        element = self._as_element(args[0])
+        self.scene.label_element(element, str(self._value(args[1])))
+        return element
 
     def _form_list(self, args) -> str:
         show_points = show_lines = True
@@ -453,6 +482,22 @@ class CommandInterpreter:
         if ln.label_text():
             parts.append(f'"{ln.label_text()}"')
         return "  ".join(parts)
+
+
+#: Shown whenever (label ...) is called with arguments it can't read.
+_LABEL_USAGE = (
+    "Usage: (label <element> <text>)   name a point or line\n"
+    "   or: (label -auto)              label points A, B, C… and lines a, b, c…\n"
+    "   or: (label -clear)             remove every label\n"
+    '  e.g. (label P1 A) or (label L1 "the horizon")'
+)
+
+
+def _count(n: int, noun: str) -> str:
+    """``3 points`` / ``1 point`` / ``no points``."""
+    if n == 0:
+        return f"no {noun}s"
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
 def _match_by_label(items, name: str):
