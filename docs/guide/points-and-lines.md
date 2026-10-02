@@ -2,8 +2,13 @@
 
 ## Points
 
-Place points with the **Point** tool (++p++). Points stay a constant on-screen
-size at any zoom.
+Place points with the **Point** tool (++p++), or **right-click blank canvas →
+Add Free Point** to drop one where you clicked without leaving the Select tool.
+Points stay a constant on-screen size at any zoom.
+
+A *free* point is attached to nothing and can be dragged anywhere — as opposed
+to one [anchored to a line](#anchoring-a-point-to-a-line), which slides along
+it.
 
 - **Drag** a point (Select tool) to move it. Anything attached to it follows.
 - **Snapping** — while placing or dragging, a point snaps onto a nearby
@@ -39,10 +44,15 @@ Snapping is transient — it releases as soon as you drag away. To make a point
 *stay* on a line, **anchor** it. The quickest way is to make it there in the
 first place:
 
-**Right-click anywhere on a line → Add Point Here.** A new point appears at
-that spot, already anchored to the line. The click is projected onto the line,
-so the point sits exactly on it however roughly you aimed, and it works
-anywhere along the line — including out past the reference frame.
+**Select the line, then right-click on it → Add Point to Line.** A new point
+appears at that spot, already anchored to the line. The click is projected onto
+the line, so the point sits exactly on it however roughly you aimed, and it
+works anywhere along the line — including out past the reference frame.
+
+The entry only appears on a **selected** line, and only for a click that landed
+on the line itself, so it can't fire on a line you merely brushed past. Since
+right-clicking never changes the selection, select the line with a left click
+first.
 
 To anchor a point you already have:
 
@@ -99,8 +109,8 @@ its **defining handles**.
 - **Drag an endpoint handle** (shown on hover/selection) to reorient it.
 - **Snapping** — dragging an endpoint onto a point **binds** it there; the
   endpoint then follows that point when it moves.
-- **Right-click → Add Point Here** puts a new point on the line where you
-  clicked, [anchored](#anchoring-a-point-to-a-line) to it.
+- **Select it, then right-click → Add Point to Line** puts a new point on the
+  line where you clicked, [anchored](#anchoring-a-point-to-a-line) to it.
 
 ### Visible range
 

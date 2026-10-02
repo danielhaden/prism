@@ -415,6 +415,23 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def add_free_point(self, scene_pos: QPointF) -> PointItem:
+        """Add a point at a position on the canvas, attached to nothing.
+
+        The counterpart to :meth:`add_point_on_line_at`: the point is free to
+        be dragged anywhere, rather than anchored to a line.
+
+        Args:
+            scene_pos: Where to put it, in scene coordinates.
+
+        Returns:
+            The new point.
+        """
+        point = self.add_point(scene_pos)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
     def add_point_on_line_at(
         self, line: LineItem, scene_pos: QPointF
     ) -> PointItem:
@@ -781,10 +798,14 @@ class CanvasScene(QGraphicsScene):
             return
 
         menu = QMenu()
+        free_point_action = menu.addAction("Add Free Point")
+        menu.addSeparator()
         auto_action = menu.addAction("Auto-label Scene")
         clear_action = menu.addAction("Clear All Labels")
         chosen = menu.exec(event.screenPos())
-        if chosen is auto_action:
+        if chosen is free_point_action:
+            self.add_free_point(event.scenePos())
+        elif chosen is auto_action:
             self.auto_label()
         elif chosen is clear_action:
             self.clear_labels()

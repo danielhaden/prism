@@ -114,8 +114,12 @@ class LineItem(Labelable, QGraphicsLineItem):
 
     def contextMenuEvent(self, event):
         menu = QMenu()
-        add_point_action = menu.addAction("Add Point Here")
-        menu.addSeparator()
+        # Offered only on a selected line, and only for a click that actually
+        # landed on it — the line has to be the thing you meant.
+        add_point_action = None
+        if self.isSelected() and self.click_is_on_line(event.pos()):
+            add_point_action = menu.addAction("Add Point to Line")
+            menu.addSeparator()
         line_props_action = menu.addAction("Line Properties…")
         proj_action = menu.addAction("Add Projectivity…")
         range_action = menu.addAction("Define Visible Range…")
@@ -139,7 +143,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         label_actions = self.add_label_actions(menu)
 
         chosen = menu.exec(event.screenPos())
-        if chosen is add_point_action:
+        if add_point_action is not None and chosen is add_point_action:
             if scene is not None:
                 scene.add_point_on_line_at(self, event.scenePos())
         elif chosen is line_props_action:
@@ -356,6 +360,22 @@ class LineItem(Labelable, QGraphicsLineItem):
         if length < 1e-9:
             return None
         return QPointF(dx / length, dy / length)
+
+    def click_is_on_line(self, local_pos: QPointF) -> bool:
+        """Whether a click landed on the line itself.
+
+        Measured against the clickable band (:attr:`HIT_WIDTH`), so "on the
+        line" means what it looks like on screen rather than what the item's
+        bounding box — fattened by the endpoint handles — would allow.
+
+        Args:
+            local_pos: The click, in this item's coordinates.
+
+        Returns:
+            Whether it is within the band.
+        """
+        offset = QLineF(local_pos, self._project_local(local_pos)).length()
+        return offset <= self.HIT_WIDTH / 2
 
     def closest_scene_point(self, scene_pos: QPointF) -> QPointF:
         """The place on this line nearest ``scene_pos``, in scene coordinates.
