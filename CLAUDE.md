@@ -125,7 +125,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Scripts**: Console "Save Script…" records the session's *building* commands;
   ScriptsPanel lists/runs them. Location set via **Settings → Scripts Folder…**
   (`prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides; `.prism` text files).
-  `prism/settings.py` also holds the book path/page (see **Panels → Book**).
+  `prism/settings.py` also holds the book path/page (see **Panels → Book**) and
+  the window layout.
 
 ## Panels
 
@@ -146,6 +147,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   width (`_fitted_zoom`); `QPdfPageNavigator.jump()` to the page it's already on
   emits nothing, so the controls are synced by hand after a load; page rendering
   is **asynchronous**, so a pixel check needs an event-pumping wait.
+
+## Window layout
+
+- `MainWindow` saves `saveGeometry()`/`saveState()` to QSettings on close and
+  restores them at the end of `__init__` (after the docks exist), so window
+  size and the dock layout — including the right tab group's width and which
+  tab is raised — persist between sessions. Keys live in `prism/settings.py`.
+- `saveState()` silently skips anything without an `objectName`; every dock has
+  one and the toolbar is `ToolsToolbar`. **A new dock must set one** or it
+  won't be restored.
+- `LAYOUT_VERSION` guards the state: bump it when the set of docks changes and
+  Qt will ignore older saved layouts rather than restoring them badly.
+- Qt fits a restored window to the screen it reopens on, so a layout saved on a
+  big display comes back usable on a small one (and headless tests see the
+  offscreen 800x800 virtual screen clamp anything larger).
 
 ## Canvas behavior
 

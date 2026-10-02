@@ -10,11 +10,22 @@ from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
 from prism.selection_panel import SelectionPanel
-from prism.settings import scripts_dir, set_scripts_dir
+from prism.settings import (
+    scripts_dir,
+    set_scripts_dir,
+    set_window_geometry,
+    set_window_state,
+    window_geometry,
+    window_state,
+)
 from prism.tools import Tool
 
 
 class MainWindow(QMainWindow):
+    #: Bumped when the set of docks changes enough that an older saved layout
+    #: would restore badly; Qt then ignores states saved under a lower number.
+    LAYOUT_VERSION = 1
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Prism")
@@ -52,6 +63,28 @@ class MainWindow(QMainWindow):
         self.scene.historyChanged.connect(self._update_history_actions)
         self.scene.init_history()
         self._select_tool(Tool.SELECT)
+        self._restore_layout()
+
+    # -- Window layout -----------------------------------------------------
+
+    def _restore_layout(self) -> None:
+        """Put the window back the size and shape it was last left.
+
+        Called once the docks exist, so their saved widths and tab order can
+        be applied; a first run has nothing saved and keeps the defaults set
+        above.
+        """
+        geometry = window_geometry()
+        if geometry:
+            self.restoreGeometry(geometry)
+        state = window_state()
+        if state:
+            self.restoreState(state, self.LAYOUT_VERSION)
+
+    def closeEvent(self, event):
+        set_window_geometry(self.saveGeometry())
+        set_window_state(self.saveState(self.LAYOUT_VERSION))
+        super().closeEvent(event)
 
     # -- Actions -----------------------------------------------------------
 
@@ -129,6 +162,8 @@ class MainWindow(QMainWindow):
 
     def _build_toolbar(self) -> None:
         toolbar = self.addToolBar("Tools")
+        # saveState() skips (and warns about) anything unnamed.
+        toolbar.setObjectName("ToolsToolbar")
         toolbar.setMovable(False)
 
         for tool in (Tool.SELECT, Tool.POINT, Tool.LINE):

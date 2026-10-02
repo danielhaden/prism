@@ -4,6 +4,9 @@ The scripts folder is where saved console scripts live. It defaults to a
 per-user application-data directory, is configurable from **Settings > Scripts
 Folder…**, and can be overridden with ``PRISM_SCRIPTS_DIR`` (used by tests).
 
+The window's size and its dock layout are remembered the same way, so the
+canvas comes back the shape you left it.
+
 The *book* is the one PDF the Book panel reads — Olive Whicher's *Projective
 Geometry* — pointed at from **Settings > Book (PDF)…**, overridable with
 ``PRISM_BOOK_PATH``. The page last read is remembered alongside it, and reset
@@ -13,13 +16,15 @@ whenever the book is pointed somewhere new.
 import os
 import re
 
-from PySide6.QtCore import QSettings, QStandardPaths
+from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
 
 #: Extension for saved console scripts.
 SCRIPT_SUFFIX = ".prism"
 
 _SCRIPTS_DIR_KEY = "paths/scripts_dir"
 _BOOK_PATH_KEY = "paths/book_path"
+_WINDOW_GEOMETRY_KEY = "window/geometry"
+_WINDOW_STATE_KEY = "window/state"
 _BOOK_PAGE_KEY = "book/last_page"
 
 
@@ -115,3 +120,24 @@ def book_page() -> int:
 
 def set_book_page(page: int) -> None:
     QSettings().setValue(_BOOK_PAGE_KEY, max(0, int(page)))
+
+
+# -- Window layout -------------------------------------------------------
+
+
+def window_geometry() -> QByteArray | None:
+    """The saved window size and position, or None on a first run."""
+    return QSettings().value(_WINDOW_GEOMETRY_KEY)
+
+
+def set_window_geometry(data: QByteArray) -> None:
+    QSettings().setValue(_WINDOW_GEOMETRY_KEY, data)
+
+
+def window_state() -> QByteArray | None:
+    """The saved dock layout — which panels are open, where, and how wide."""
+    return QSettings().value(_WINDOW_STATE_KEY)
+
+
+def set_window_state(data: QByteArray) -> None:
+    QSettings().setValue(_WINDOW_STATE_KEY, data)

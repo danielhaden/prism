@@ -69,6 +69,20 @@ There is deliberately **no grid and no origin axes** — a metric has no place o
 a projective canvas. If you want a scale, construct one projectively from the
 elements themselves. See [Projective Basics](../concepts/projective-basics.md).
 
+## The window remembers itself
+
+Prism saves the window's size and position, and the whole dock layout, when you
+quit — which panels are open, where they sit, the width of the right-hand tab
+group (**Library** / **Scripts** / **Book**), and which of those tabs was on
+top. Open it again and you get the canvas back the shape you left it.
+
+Size the Book panel once for comfortable reading and it stays that way.
+
+!!! note "When it won't come back exactly"
+    A window larger than the display it reopens on is fitted to that display —
+    so unplugging an external monitor leaves you with a usable window rather
+    than one that runs off the edge.
+
 ## Grouping
 
 Select several elements and press ++ctrl+g++ to **group** them. A group moves,
