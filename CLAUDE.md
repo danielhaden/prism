@@ -90,6 +90,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   entry is gated on `isSelected()` and `click_is_on_line()` (within
   `HIT_WIDTH / 2`); note the second gate rarely bites on its own, since the
   line's menu only opens inside that same band.
+- A point's menu offers **Add Line Through Point** (one line at
+  `PointItem.NEW_LINE_ANGLE`, 45°) and **Add Lines Through Point…** (the
+  `ProjectivityDialog` angles). Both go through `add_projectivity`, so the
+  lines are **pinned** to the point and it commits undo for them. Both are
+  hidden on intersection points, like pinning, since a computed point can't
+  drive what hangs off it. Note "Pin Lines Through Point" only pins *existing*
+  lines — before this there was no way to *create* a line through a single
+  point except the console.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
   adds an unattached point there. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.

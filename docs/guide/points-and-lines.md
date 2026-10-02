@@ -54,6 +54,11 @@ on the line itself, so it can't fire on a line you merely brushed past. Since
 right-clicking never changes the selection, select the line with a left click
 first.
 
+!!! tip "Vanishing points"
+    Put a point on the horizon this way, then right-click *that point* →
+    **Add Lines Through Point…** to fan a pencil out of it. The lines are
+    pinned to the point, so they keep meeting there as you rotate them.
+
 To anchor a point you already have:
 
 1. Select **one line and one (or more) points** — click one, then ++shift++-click
@@ -71,10 +76,19 @@ releases anything anchored to it.
 ### Point context menu (right-click)
 
 - **Modify Display Properties…** — see [Display properties](#display-properties).
+- **Add Line Through Point** — draw one line through it, at 45°, **pinned** to
+  the point so dragging the line rotates it about the point rather than moving
+  it away.
+- **Add Lines Through Point…** — the same, for a whole
+  [pencil](projectivities.md): choose a start angle, an end angle and how many
+  lines. This is the quick way to fan lines out of a vanishing point.
+- **Add Line Through Points** — appears when **two** points are selected, and
+  joins them; each endpoint is bound to its point.
 - **Snap Point to Line** / **Remove Anchor** — see
   [Anchoring](#anchoring-a-point-to-a-line).
-- **Pin Lines Through Point / Unpin** — turn the lines currently passing
-  through the point into a [pencil](projectivities.md) (or release them).
+- **Pin Lines Through Point / Unpin** — turn the lines *already* passing
+  through the point into a [pencil](projectivities.md) (or release them). This
+  one draws nothing; use **Add Line(s) Through Point** to create lines.
 - **Add / Edit / Remove Label**, **Label Properties…** — see
   [Labels](#labels).
 
