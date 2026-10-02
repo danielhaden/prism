@@ -145,15 +145,32 @@ class DependencyGraph:
         Returns:
             The affected items, ordered.
         """
-        affected = self.affected_by(changed)
-        within = {id(it) for it in affected}
+        return self.update_order_within(self.affected_by(changed))
+
+    def full_order(self) -> list:
+        """Every item, each after everything it is computed from.
+
+        Returns:
+            The whole graph in dependency order; anything caught in a cycle is
+                left out, as in :meth:`update_order`.
+        """
+        return self.update_order_within(self.items())
+
+    def update_order_within(self, within: list) -> list:
+        """Order ``within`` so each item follows the ones it depends on.
+
+        Args:
+            within: The items to order.
+
+        Returns:
+            Them, in dependency order, minus anything in a cycle.
+        """
+        chosen = {id(it): it for it in within}
         remaining = {
-            id(it): [
-                d for d in self.dependencies(it) if id(d) in within
-            ]
-            for it in affected
+            key: [d for d in self.dependencies(it) if id(d) in chosen]
+            for key, it in chosen.items()
         }
-        ready = [it for it in affected if not remaining[id(it)]]
+        ready = [chosen[key] for key, deps in remaining.items() if not deps]
         ordered = []
         while ready:
             item = ready.pop(0)
@@ -162,9 +179,7 @@ class DependencyGraph:
                 pending = remaining.get(id(dependent))
                 if pending is None:
                     continue
-                remaining[id(dependent)] = [
-                    d for d in pending if d is not item
-                ]
+                remaining[id(dependent)] = [d for d in pending if d is not item]
                 if not remaining[id(dependent)]:
                     ready.append(dependent)
         return ordered

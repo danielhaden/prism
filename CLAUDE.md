@@ -255,13 +255,19 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    `on_line_changed` both funnel through it; `_replace()` re-places one item
    from its dependencies. Verified behaviour-identical against the old sweep
    (same coordinates, every relationship kind).
-   Remaining: (2b) an **undefined** state — a crossing that stops existing
-   makes whatever depends on it *disappear* (the user's call), cascading
-   downstream, and markers with dependents must survive instead of being
-   destroyed by `recompute_intersections`; (3) refuse cycles at bind time with
-   `would_cycle`; (4) lift the intersection guards in `resolve_point` /
-   `_as_point`, `selected_points`, `selected_point_line_pair`, `snap_target`,
-   pin and group.
+   (2b) `prism/items/definable.py` adds an **undefined** state (the `Definable`
+   mixin on both item types): an item whose definition fails keeps its identity
+   and relationships but is hidden, so Qt also drops it from hit-testing.
+   `CanvasScene._set_defined` decides it and cascades (anything computed from
+   something undefined is undefined too); `settle_definitions()` re-decides
+   scene-wide after `recompute_intersections` and after a snapshot restore.
+   A marker whose crossing is gone is now **kept** (undefined) when anything
+   depends on it — dropping it would strand them. Undefined-ness is derived,
+   never stored.
+   Remaining: (3) refuse cycles at bind time with `would_cycle`; (4) lift the
+   intersection guards in `resolve_point` / `_as_point`, `selected_points`,
+   `selected_point_line_pair`, `snap_target`, pin and group — until then the
+   capability exists but the UI still refuses to let you use it.
    Why it's blocked today, measured: a crossing marker is repositioned by
    `recompute_intersections` **last** and its movement notifies nobody, so a
    line force-bound to a crossing never moves at all (not even one update

@@ -251,6 +251,8 @@ def restore(scene, state: dict) -> None:
     scene._point_style = _restore_point_style(state.get("point_style"))
     scene.recompute_intersections()
     _restore_crossing_labels(scene, lines, state.get("crossings", []))
+    # Undefined-ness is derived, never stored, so work it out afresh.
+    scene.settle_definitions()
 
 
 def _restore_crossing_labels(scene, lines, entries) -> None:

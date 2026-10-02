@@ -10,6 +10,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem, QMenu
 
+from prism.items.definable import Definable
 from prism.items.label import Labelable
 
 
@@ -43,7 +44,7 @@ def _clip_line_to_rect(p0: QPointF, d: QPointF, rect):
     )
 
 
-class LineItem(Labelable, QGraphicsLineItem):
+class LineItem(Definable, Labelable, QGraphicsLineItem):
     """A straight line segment between two scene points.
 
     The whole segment can be selected and dragged. Hovering near either

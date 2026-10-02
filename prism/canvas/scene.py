@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from prism.anchors import IntersectionAnchor
-from prism.dependencies import Changed, DependencyGraph
+from prism.dependencies import Changed, DependencyGraph, dependencies_of
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
@@ -233,6 +233,7 @@ class CanvasScene(QGraphicsScene):
             if (
                 isinstance(item, PointItem)
                 and not item.is_intersection()
+                and not item.position_undefined()
                 and item not in exclude
             ):
                 d = QLineF(scene_pos, item.center()).length()
@@ -616,13 +617,50 @@ class CanvasScene(QGraphicsScene):
         try:
             graph = DependencyGraph(self)
             for item in graph.update_order(changed):
-                self._replace(item)
+                self._replace(item, graph)
         finally:
             self._syncing_anchors = False
         self.recompute_intersections()
+        self.settle_definitions()
 
-    def _replace(self, item) -> None:
+    def settle_definitions(self) -> None:
+        """Re-decide across the whole scene what currently has a position.
+
+        The targeted walk in :meth:`propagate_from` settles everything
+        downstream of a move; this catches the rest — markers created, revived
+        or retired by :meth:`recompute_intersections` afterwards, and the state
+        of a scene just rebuilt from a snapshot.
+        """
+        graph = DependencyGraph(self)
+        for item in graph.full_order():
+            self._set_defined(item, graph)
+
+    def _set_defined(self, item, graph: DependencyGraph) -> bool:
+        """Decide whether ``item`` still has a position, and mark it.
+
+        Undefined-ness cascades: whatever is computed from something that has
+        no position has none either.
+
+        Args:
+            item: The point or line to judge.
+            graph: The dependency graph it belongs to.
+
+        Returns:
+            Whether the item is defined.
+        """
+        undefined = any(
+            dependency.position_undefined()
+            for dependency in graph.dependencies(item)
+        )
+        if not undefined and isinstance(item, PointItem) and item.has_anchor():
+            undefined = item.anchor().position() is None
+        item.set_position_undefined(undefined)
+        return not undefined
+
+    def _replace(self, item, graph: DependencyGraph) -> None:
         """Put one item back where its dependencies now say it belongs."""
+        if not self._set_defined(item, graph):
+            return  # nowhere to put it; it is hidden until its definition holds
         if isinstance(item, LineItem):
             for end in (1, 2):
                 bound = item.bound_point(end)
@@ -781,7 +819,8 @@ class CanvasScene(QGraphicsScene):
             return
         self._updating = True
         try:
-            lines = self._lines()
+            # An undefined line has no position, so it crosses nothing.
+            lines = [ln for ln in self._lines() if not ln.position_undefined()]
             seen: set[tuple[int, int]] = set()
             for i in range(len(lines)):
                 for j in range(i + 1, len(lines)):
@@ -800,12 +839,32 @@ class CanvasScene(QGraphicsScene):
                         self.addItem(marker)
                         self._intersections[key] = marker
                     else:
+                        # The crossing is back (or never left).
+                        existing.set_position_undefined(False)
                         existing.sync_to_anchor()
             for key in list(self._intersections):
-                if key not in seen:
+                if key in seen:
+                    continue
+                marker = self._intersections[key]
+                if self._is_depended_on(marker):
+                    # Something is built on this crossing, so the marker has to
+                    # outlive it: keep it undefined, ready to come back when
+                    # the lines meet again. Dropping it would strand whatever
+                    # depends on it.
+                    marker.set_position_undefined(True)
+                else:
                     self.removeItem(self._intersections.pop(key))
         finally:
             self._updating = False
+
+    def _is_depended_on(self, item) -> bool:
+        """Whether any geometry in the scene is computed from ``item``."""
+        for other in self.items():
+            if other is item or not isinstance(other, (PointItem, LineItem)):
+                continue
+            if any(d is item for d in dependencies_of(other)):
+                return True
+        return False
 
     def _intersection_of(self, a: LineItem, b: LineItem) -> QPointF | None:
         # Use the visible (drawn) segment so markers appear where lines cross.

@@ -4,10 +4,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsEllipseItem, QMenu
 
+from prism.items.definable import Definable
 from prism.items.label import Labelable
 
 
-class PointItem(Labelable, QGraphicsEllipseItem):
+class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     """A point rendered as a small filled circle.
 
     The point is positioned by its center. It is drawn at a fixed on-screen
