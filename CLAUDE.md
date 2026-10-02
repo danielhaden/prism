@@ -247,15 +247,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 1. **Propagation engine** — let geometry stay attached to *live intersection
    points* (lines through intersections that update): the real harmonic-net
-   enabler. **Step 1 of 4 is done**: `prism/dependencies.py` reads the graph
-   out of the scene (`DependencyGraph`: `dependencies`/`dependents`,
-   `affected_by`, `update_order`, `cycles`, `would_cycle`). It is pure
-   observation — nothing consumes it yet, so behaviour is unchanged. Remaining:
-   (2) drive updates from `update_order` instead of the fixed sweep in
-   `on_point_moved`/`on_line_changed`/`_sync_anchored_points`; (3) refuse
-   cycles at bind time with `would_cycle`; (4) lift the intersection guards in
-   `resolve_point`/`_as_point`, `selected_points`,
-   `selected_point_line_pair`, `snap_target`, pin and group.
+   enabler. **Steps 1 and 2a of 4 are done.** (1) `prism/dependencies.py` reads
+   the graph out of the scene (`DependencyGraph`: `dependencies`/`dependents`,
+   `affected_by`, `update_order`, `cycles`, `would_cycle`). (2a)
+   `CanvasScene.propagate_from()` now drives updates from `update_order` — the
+   fixed sweep and `_sync_anchored_points` are gone, and `on_point_moved` /
+   `on_line_changed` both funnel through it; `_replace()` re-places one item
+   from its dependencies. Verified behaviour-identical against the old sweep
+   (same coordinates, every relationship kind).
+   Remaining: (2b) an **undefined** state — a crossing that stops existing
+   makes whatever depends on it *disappear* (the user's call), cascading
+   downstream, and markers with dependents must survive instead of being
+   destroyed by `recompute_intersections`; (3) refuse cycles at bind time with
+   `would_cycle`; (4) lift the intersection guards in `resolve_point` /
+   `_as_point`, `selected_points`, `selected_point_line_pair`, `snap_target`,
+   pin and group.
    Why it's blocked today, measured: a crossing marker is repositioned by
    `recompute_intersections` **last** and its movement notifies nobody, so a
    line force-bound to a crossing never moves at all (not even one update

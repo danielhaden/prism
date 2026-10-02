@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from prism.anchors import IntersectionAnchor
+from prism.dependencies import Changed, DependencyGraph
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
@@ -594,38 +595,46 @@ class CanvasScene(QGraphicsScene):
     # -- Dependency propagation -------------------------------------------
 
     def on_point_moved(self, point: PointItem) -> None:
-        """A point moved: update bound endpoints, pinned lines, intersections."""
-        for item in self._lines():
-            item.sync_from_point(point)
-            if item.pivot() is point:
-                item.sync_from_pivot()
-            if item.range_anchor() is point:
-                item.prepareGeometryChange()
-                item.update()
-        # Lines bound to (or pivoting on) this point just changed shape, so
-        # carry any points anchored to them.
-        self._sync_anchored_points(exclude=point)
-        self.recompute_intersections()
+        """A point moved: bring everything computed from it up to date."""
+        self.propagate_from(point)
 
-    def _sync_anchored_points(self, exclude=None) -> None:
-        """Re-place line-anchored points on their line (re-entrancy guarded).
+    def propagate_from(self, changed: Changed) -> None:
+        """Re-place everything downstream of ``changed``, in dependency order.
 
-        Intersection points are handled by :meth:`recompute_intersections`.
+        The order comes from :class:`~prism.dependencies.DependencyGraph`, so
+        each item is re-placed only once everything it is computed from has
+        been. That replaces the old fixed sweep (points drive lines, lines
+        drive anchored points, crossings last), which could only ever leave
+        crossings as leaves.
+
+        Args:
+            changed: The item that moved, or several of them.
         """
         if self._syncing_anchors:
             return
         self._syncing_anchors = True
         try:
-            for item in self.items():
-                if (
-                    isinstance(item, PointItem)
-                    and item is not exclude
-                    and item.has_anchor()
-                    and not item.is_intersection()
-                ):
-                    item.sync_to_anchor()
+            graph = DependencyGraph(self)
+            for item in graph.update_order(changed):
+                self._replace(item)
         finally:
             self._syncing_anchors = False
+        self.recompute_intersections()
+
+    def _replace(self, item) -> None:
+        """Put one item back where its dependencies now say it belongs."""
+        if isinstance(item, LineItem):
+            for end in (1, 2):
+                bound = item.bound_point(end)
+                if bound is not None:
+                    item.sync_from_point(bound)
+            if item.pivot() is not None:
+                item.sync_from_pivot()
+            if item.range_anchor() is not None:
+                item.prepareGeometryChange()
+                item.update()
+        elif isinstance(item, PointItem) and item.has_anchor():
+            item.sync_to_anchor()
 
     def on_point_detached(self, point: PointItem) -> None:
         """A point's anchor released (e.g. an intersection point was dragged).
@@ -727,9 +736,8 @@ class CanvasScene(QGraphicsScene):
         return created
 
     def on_line_changed(self, line: LineItem) -> None:
-        """A line's geometry changed: carry anchored points, recompute."""
-        self._sync_anchored_points()
-        self.recompute_intersections()
+        """A line's geometry changed: bring everything computed from it up to date."""
+        self.propagate_from(line)
 
     def _lines(self):
         return [
