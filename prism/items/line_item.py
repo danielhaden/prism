@@ -57,9 +57,12 @@ class LineItem(Labelable, QGraphicsLineItem):
     next iteration.
     """
 
-    #: Width (scene units) of the invisible band around the line that still
-    #: counts as a "hit", so the thin line is easy to click and drag.
-    HIT_WIDTH = 12.0
+    #: Width of the invisible band around the line that still counts as a
+    #: "hit", in **screen pixels**, so a thin line stays easy to click and drag.
+    #: Scene units would shrink with the zoom — at the fully-zoomed-out default
+    #: that left barely two pixels to aim at, and a line was nearly
+    #: unselectable.
+    HIT_PX = 12.0
 
     #: On-screen pixel radius for grabbing an endpoint / drawing its handle.
     ENDPOINT_GRAB_PX = 10.0
@@ -364,7 +367,7 @@ class LineItem(Labelable, QGraphicsLineItem):
     def click_is_on_line(self, local_pos: QPointF) -> bool:
         """Whether a click landed on the line itself.
 
-        Measured against the clickable band (:attr:`HIT_WIDTH`), so "on the
+        Measured against the clickable band (:attr:`HIT_PX`), so "on the
         line" means what it looks like on screen rather than what the item's
         bounding box — fattened by the endpoint handles — would allow.
 
@@ -375,7 +378,7 @@ class LineItem(Labelable, QGraphicsLineItem):
             Whether it is within the band.
         """
         offset = QLineF(local_pos, self._project_local(local_pos)).length()
-        return offset <= self.HIT_WIDTH / 2
+        return offset <= self._px(self.HIT_PX) / 2
 
     def closest_scene_point(self, scene_pos: QPointF) -> QPointF:
         """The place on this line nearest ``scene_pos``, in scene coordinates.
@@ -525,7 +528,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         path.moveTo(seg[0])
         path.lineTo(seg[1])
         stroker = QPainterPathStroker()
-        stroker.setWidth(self.HIT_WIDTH)
+        stroker.setWidth(self._px(self.HIT_PX))
         return stroker.createStroke(path)
 
     def boundingRect(self) -> QRectF:
@@ -537,7 +540,7 @@ class LineItem(Labelable, QGraphicsLineItem):
         xs = [p.x() for p in pts]
         ys = [p.y() for p in pts]
         margin = (
-            max(self.HIT_WIDTH / 2, self._px(self.ENDPOINT_GRAB_PX))
+            max(self._px(self.HIT_PX) / 2, self._px(self.ENDPOINT_GRAB_PX))
             + self._px(self.HANDLE_PX)
         )
         return QRectF(

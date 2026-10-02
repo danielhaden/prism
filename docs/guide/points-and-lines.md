@@ -54,6 +54,11 @@ on the line itself, so it can't fire on a line you merely brushed past. Since
 right-clicking never changes the selection, select the line with a left click
 first.
 
+Lines are thin, so they carry an invisible band about 6 pixels either side that
+still counts as a hit — the same width at every zoom. Click within it and the
+line selects; stray outside and you are clicking the canvas, which has its own
+menu.
+
 !!! tip "Vanishing points"
     Put a point on the horizon this way, then right-click *that point* →
     **Add Lines Through Point…** to fan a pencil out of it. The lines are

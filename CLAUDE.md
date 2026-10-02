@@ -76,6 +76,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 - **Infinite by default**, clipped to the scene rect for drawing/intersections
   (`display_line()`); the two defining endpoints are draggable handles.
+- The clickable band is `HIT_PX` (12) **screen pixels**, converted with `_px()`
+  — as endpoint grabbing and point radii already were. It used to be 12 *scene*
+  units, which at the fully-zoomed-out default is 4.5px wide: miss a line by 3
+  pixels and you got neither selection nor its context menu, just the canvas
+  menu. Keep hit tolerances in screen pixels.
 - **Endpoint binding**: an endpoint can bind to a `PointItem` and follow it.
 - **Pivot**: pinned through a point → rotates about it (pencils/projectivities).
 - **Visible range**: right-click → "Define Visible Range…" adds an anchor point
@@ -87,9 +92,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   point where you clicked (`CanvasScene.add_point_on_line_at`, which projects
   the click with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it
   takes a position, not a fraction, so it works past the reference frame. The
-  entry is gated on `isSelected()` and `click_is_on_line()` (within
-  `HIT_WIDTH / 2`); note the second gate rarely bites on its own, since the
-  line's menu only opens inside that same band.
+  entry is gated on `isSelected()` and `click_is_on_line()`; note the second
+  gate rarely bites on its own, since the line's menu only opens inside the
+  same band.
 - A point's menu offers **Add Line Through Point** (one line at
   `PointItem.NEW_LINE_ANGLE`, 45°) and **Add Lines Through Point…** (the
   `ProjectivityDialog` angles). Both go through `add_projectivity`, so the
