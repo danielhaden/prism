@@ -864,6 +864,20 @@ class CanvasScene(QGraphicsScene):
         self.recompute_intersections()
         self.commit_undo()
 
+    def remove_element(self, item: PointItem | LineItem | GroupItem) -> None:
+        """Remove one item from the canvas, detaching whatever referenced it.
+
+        Lines bound or pinned to a removed point stay on the canvas and simply
+        come free — the same thing the Delete key does, so the console and the
+        canvas agree.
+
+        Args:
+            item: The point, line or group to remove.
+        """
+        self._remove_geometry(item)
+        self.recompute_intersections()
+        self.commit_undo()
+
     def _remove_geometry(self, item) -> None:
         if isinstance(item, GroupItem):
             # Detach references to the group's child points, then remove the

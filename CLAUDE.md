@@ -26,8 +26,9 @@ is imposed *projectively* using the app's own elements.
 - **`STATUS.md` is gitignored** — never commit it.
 - **Docs must stay green**: after any docstring/API change run
   `mkdocs build --strict` (exit 0). Recurring gotcha: a Google-style `Returns:`
-  block on a function **without a return type annotation** fails griffe in
-  strict mode — add the annotation (e.g. `-> tuple`, `-> float | None`).
+  or `Args:` block that documents something **without a type annotation** fails
+  griffe in strict mode — annotate both the return (e.g. `-> tuple`,
+  `-> float | None`) and every parameter you list under `Args:`.
 - **Headless testing**: verify behavior with
   `QT_QPA_PLATFORM=offscreen ./.venv/bin/python -u -c "..."`. Filter noise with
   `grep -v "propagateSizeHints\|font family"`. For rendering/visual checks,
@@ -105,7 +106,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
   `(add line <angle> <point>)`, `(add line <point> <point>)`,
-  `(point <line> <fraction>)`, `(list [-points|-lines])`, `(help)`.
+  `(point <line> <fraction>)`, `(rm <element>)`, `(list [-points|-lines])`,
+  `(help)`.
+- `(rm <element>)` resolves points *or* lines (`resolve_element`) and delegates
+  to `CanvasScene.remove_element`, which shares `_remove_geometry` with the
+  Delete key: references come free rather than cascading. Intersection points
+  are refused — they'd be recreated by the next recompute.
 - Elements referenced by **label** (`A`, case-insensitive) or **`list` id**
   (`P1`, `L1`). Fractions accept `1/3` or `0.5`. Angles are **degrees clockwise
   from horizontal**. Canvas fractions: 0 = top/left, 1 = bottom/right, of the
