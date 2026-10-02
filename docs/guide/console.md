@@ -131,6 +131,45 @@ it slides along.
 This form exists to be nested, so you can build in terms of existing geometry
 rather than bare coordinates.
 
+### `(label <element> <text>)`
+
+Name a point or a line. The label is drawn on the canvas beside it, and becomes
+a way to refer to it in later commands.
+
+```
+(label P1 A)              # by id
+(label L1 a)              # lines take labels too
+(label P2 "centre")       # quote anything with spaces
+(label A "")              # empty text removes the label
+```
+
+Points are set upright and lines **italic**, the usual convention and the same
+styling `(label -auto)` applies, so hand-labelled elements sit beside
+auto-labelled ones without looking out of place. Intersection points can be
+labelled — the label sticks across recomputes.
+
+### `(label -auto)` and `(label -clear)`
+
+```
+(label -auto)       # points A, B, C… and lines a, b, c…, in creation order
+(label -clear)      # remove every label on the canvas
+```
+
+`-auto` skips intersection points. Both are a single undo step. They are the
+console equivalent of **Auto-label Scene** and **Clear All Labels** on the
+canvas's right-click menu.
+
+!!! tip "Labels outlast ids"
+    Ids are positional, so `(rm P1)` renumbers everything after it. A label
+    stays put. In a script that removes or reorders anything, label first and
+    refer to elements by name:
+
+    ```
+    (add point 1/4 1/2)
+    (label P1 A)
+    (add line 30 A)       ; still works however the ids shift
+    ```
+
 ### `(rm <element>)`
 
 Remove a point or a line from the canvas.

@@ -107,8 +107,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
   `(add line <angle> <point>)`, `(add line <point> <point>)`,
-  `(point <line> <fraction>)`, `(rm <element>)`, `(list [-points|-lines])`,
-  `(help)`.
+  `(point <line> <fraction>)`, `(rm <element>)`, `(label <element> <text>)`,
+  `(label -auto|-clear)`, `(list [-points|-lines])`, `(help)`.
+- `(label …)` delegates to `CanvasScene.label_element` / `auto_label` /
+  `clear_labels`; the scene owns the convention (points upright, lines italic).
+  `auto_label` and `clear_labels` now `commit_undo()` themselves — they didn't,
+  so labelling from the canvas's right-click menu wasn't undoable and the next
+  Ctrl+Z quietly rolled back a *real* action instead.
 - `(rm <element>)` resolves points *or* lines (`resolve_element`) and delegates
   to `CanvasScene.remove_element`, which shares `_remove_geometry` with the
   Delete key: references come free rather than cascading. Intersection points

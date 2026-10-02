@@ -766,8 +766,27 @@ class CanvasScene(QGraphicsScene):
             self.clear_labels()
         event.accept()
 
-    def auto_label(self) -> None:
-        """Label points A, B, C… (upright) and lines a, b, c… (italic)."""
+    def label_element(self, item: PointItem | LineItem, text: str) -> None:
+        """Label one point or line, in the scene's convention.
+
+        Points are set upright and lines italic, matching
+        :meth:`auto_label`, so a labelled-by-hand element sits beside
+        auto-labelled ones without looking out of place.
+
+        Args:
+            item: The point or line to label.
+            text: The label; an empty string removes it.
+        """
+        item.set_label(text)
+        self._set_label_italic(item, isinstance(item, LineItem))
+        self.commit_undo()
+
+    def auto_label(self) -> tuple[int, int]:
+        """Label points A, B, C… (upright) and lines a, b, c… (italic).
+
+        Returns:
+            How many points and lines were labelled.
+        """
         points = sorted(
             (
                 it
@@ -790,11 +809,22 @@ class CanvasScene(QGraphicsScene):
         for i, line in enumerate(lines):
             line.set_label(_letters(i))
             self._set_label_italic(line, True)
+        self.commit_undo()
+        return len(points), len(lines)
 
-    def clear_labels(self) -> None:
+    def clear_labels(self) -> int:
+        """Remove every label on the canvas.
+
+        Returns:
+            How many labels were removed.
+        """
+        cleared = 0
         for item in self.items():
-            if isinstance(item, (PointItem, LineItem)):
+            if isinstance(item, (PointItem, LineItem)) and item.label_text():
                 item.set_label("")
+                cleared += 1
+        self.commit_undo()
+        return cleared
 
     @staticmethod
     def _set_label_italic(item, italic: bool) -> None:
