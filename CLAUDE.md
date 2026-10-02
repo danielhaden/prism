@@ -12,7 +12,8 @@ is imposed *projectively* using the app's own elements.
 
 ## Running & environment
 
-- Python **3.12** in `.venv` (created with `/opt/homebrew/bin/python3.12`).
+- Python **3.12** in `.venv` (rebuild it with `uv venv --python 3.12`; the old
+  `/opt/homebrew/bin/python3.12` this was first made with is gone).
 - Run the app: `python main.py` (or the VS Code "Prism" launch config, F5).
 - App deps: `requirements.txt` (PySide6). Docs deps: `requirements-docs.txt`.
 
@@ -35,7 +36,7 @@ is imposed *projectively* using the app's own elements.
   render the scene/view to a `QImage` and inspect pixels (state checks alone
   have hidden real rendering bugs — see below).
 - The shell's working directory sometimes drifts; prefer `cd
-  /Users/dhadenx6/projects/prism && …` in one-off commands.
+  /Users/dhaden/projects/prism && …` in one-off commands.
 
 ## Architecture
 
@@ -119,6 +120,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Scripts**: Console "Save Script…" records the session's *building* commands;
   ScriptsPanel lists/runs them. Location set via **Settings → Scripts Folder…**
   (`prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides; `.prism` text files).
+  `prism/settings.py` also holds the book path/page (see **Panels → Book**).
 
 ## Panels
 
@@ -128,6 +130,17 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Console** (bottom), **Scripts** (right, tabbed with Library), **Selection**
   (left; live names + positions, matches console naming via
   `CanvasScene.element_name`).
+- **Book** (`prism/book_panel.py`; right, tabbed with Library/Scripts): a
+  `QPdfView` reader for *one* PDF — Olive Whicher's *Projective Geometry* —
+  pointed at from **Settings → Book (PDF)…** (`PRISM_BOOK_PATH` overrides).
+  Continuous pages, fit-to-width by default, and the last page read is
+  remembered (reset when the book is re-pointed). Uses PySide6's **QtPdf /
+  QtPdfWidgets** — part of PySide6, so no new dependency.
+  Gotchas: `QPdfView.zoomFactor()` stays at its last *custom* value while
+  fit-to-width is on, so a zoom step reconstructs the fitted scale from the page
+  width (`_fitted_zoom`); `QPdfPageNavigator.jump()` to the page it's already on
+  emits nothing, so the controls are synced by hand after a load; page rendering
+  is **asynchronous**, so a pixel check needs an event-pumping wait.
 
 ## Canvas behavior
 
@@ -184,4 +197,6 @@ tab → harmonic-nets groundwork (infinite lines, visible range, no grid, consol
 (point radius/color/glow, point↔line anchor, zoom cap, undo/redo) → expand CLI
 (S-expressions, add horizon/line/point, scripts, settings) → refine canvas
 behavior (default point style, line-through-two-points + CLI, selectable
-intersections, Selection panel, **point/anchor unification**).
+intersections, Selection panel, **point/anchor unification**) → recenter a
+drifted canvas (Fit to Frame, zoom-out rescue) → console `(rm <element>)` →
+book viewer (QtPdf Book panel + Settings → Book (PDF)…).

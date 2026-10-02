@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMainWindow
 
+from prism.book_panel import BookPanel
 from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
@@ -35,6 +36,10 @@ class MainWindow(QMainWindow):
         self.scripts = ScriptsPanel(self.console.run_script, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.scripts)
         self.tabifyDockWidget(self.library, self.scripts)
+
+        self.book = BookPanel(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.book)
+        self.tabifyDockWidget(self.library, self.book)
         self.library.raise_()
         self.console.scriptSaved.connect(self.scripts.refresh)
 
@@ -167,12 +172,20 @@ class MainWindow(QMainWindow):
         toggle_selection = self.selection.toggleViewAction()
         toggle_selection.setText("Show Selection")
         view_menu.addAction(toggle_selection)
+        toggle_book = self.book.toggleViewAction()
+        toggle_book.setText("Show Book")
+        view_menu.addAction(toggle_book)
 
         settings_menu = self.menuBar().addMenu("&Settings")
         scripts_folder_action = QAction("Scripts Folder…", self)
         scripts_folder_action.setToolTip("Choose where scripts are saved")
         scripts_folder_action.triggered.connect(self._choose_scripts_folder)
         settings_menu.addAction(scripts_folder_action)
+
+        book_action = QAction("Book (PDF)…", self)
+        book_action.setToolTip("Choose the PDF the Book panel reads")
+        book_action.triggered.connect(self._choose_book)
+        settings_menu.addAction(book_action)
 
     # -- Tool switching ----------------------------------------------------
 
@@ -192,3 +205,8 @@ class MainWindow(QMainWindow):
         if chosen:
             set_scripts_dir(chosen)
             self.scripts.refresh()
+
+    def _choose_book(self) -> None:
+        self.book.choose_book()
+        self.book.show()
+        self.book.raise_()

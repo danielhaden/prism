@@ -19,3 +19,9 @@ Entry point, main window, and shared enums.
 Where the scripts folder lives, and how saved scripts are read/written.
 
 ::: prism.settings
+
+## The book panel
+
+The PDF reader docked beside the canvas.
+
+::: prism.book_panel

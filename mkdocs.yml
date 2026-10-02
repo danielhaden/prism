@@ -62,6 +62,7 @@ nav:
       - Projectivities & Pivots: guide/projectivities.md
       - The Library: guide/library.md
       - The Console: guide/console.md
+      - The Book: guide/book.md
   - Concepts:
       - Projective Basics: concepts/projective-basics.md
   - Developer Reference:
