@@ -83,6 +83,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
   move, can't rotate). The horizon uses this.
 - Line properties dialog: color, thickness (cosmetic), dash style.
+- Right-click → **Add Point Here** adds a line-anchored point where you clicked
+  (`CanvasScene.add_point_on_line_at`, which projects the click with
+  `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
+  position, not a fraction, so it works past the reference frame.
+- Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
+  the real modal menu opens and the test hangs). Patch the module's name
+  instead: `prism.items.line_item.QMenu = FakeMenu`. And re-fetch items after
+  an undo: the snapshot rebuild deletes the C++ objects behind stale wrappers.
 
 ### Intersections
 

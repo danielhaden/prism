@@ -114,6 +114,8 @@ class LineItem(Labelable, QGraphicsLineItem):
 
     def contextMenuEvent(self, event):
         menu = QMenu()
+        add_point_action = menu.addAction("Add Point Here")
+        menu.addSeparator()
         line_props_action = menu.addAction("Line Properties…")
         proj_action = menu.addAction("Add Projectivity…")
         range_action = menu.addAction("Define Visible Range…")
@@ -137,7 +139,10 @@ class LineItem(Labelable, QGraphicsLineItem):
         label_actions = self.add_label_actions(menu)
 
         chosen = menu.exec(event.screenPos())
-        if chosen is line_props_action:
+        if chosen is add_point_action:
+            if scene is not None:
+                scene.add_point_on_line_at(self, event.scenePos())
+        elif chosen is line_props_action:
             self.open_line_style_dialog()
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
@@ -351,6 +356,20 @@ class LineItem(Labelable, QGraphicsLineItem):
         if length < 1e-9:
             return None
         return QPointF(dx / length, dy / length)
+
+    def closest_scene_point(self, scene_pos: QPointF) -> QPointF:
+        """The place on this line nearest ``scene_pos``, in scene coordinates.
+
+        The line is infinite, so this is a perpendicular projection rather than
+        a clamp to the drawn segment.
+
+        Args:
+            scene_pos: A position in scene coordinates, e.g. a click.
+
+        Returns:
+            The nearest position on the line.
+        """
+        return self.mapToScene(self._project_local(self.mapFromScene(scene_pos)))
 
     def _project_local(self, local_pt: QPointF) -> QPointF:
         line = self.line()

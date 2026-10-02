@@ -415,6 +415,30 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def add_point_on_line_at(
+        self, line: LineItem, scene_pos: QPointF
+    ) -> PointItem:
+        """Add a point on a line, where a click lands on it.
+
+        The click is projected onto the line, so the point sits exactly on it
+        rather than merely near it, and is anchored there — dragging it slides
+        it along, as with :meth:`add_point_on_line`. Unlike that method this
+        takes a position rather than a fraction, so it works anywhere along an
+        infinite line, including outside the reference frame.
+
+        Args:
+            line: The line to place the point on.
+            scene_pos: Where the user clicked, in scene coordinates.
+
+        Returns:
+            The new point.
+        """
+        point = self.add_point(line.closest_scene_point(scene_pos))
+        point.set_anchor_line(line)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
     def add_line_between(self, a: PointItem, b: PointItem) -> LineItem | None:
         """Add an infinite line through two points, bound to both.
 

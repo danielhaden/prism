@@ -36,7 +36,15 @@ endpoint **bound** to its point, so the line stays through them as they move.
 ### Anchoring a point to a line
 
 Snapping is transient — it releases as soon as you drag away. To make a point
-*stay* on a line, **anchor** it:
+*stay* on a line, **anchor** it. The quickest way is to make it there in the
+first place:
+
+**Right-click anywhere on a line → Add Point Here.** A new point appears at
+that spot, already anchored to the line. The click is projected onto the line,
+so the point sits exactly on it however roughly you aimed, and it works
+anywhere along the line — including out past the reference frame.
+
+To anchor a point you already have:
 
 1. Select **one line and one (or more) points** — click one, then ++shift++-click
    the other.
@@ -91,6 +99,8 @@ its **defining handles**.
 - **Drag an endpoint handle** (shown on hover/selection) to reorient it.
 - **Snapping** — dragging an endpoint onto a point **binds** it there; the
   endpoint then follows that point when it moves.
+- **Right-click → Add Point Here** puts a new point on the line where you
+  clicked, [anchored](#anchoring-a-point-to-a-line) to it.
 
 ### Visible range
 
