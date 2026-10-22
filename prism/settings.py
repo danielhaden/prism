@@ -63,12 +63,26 @@ def script_path(name: str) -> str:
     return os.path.join(scripts_dir(), safe_script_name(name) + SCRIPT_SUFFIX)
 
 
+def write_script(path: str, text: str) -> None:
+    """Overwrite a script at an exact path.
+
+    Used when editing a script that is already on disk: the path comes from the
+    file itself rather than from its display name, which matters for a script
+    added by hand under a name :func:`safe_script_name` would alter.
+
+    Args:
+        path: The file to write.
+        text: Its new contents; a trailing newline is added if missing.
+    """
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text if text.endswith("\n") else text + "\n")
+
+
 def save_script(name: str, text: str) -> str:
     """Write a script to the scripts folder; returns the path written."""
     ensure_scripts_dir()
     path = script_path(name)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(text if text.endswith("\n") else text + "\n")
+    write_script(path, text)
     return path
 
 

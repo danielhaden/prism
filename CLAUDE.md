@@ -174,9 +174,17 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Library** (right): built-in templates (Triangle, Quadrilateral, Complete
   Quadrangle, Projectivity) + user-saved; drag onto canvas; save selection;
   right-click rename/delete; persisted via `prism/template_store.py`.
-- **Console** (bottom), **Scripts** (right, tabbed with Library), **Selection**
-  (left; live names + positions, matches console naming via
-  `CanvasScene.element_name`).
+- **Console** (bottom), **Selection** (left; live names + positions, matches
+  console naming via `CanvasScene.element_name`).
+- **Scripts** (right, tabbed with Library): the folder's `.prism` files in a
+  list, with an editor under it in a vertical splitter. **Run** executes the
+  *editor's* text, not the file, so an edit can be tried before it's kept;
+  Save / Revert / Refresh alongside. Unsaved edits mark the script *modified*
+  and prompt (Save / Discard / Cancel) when you select another — Cancel puts
+  the selection back. Saving goes through `settings.write_script(path, text)`,
+  which writes the **exact path** the script was read from: deriving it from
+  the display name would send a hand-named script like `net(1).prism` to
+  `net1.prism` and leave the original behind.
 - **Book** (`prism/book_panel.py`; right, tabbed with Library/Scripts): a
   `QPdfView` reader for *one* PDF — Olive Whicher's *Projective Geometry* —
   pointed at from **Settings → Book (PDF)…** (`PRISM_BOOK_PATH` overrides).

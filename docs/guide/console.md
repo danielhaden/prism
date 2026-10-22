@@ -233,9 +233,22 @@ Click **Save Script…** next to the input and give it a name. The session's
 ### The Scripts panel
 
 **View → Show Scripts** opens a dock (tabbed with the Library) listing every
-script in your scripts folder. **Double-click** one — or select it and hit
-**Run** — to execute it; its commands and output are echoed to the console.
-**Refresh** re-reads the folder, so scripts you add by hand show up too.
+script in your scripts folder, with an **editor** below the list. Select a
+script and its text appears there; drag the divider to give the list or the
+editor more room.
+
+| Button | What it does |
+|--------|--------------|
+| **Run** | Execute what's in the editor; commands and output are echoed to the console |
+| **Save** | Write the editor back to the file |
+| **Revert** | Throw away your edits and re-read the file |
+| **Refresh** | Re-read the folder, so scripts you add by hand show up |
+
+**Run uses the editor, not the file**, so you can try a change before keeping
+it. Edit, run, look at the canvas, adjust — then **Save** when it does what you
+want, or **Revert** when it doesn't. A script with unsaved edits is marked
+*modified* under the editor, and selecting a different one asks before
+discarding them. Double-clicking a script still runs it.
 
 Replaying a script doesn't re-record its commands, so running one won't
 duplicate it into the next thing you save.
@@ -243,7 +256,7 @@ duplicate it into the next thing you save.
 ### Where scripts live
 
 Scripts are plain text files (`.prism`) in your **scripts folder**, so you can
-edit them in any editor. Choose the folder from **Settings → Scripts Folder…**;
+edit them in any editor as well as in the panel. Choose the folder from **Settings → Scripts Folder…**;
 it defaults to a per-user application-data directory, and the panel shows the
 current path at the bottom.
 
