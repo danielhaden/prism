@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from prism.anchors import IntersectionAnchor
+from prism.anchors import MeetAnchor
 from prism.dependencies import (
     Changed,
     DependencyGraph,
@@ -93,9 +93,11 @@ class CanvasScene(QGraphicsScene):
         self._line_start_point: PointItem | None = None
         self._preview_line: LineItem | None = None
 
-        # Intersection points (plain points with an IntersectionAnchor), keyed
+        # Intersection points (plain points with an MeetAnchor), keyed
         # by the (ordered id) line pair.
-        self._intersections: dict[tuple[int, int], PointItem] = {}
+        # Points where lines meet. One per place, however many lines concur
+        # there; the lines are held by each point's MeetAnchor.
+        self._meets: list[PointItem] = []
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._syncing_anchors = False
@@ -770,10 +772,8 @@ class CanvasScene(QGraphicsScene):
         Drop it from the managed intersection set so it becomes a free point;
         the crossing gets a fresh marker on the next recompute.
         """
-        for key, managed in list(self._intersections.items()):
-            if managed is point:
-                del self._intersections[key]
-                break
+        if point in self._meets:
+            self._meets.remove(point)
 
     # -- Pencils (pinning lines through a point) --------------------------
 
@@ -861,7 +861,7 @@ class CanvasScene(QGraphicsScene):
             it
             for it in self.items()
             if isinstance(it, PointItem)
-            and not it.is_intersection()
+            and not it.is_meet()
             and it.anchor_references_line(line)
         ]
 
@@ -923,53 +923,92 @@ class CanvasScene(QGraphicsScene):
         return f'{base} "{label}"' if label else base
 
     def recompute_intersections(self) -> None:
-        """Maintain an intersection point at every line crossing.
+        """Maintain one point wherever lines meet.
 
-        Each is a plain point carrying an IntersectionAnchor; the scene keeps
-        it positioned. It stays the same object as lines move (so a selection or
-        label sticks with it) until its crossing is gone.
+        Crossings are gathered first and then **grouped by place**: lines that
+        concur give a single point carrying all of them, not one point per
+        pair stacked on top of each other. A point keeps its identity — and so
+        its label, selection and anything built on it — while at least two of
+        its lines still meet there.
         """
         if self._updating:
             return
         self._updating = True
         try:
-            # An undefined line has no position, so it crosses nothing.
-            lines = [ln for ln in self._lines() if not ln.position_undefined()]
-            seen: set[tuple[int, int]] = set()
-            for i in range(len(lines)):
-                for j in range(i + 1, len(lines)):
-                    a, b = lines[i], lines[j]
-                    point = self._intersection_of(a, b)
-                    if point is None:
-                        continue
-                    key = (min(id(a), id(b)), max(id(a), id(b)))
-                    seen.add(key)
-                    existing = self._intersections.get(key)
-                    if existing is None:
-                        marker = PointItem(point)
-                        marker.set_anchor(IntersectionAnchor(a, b))
-                        self._apply_default_point_style(marker)
-                        self._tag(marker)
-                        self.addItem(marker)
-                        self._intersections[key] = marker
-                    else:
-                        # The crossing is back (or never left).
-                        existing.set_position_undefined(False)
-                        existing.sync_to_anchor()
-            for key in list(self._intersections):
-                if key in seen:
-                    continue
-                marker = self._intersections[key]
-                if self._is_depended_on(marker):
-                    # Something is built on this crossing, so the marker has to
-                    # outlive it: keep it undefined, ready to come back when
-                    # the lines meet again. Dropping it would strand whatever
-                    # depends on it.
-                    marker.set_position_undefined(True)
-                else:
-                    self.removeItem(self._intersections.pop(key))
+            self._apply_meets(self._gather_meeting_places())
         finally:
             self._updating = False
+
+    def _gather_meeting_places(self) -> list:
+        """Where lines currently meet, and which lines meet at each place.
+
+        Returns:
+            ``[[position, [lines…]], …]``, one entry per place.
+        """
+        # An undefined line has no position, so it crosses nothing.
+        lines = [ln for ln in self._lines() if not ln.position_undefined()]
+        tolerance = self.snap_radius()
+        places: list = []
+        for first in range(len(lines)):
+            for second in range(first + 1, len(lines)):
+                a, b = lines[first], lines[second]
+                where = self._intersection_of(a, b)
+                if where is None:
+                    continue
+                place = None
+                for candidate in places:
+                    if QLineF(candidate[0], where).length() <= tolerance:
+                        place = candidate
+                        break
+                if place is None:
+                    places.append([where, [a, b]])
+                else:
+                    for line in (a, b):
+                        if not any(other is line for other in place[1]):
+                            place[1].append(line)
+        return places
+
+    def _apply_meets(self, places: list) -> None:
+        """Bring the scene's meet points into line with ``places``."""
+        spare = list(self._meets)
+        for where, lines in places:
+            point = self._claim_meet(spare, lines)
+            if point is None:
+                point = PointItem(where)
+                point.set_anchor(MeetAnchor(lines))
+                self._apply_default_point_style(point)
+                self._tag(point)
+                self.addItem(point)
+                self._meets.append(point)
+            else:
+                spare.remove(point)
+                point.anchor().set_lines(lines)
+                point.set_position_undefined(False)
+                point.sync_to_anchor()
+        for point in spare:
+            if self._is_depended_on(point) or point.label_text() or not point.is_shown():
+                # Something is built on this meet, or you have said something
+                # about it, so it outlives the crossing: undefined, ready to
+                # come back when the lines meet again.
+                point.set_position_undefined(True)
+            else:
+                self._meets.remove(point)
+                self.removeItem(point)
+
+    @staticmethod
+    def _claim_meet(candidates: list, lines: list):
+        """The existing meet point that belongs to ``lines``, if any.
+
+        Identity follows the lines: a point is the same point while two of the
+        lines meeting there are still the ones that defined it. That keeps a
+        label and anything built on it attached as other lines come and go.
+        """
+        for point in candidates:
+            anchor = point.anchor()
+            shared = sum(1 for line in lines if anchor.references_line(line))
+            if shared >= 2:
+                return point
+        return None
 
     def items_at(self, scene_pos: QPointF) -> list:
         """Items under a scene position, topmost first.
@@ -1032,7 +1071,7 @@ class CanvasScene(QGraphicsScene):
         # twice. (N concurrent lines still leave N stacked — see CLAUDE.md.)
         radius = self.snap_radius()
         for item in self.items():
-            if isinstance(item, PointItem) and not item.is_intersection():
+            if isinstance(item, PointItem) and not item.is_meet():
                 if QLineF(point, item.center()).length() <= radius:
                     return None
         return point
@@ -1213,7 +1252,7 @@ class CanvasScene(QGraphicsScene):
             # A crossing can't be removed — the lines still meet there, and the
             # recompute would put it straight back. Hiding it is what deleting
             # one can honestly mean.
-            if isinstance(item, PointItem) and item.is_intersection():
+            if isinstance(item, PointItem) and item.is_meet():
                 item.set_shown(False)
                 continue
             self._remove_geometry(item)
@@ -1266,6 +1305,6 @@ class CanvasScene(QGraphicsScene):
     def clear_all(self) -> None:
         self._cancel_line()
         self.clear()
-        self._intersections.clear()
+        self._meets.clear()
         self._snap_indicator = None
         self.commit_undo()

@@ -34,7 +34,7 @@ def serialize_selection(items, name: str) -> dict:
     points = [
         it
         for it in items
-        if isinstance(it, PointItem) and not it.is_intersection()
+        if isinstance(it, PointItem) and not it.is_meet()
     ]
     lines = [it for it in items if isinstance(it, LineItem)]
     index = {id(p): i for i, p in enumerate(points)}

@@ -387,7 +387,7 @@ class CommandInterpreter:
                 "  e.g. (rm P1)"
             )
         element = self._as_element(args[0])
-        if isinstance(element, PointItem) and element.is_intersection():
+        if isinstance(element, PointItem) and element.is_meet():
             # The lines still meet there, so the point can't be removed — but
             # it can be put out of the way, which is what was meant.
             described = self._render(element)
@@ -497,12 +497,11 @@ class CommandInterpreter:
     def _describe_point(self, point) -> str:
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
-        if point.is_intersection():
-            anchor = point.anchor()
-            pair = ", ".join(
-                sorted(self._line_name(ln) for ln in (anchor.a, anchor.b))
+        if point.is_meet():
+            names = ", ".join(
+                sorted(self._line_name(ln) for ln in point.meeting_lines())
             )
-            tag = f"  [meet of {pair}]"
+            tag = f"  [meet of {names}]"
         elif point.has_anchor():
             tag = "  [on-line]"
         else:

@@ -277,7 +277,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             # Notify so bound endpoints / anchored points / intersections
             # update. An intersection point moved *by the scene* has nothing
             # depending on it, so skip that to avoid needless churn.
-            if not (self._syncing and self.is_intersection()):
+            if not (self._syncing and self.is_meet()):
                 scene = self.scene()
                 if scene is not None and hasattr(scene, "on_point_moved"):
                     scene.on_point_moved(self)
@@ -292,9 +292,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     def has_anchor(self) -> bool:
         return self._anchor is not None
 
-    def is_intersection(self) -> bool:
-        """Whether this point is currently pinned to a line intersection."""
-        return self._anchor is not None and self._anchor.kind == "intersection"
+    def is_meet(self) -> bool:
+        """Whether this point is where a set of lines meet.
+
+        Not a kind of point — a statement about what currently determines it.
+        Ask :meth:`meeting_lines` for the lines themselves.
+        """
+        return self._anchor is not None and self._anchor.kind == "meet"
+
+    def meeting_lines(self) -> list:
+        """The lines that meet at this point, or an empty list."""
+        return list(self._anchor.lines) if self.is_meet() else []
 
     def set_anchor(self, anchor) -> None:
         """Pin this point with ``anchor`` and snap it to the anchor's position."""
@@ -320,7 +328,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         it is — what matters is how much freedom it has.
         """
         anchor = self._anchor
-        return anchor is not None and anchor.kind == "intersection"
+        return anchor is not None and anchor.kind == "meet"
 
     def anchor_references_line(self, line) -> bool:
         return self._anchor is not None and self._anchor.references_line(line)

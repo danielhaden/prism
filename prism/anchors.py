@@ -5,7 +5,7 @@ governs where a real :class:`~prism.items.point_item.PointItem` sits and how it
 responds to being dragged:
 
 * :class:`LineAnchor` keeps a point on a line; dragging it *slides* it along.
-* :class:`IntersectionAnchor` keeps a point at the crossing of two lines;
+* :class:`MeetAnchor` keeps a point at the crossing of two lines;
   dragging it *detaches* it into a free point.
 
 All points are the same kind of object; whether one is "an intersection point"
@@ -64,26 +64,47 @@ class LineAnchor(Anchor):
         return line is self.line
 
 
-class IntersectionAnchor(Anchor):
-    """Constrains a point to the crossing of two lines."""
+class MeetAnchor(Anchor):
+    """Constrains a point to where a set of lines meet.
 
-    kind = "intersection"
+    Two lines are enough to determine the point. Further lines through the
+    same place **join this anchor** rather than spawning points of their own:
+    three concurrent lines meet at one point, not at three points stacked on
+    each other. That is what makes a pencil a pencil.
+
+    The lines are the relation. A point does not know what sort of point it
+    is — it knows what it is the meet of, and
+    :meth:`~prism.items.line_item.LineItem.meets` reads the same relation from
+    the other side.
+    """
+
+    kind = "meet"
     persistent = False
 
-    def __init__(self, line_a, line_b):
-        self.a = line_a
-        self.b = line_b
+    def __init__(self, lines):
+        """
+        Args:
+            lines: The lines that meet here; two or more.
+        """
+        self.lines = list(lines)
 
     def position(self) -> QPointF | None:
-        if self.a.scene() is None or self.b.scene() is None:
-            return None
-        kind, point = self.a.display_line().intersects(self.b.display_line())
-        if kind == QLineF.IntersectionType.BoundedIntersection:
-            return point
+        live = [ln for ln in self.lines if ln.scene() is not None]
+        for first in range(len(live)):
+            for second in range(first + 1, len(live)):
+                kind, point = live[first].display_line().intersects(
+                    live[second].display_line()
+                )
+                if kind == QLineF.IntersectionType.BoundedIntersection:
+                    return point
         return None
 
     def constrain_drag(self, scene_pos: QPointF) -> QPointF | None:
-        return None  # dragging an intersection point detaches it
+        return None  # the lines decide where this point is
 
     def references_line(self, line) -> bool:
-        return line is self.a or line is self.b
+        return any(other is line for other in self.lines)
+
+    def set_lines(self, lines) -> None:
+        """Replace the set of lines meeting here."""
+        self.lines = list(lines)

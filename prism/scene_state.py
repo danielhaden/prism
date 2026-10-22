@@ -86,7 +86,7 @@ def capture(scene) -> dict:
         (
             it
             for it in scene.items()
-            if isinstance(it, PointItem) and not it.is_intersection()
+            if isinstance(it, PointItem) and not it.is_meet()
         ),
         key=lambda it: getattr(it, "_seq", 0),
     )
@@ -156,19 +156,19 @@ def capture(scene) -> dict:
     # need keeping — against the lines that produce them, since the markers
     # themselves won't be the same objects afterwards.
     crossing_labels = []
-    for marker in getattr(scene, "_intersections", {}).values():
+    for marker in getattr(scene, "_meets", []):
         anchor = marker.anchor()
-        if anchor is None or anchor.kind != "intersection":
+        if anchor is None or anchor.kind != "meet":
             continue
         label = _capture_label(marker)
         shown = marker.is_shown()
         if label is None and shown:
             continue  # nothing about this one worth keeping
-        first, second = l_index.get(id(anchor.a)), l_index.get(id(anchor.b))
-        if first is None or second is None:
+        indices = [l_index.get(id(line)) for line in anchor.lines]
+        if any(index is None for index in indices) or len(indices) < 2:
             continue
         crossing_labels.append(
-            {"lines": sorted((first, second)), "label": label, "shown": shown}
+            {"lines": sorted(indices), "label": label, "shown": shown}
         )
 
     groups = []
@@ -269,16 +269,21 @@ def _restore_crossing_labels(scene, lines, entries) -> None:
     """
     if not entries:
         return
-    markers = {}
-    for marker in getattr(scene, "_intersections", {}).values():
+    markers = []
+    for marker in getattr(scene, "_meets", []):
         anchor = marker.anchor()
-        if anchor is not None and anchor.kind == "intersection":
-            markers[frozenset((id(anchor.a), id(anchor.b)))] = marker
+        if anchor is not None and anchor.kind == "meet":
+            markers.append((frozenset(id(ln) for ln in anchor.lines), marker))
     for entry in entries:
-        first, second = entry["lines"]
-        if first >= len(lines) or second >= len(lines):
+        wanted = entry["lines"]
+        if any(index >= len(lines) for index in wanted):
             continue
-        marker = markers.get(frozenset((id(lines[first]), id(lines[second]))))
+        ids = frozenset(id(lines[index]) for index in wanted)
+        # Match on the lines they have in common: a meet is the same meet while
+        # two of its lines are, even if others have joined or left since.
+        marker = next(
+            (m for key, m in markers if len(key & ids) >= 2), None
+        )
         if marker is not None:
             _restore_label(marker, entry["label"])
             marker.set_shown(entry.get("shown", True))

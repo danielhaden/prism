@@ -58,9 +58,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **All points are `PointItem`.** There is no `IntersectionPointItem` anymore.
 - A point may carry an invisible **anchor** (`prism/anchors.py`) that *pins its
   position*. Anchors are pseudo-points, never drawn:
-  - `IntersectionAnchor(a, b)` — pins a point to the crossing of two lines.
-    **Dragging detaches** it (becomes a free point; the crossing gets a fresh
-    marker).
+  - `MeetAnchor(lines)` — pins a point to where a **set** of lines meet. Two
+    determine it; further concurrent lines **join the same anchor**, so three
+    concurrent lines give one point, not three stacked (stage 3). Read the
+    same relation from the other side with `LineItem.meets()`.
   - `LineAnchor(line, t)` — keeps a point on a line; **dragging slides** it.
 - `PointItem.is_intersection()` / `has_anchor()` / `set_anchor()` /
   `clear_anchor()`. `itemChange` applies the anchor's drag rule; a `_syncing`
@@ -89,11 +90,20 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   the reason**, when the selection isn't exactly two ("3 points selected, need
   2", "right-click one of the two"). It used to vanish silently, which read as
   a bug — see the RCA in the session log.
-- **Known wart, to fix in stage 3:** `_intersections` is keyed by *line
-  pair*, so N concurrent lines leave N stacked markers at one spot (3 lines →
-  3 points, all at the same position). Hiding one therefore does nothing
-  visible in a pencil. One point per concurrency is the fix, with the incidence
-  held by the lines.
+- **Stage 3 (done):** meets are grouped **by place**, not by line pair.
+  `_gather_meeting_places()` collects crossings and clusters them within
+  `snap_radius()`; `_apply_meets()` reconciles them with the scene's `_meets`
+  list, claiming an existing point when it shares **two** lines with a place
+  (so a label and anything built on it stay attached as lines come and go).
+  `PointItem.is_meet()`/`meeting_lines()` replace `is_intersection()`.
+- **Open gap, found by stage 3:** snapshots don't store meets (they are
+  recomputed), so a **pivot or endpoint binding onto a meet is silently
+  dropped by undo/redo** — `capture()` writes `"pivot": None` because the meet
+  has no index in the stored point list. It arrived with "geometry can be
+  built on a crossing" and was hidden until concurrency collapsed to one
+  point. The fix is to key such relationships on the meet's *lines*, the way
+  crossing labels already are. Until then a net built on crossings loses its
+  pinning on undo.
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
   add-line-through, joining two crossings, console `(add line … X)`. Updates
   run in dependency order (see **Propagation**), so what you build follows.

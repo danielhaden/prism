@@ -385,6 +385,28 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         offset = QLineF(local_pos, self._project_local(local_pos)).length()
         return offset <= self._px(self.HIT_PX) / 2
 
+    def meets(self) -> list:
+        """The points where this line meets others.
+
+        The same relation :class:`~prism.anchors.MeetAnchor` holds, read from
+        the line's side: these are points this line helps determine.
+
+        Returns:
+            The meet points on this line, in scene order of creation.
+        """
+        scene = self.scene()
+        if scene is None:
+            return []
+        from prism.items.point_item import PointItem
+
+        return [
+            it
+            for it in scene.items()
+            if isinstance(it, PointItem)
+            and it.is_meet()
+            and it.anchor().references_line(self)
+        ]
+
     def closest_scene_point(self, scene_pos: QPointF) -> QPointF:
         """The place on this line nearest ``scene_pos``, in scene coordinates.
 
