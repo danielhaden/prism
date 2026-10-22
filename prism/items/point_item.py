@@ -129,13 +129,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # two, say so in a disabled entry rather than silently omitting it —
         # a stray selected point (a crossing caught by a rubber band, say)
         # used to make the command vanish with no explanation.
-        line_action = None
+        line_action = one_line_action = pencil_action = None
         two_points = (
             scene.selected_points()
             if scene is not None and hasattr(scene, "selected_points")
             else []
         )
-        if len(two_points) == 2 and self in two_points:
+        joining = len(two_points) == 2 and self in two_points
+        if joining:
+            # With two points picked, joining them is the thing you mean. The
+            # single-point commands below would be three ways to draw a line
+            # in one menu, so they stand down.
             line_action = menu.addAction("Add Line Through Points")
             menu.addSeparator()
         elif scene is not None:
@@ -148,8 +152,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # Lines drawn *through* this point. The lines are new, so nothing can
         # depend on them yet and no cycle is possible — a crossing is as good a
         # centre for a pencil as any other point.
-        one_line_action = pencil_action = None
-        if scene is not None:
+        if scene is not None and not joining:
             one_line_action = menu.addAction("Add Line Through Point")
             pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()

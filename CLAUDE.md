@@ -90,7 +90,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - `PointItem.contextMenuEvent` shows **Add Line Through Points disabled, with
   the reason**, when the selection isn't exactly two ("3 points selected, need
   2", "right-click one of the two"). It used to vanish silently, which read as
-  a bug — see the RCA in the session log.
+  a bug — see the RCA in the session log. When the join *is* available the two
+  single-point line commands are **omitted** (`joining` flag): with a pair
+  selected, three ways to draw a line in one menu is noise.
 - **Stage 3 (done):** meets are grouped **by place**, not by line pair.
   `_gather_meeting_places()` collects crossings and clusters them within
   `snap_radius()`; `_apply_meets()` reconciles them with the scene's `_meets`

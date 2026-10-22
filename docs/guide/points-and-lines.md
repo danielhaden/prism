@@ -116,8 +116,13 @@ you want them back.
   [pencil](projectivities.md): choose a start angle, an end angle and how many
   lines. This is the quick way to fan lines out of a vanishing point.
 - **Add Line Through Points** — joins **two** selected points, binding each
-  endpoint to its point. Select anything other than two and the entry is
-  still there, greyed out, saying what it needs.
+  endpoint to its point.
+
+With two points selected, joining them is clearly what you mean, so the menu
+offers **only** that: the two single-point commands stand down rather than
+giving you three ways to draw a line at once. They come back as soon as the
+selection isn't a pair. Select anything other than two and the join is still
+listed, greyed out, saying what it needs.
 - **Snap Point to Line** / **Remove Anchor** — see
   [Anchoring](#anchoring-a-point-to-a-line).
 - **Pin Lines Through Point / Unpin** — turn the lines *already* passing
