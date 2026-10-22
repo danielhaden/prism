@@ -149,6 +149,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   depend on them yet and no cycle is possible. Note "Pin Lines Through Point" only pins *existing*
   lines — before this there was no way to *create* a line through a single
   point except the console.
+- Select **two lines**, right-click either → **Add Point at Intersection**
+  (`CanvasScene.meet_of`, console `(point <line> <line>)`). It *finds* the
+  meet rather than creating one — since stage 3 a point already exists wherever
+  lines cross — and shows it if hidden. Disabled with a reason when more than
+  two lines are selected. Fires the console command, like Add Horizon.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
   adds an unattached point there, and **Add Horizon** a horizontal
   orientation-locked line at the clicked height.

@@ -140,6 +140,26 @@ it slides along.
 This form exists to be nested, so you can build in terms of existing geometry
 rather than bare coordinates.
 
+### `(point <line> <line>)`
+
+The point where two lines meet.
+
+```
+(point L1 L2)       # where L1 crosses L2
+(point a b)         # by label
+```
+
+Nothing is created: Prism already keeps a point wherever lines cross, so this
+*finds* it — and shows it if you had [hidden](points-and-lines.md#hiding-a-point)
+it. Making a second point there would be the same point twice.
+
+If the two don't cross on the canvas — parallel, or meeting off it — the
+command says so rather than inventing a point.
+
+!!! tip "From the canvas"
+    Select two lines and right-click either of them → **Add Point at
+    Intersection** runs this command for you.
+
 ### `(label <element> <text>)`
 
 Name a point or a line. The label is drawn on the canvas beside it, and becomes

@@ -286,6 +286,7 @@ class CommandInterpreter:
             "                              both\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
+            "  (point <line> <line>)       the point where two lines meet\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
             "  (label <element> <text>)    name a point or line; quote text\n"
@@ -369,14 +370,38 @@ class CommandInterpreter:
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:
             raise CommandError(
-                "Usage: (point <line> <fraction>)\n"
+                "Usage: (point <line> <fraction>)  a point along a line\n"
+                "   or: (point <line> <line>)      where two lines meet\n"
                 "  0 = the line's left-hand end, 1 = its right-hand end"
             )
         line = self._as_line(args[0])
+        second = self._value(args[1])
+        if isinstance(second, LineItem) or (
+            isinstance(second, str) and parse_fraction(second) is None
+        ):
+            return self._meet_of(line, self._as_line(args[1]))
         fraction = self._as_fraction(args[1])
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
+        return point
+
+    def _meet_of(self, a: LineItem, b: LineItem) -> PointItem:
+        """The point where two lines meet, shown if it was hidden.
+
+        Nothing is created: a point is already kept wherever lines cross. If
+        it was hidden, asking for it is a good enough reason to draw it again.
+        """
+        if a is b:
+            raise CommandError("A line meets itself everywhere.")
+        point = self.scene.meet_of(a, b)
+        if point is None:
+            raise CommandError(
+                f"{self._line_name(a)} and {self._line_name(b)} don't meet on "
+                "the canvas — they may be parallel, or cross off it."
+            )
+        if point.set_shown(True):
+            self.scene.commit_undo()
         return point
 
     def _form_rm(self, args) -> str:

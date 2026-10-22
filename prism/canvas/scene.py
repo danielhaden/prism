@@ -1031,6 +1031,40 @@ class CanvasScene(QGraphicsScene):
             scene_pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform
         )
 
+    def selected_lines(self) -> list:
+        """The selected lines, in the order they were created."""
+        return sorted(
+            (it for it in self.selectedItems() if isinstance(it, LineItem)),
+            key=lambda it: getattr(it, "_seq", 0),
+        )
+
+    def meet_of(self, a: LineItem, b: LineItem) -> PointItem | None:
+        """The point where two lines meet, if they meet on the canvas.
+
+        There is no making one: a point is already kept wherever lines cross,
+        so this finds it. It may be hidden — that is a choice about drawing,
+        not about whether the point is there.
+
+        Args:
+            a: One line.
+            b: The other.
+
+        Returns:
+            The meet point, or None when the two don't currently cross.
+        """
+        for point in self._meets:
+            if point.position_undefined():
+                continue
+            anchor = point.anchor()
+            if anchor.references_line(a) and anchor.references_line(b):
+                return point
+        return None
+
+    def line_id(self, line: LineItem) -> str:
+        """The console id for a line (``L1``), as ``(list)`` numbers them."""
+        ordered = self.ordered_lines()
+        return f"L{ordered.index(line) + 1}" if line in ordered else "L?"
+
     def hidden_points(self) -> list:
         """Every point currently hidden by choice."""
         return [
