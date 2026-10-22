@@ -92,11 +92,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
   move, can't rotate). The horizon uses this.
 - Line properties dialog: color, thickness (cosmetic), dash style.
-- Right-click a **selected** line → **Add Point to Line** adds a line-anchored
-  point where you clicked (`CanvasScene.add_point_on_line_at`, which projects
-  the click with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it
-  takes a position, not a fraction, so it works past the reference frame. The
-  entry is gated on `isSelected()` and `click_is_on_line()`.
+- Right-click a line → **Add Point to Line** adds a line-anchored point where
+  you clicked (`CanvasScene.add_point_on_line_at`, which projects the click
+  with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
+  position, not a fraction, so it works past the reference frame. Gated on
+  `click_is_on_line()` only: **not** on selection, which was tried and removed
+  — a new line isn't selected and any stray click clears the selection, so the
+  natural flow (add a horizon, right-click it) never offered the command.
 - The same entry appears in the **canvas** menu when the click is blank space
   within `CanvasScene.NEAR_LINE_PX` (40 screen px) of a selected line
   (`nearest_selected_line`, nearest wins). Without it the command is

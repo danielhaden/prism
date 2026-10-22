@@ -118,10 +118,12 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
 
     def contextMenuEvent(self, event):
         menu = QMenu()
-        # Offered only on a selected line, and only for a click that actually
-        # landed on it — the line has to be the thing you meant.
+        # Offered for a click that actually landed on this line. No selection
+        # needed: opening *this* line's menu already says which line is meant.
+        # (The canvas menu's version does require selection — out there, on
+        # blank canvas, which line you mean is a real question.)
         add_point_action = None
-        if self.isSelected() and self.click_is_on_line(event.pos()):
+        if self.click_is_on_line(event.pos()):
             add_point_action = menu.addAction("Add Point to Line")
             menu.addSeparator()
         line_props_action = menu.addAction("Line Properties…")
