@@ -543,7 +543,26 @@ class CanvasScene(QGraphicsScene):
             The new line.
         """
         rect = self.reference_rect()
-        y = rect.top() + fraction * rect.height()
+        return self._add_horizon_at_y(rect.top() + fraction * rect.height())
+
+    def add_horizon_at(self, scene_pos: QPointF) -> LineItem:
+        """Add a horizon through a position on the canvas.
+
+        The same thing :meth:`add_horizon` makes, placed where you clicked
+        rather than at a fraction of the reference frame — so it can be put
+        against the geometry already on the canvas instead of measured out.
+
+        Args:
+            scene_pos: Where to put it, in scene coordinates; only the height
+                matters, since the line is horizontal.
+
+        Returns:
+            The new line.
+        """
+        return self._add_horizon_at_y(scene_pos.y())
+
+    def _add_horizon_at_y(self, y: float) -> LineItem:
+        rect = self.reference_rect()
         line = self.add_line(QPointF(rect.left(), y), QPointF(rect.right(), y))
         line.set_orientation_locked(True)
         self.on_line_changed(line)
@@ -942,6 +961,7 @@ class CanvasScene(QGraphicsScene):
             menu.addAction("Add Point to Line") if near_line is not None else None
         )
         free_point_action = menu.addAction("Add Free Point")
+        horizon_action = menu.addAction("Add Horizon")
         menu.addSeparator()
         auto_action = menu.addAction("Auto-label Scene")
         clear_action = menu.addAction("Clear All Labels")
@@ -950,6 +970,8 @@ class CanvasScene(QGraphicsScene):
             self.add_point_on_line_at(near_line, event.scenePos())
         elif chosen is free_point_action:
             self.add_free_point(event.scenePos())
+        elif chosen is horizon_action:
+            self.add_horizon_at(event.scenePos())
         elif chosen is auto_action:
             self.auto_label()
         elif chosen is clear_action:

@@ -111,7 +111,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   lines — before this there was no way to *create* a line through a single
   point except the console.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
-  adds an unattached point there. The scene's `contextMenuEvent` routes to the
+  adds an unattached point there, and **Add Horizon**
+  (`CanvasScene.add_horizon_at`) a horizontal orientation-locked line at the
+  clicked height. `add_horizon(fraction)` and `add_horizon_at(pos)` share
+  `_add_horizon_at_y()`. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
   the real modal menu opens and the test hangs). Patch the module's name

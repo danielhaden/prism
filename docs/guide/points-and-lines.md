@@ -130,6 +130,9 @@ the point so it reads cleanly instead of dissolving into a knot of ink.
 
 ## Lines
 
+Right-click blank canvas → **Add Horizon** drops a horizontal,
+[orientation-locked](#locked-orientation) line at the height you clicked.
+
 Lines are **infinite projective entities**. When you draw a line through two
 points, it extends across the whole canvas; the two points you clicked become
 its **defining handles**.
@@ -161,9 +164,13 @@ A line's **orientation can be locked**, freezing its direction: it can still be
 moved, but nothing rotates it — dragging an endpoint handle slides the whole
 line through the cursor rather than tilting it, and pivot rotation is refused.
 
-The [`add horizon`](console.md#add-horizon) console command creates a
-horizontal line with its orientation locked; otherwise it's an ordinary
-infinite line.
+A **horizon** is such a line: horizontal, orientation-locked, otherwise an
+ordinary infinite line. Make one by **right-clicking blank canvas → Add
+Horizon**, which puts it at the height you clicked, or with the
+[`(add horizon <fraction>)`](console.md#add-horizon-fraction) console command,
+which measures a fraction down the reference frame instead. The menu is the one
+to reach for when the height should sit against geometry already on the canvas;
+the console form when you want it measured.
 
 ### Line properties
 
