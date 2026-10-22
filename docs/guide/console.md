@@ -77,7 +77,16 @@ Add a **horizon**: a horizontal line across the canvas whose orientation is
 ```
 
 The position is a fraction of the way down the **reference frame** (the
-fully-zoomed-out canvas): **0 is the top, 1 is the bottom**.
+fully-zoomed-out canvas): **0 is the top, 1 is the bottom**. Values outside
+that are allowed and mean above or below the frame — the canvas is larger than
+it, and a construction can run off it.
+
+!!! tip "The canvas runs this command too"
+    **Right-click blank canvas → Add Horizon** doesn't do its own thing: it
+    works out the fraction you clicked at and runs `(add horizon …)` for you.
+    The command appears in the console as though you had typed it, and is
+    **recorded into the next script you save** — so a figure built by clicking
+    replays as one built by typing.
 
 Otherwise it's an ordinary infinite line — style it, label it, hang pencils off
 it, drag it up and down. Dragging an endpoint handle slides the whole line

@@ -8,6 +8,7 @@ endpoints follow and intersections recompute.
 """
 
 import math
+from typing import Callable
 
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPen
@@ -40,6 +41,12 @@ def _closest_on_segment(p: QPointF, seg: QLineF) -> QPointF:
     t = ((p.x() - a.x()) * abx + (p.y() - a.y()) * aby) / denom
     t = max(0.0, min(1.0, t))
     return QPointF(a.x() + t * abx, a.y() + t * aby)
+
+
+def _number(value: float) -> str:
+    """A float as a command would be typed: short, but still exact enough."""
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _letters(index: int) -> str:
@@ -101,6 +108,8 @@ class CanvasScene(QGraphicsScene):
         # Display properties applied to points created from now on (None = use
         # each item's own defaults). Set via apply_point_style_to_all().
         self._point_style: dict | None = None
+        # Set by MainWindow: lets canvas actions run as console commands.
+        self._run_command = None
 
     # -- Undo / redo -------------------------------------------------------
 
@@ -545,6 +554,50 @@ class CanvasScene(QGraphicsScene):
         rect = self.reference_rect()
         return self._add_horizon_at_y(rect.top() + fraction * rect.height())
 
+    def set_command_runner(self, runner: Callable | None) -> None:
+        """Let canvas actions go through the console.
+
+        Given a ``run_command(text)`` callable, a canvas action that has a
+        console equivalent is performed *as* that command — echoed in the
+        console and recorded into the next script saved, so a figure built by
+        clicking can be replayed as one built by typing.
+
+        Args:
+            runner: Callable taking one command line, or None to go direct.
+        """
+        self._run_command = runner
+
+    def run_as_command(self, text: str) -> bool:
+        """Run a console command on the canvas's behalf, if one can be run.
+
+        Args:
+            text: The command line, e.g. ``(add horizon 1/3)``.
+
+        Returns:
+            Whether it went through the console; False means the caller should
+                do the work itself.
+        """
+        if self._run_command is None:
+            return False
+        self._run_command(text)
+        return True
+
+    def horizon_fraction_at(self, y: float) -> float:
+        """Where a height sits down the reference frame, as a fraction.
+
+        The inverse of what :meth:`add_horizon` does with its argument. Values
+        outside 0-1 mean above or below the frame, which is allowed — the
+        canvas is bigger than the frame.
+
+        Args:
+            y: A height in scene coordinates.
+
+        Returns:
+            The fraction.
+        """
+        rect = self.reference_rect()
+        return (y - rect.top()) / rect.height()
+
     def add_horizon_at(self, scene_pos: QPointF) -> LineItem:
         """Add a horizon through a position on the canvas.
 
@@ -971,7 +1024,9 @@ class CanvasScene(QGraphicsScene):
         elif chosen is free_point_action:
             self.add_free_point(event.scenePos())
         elif chosen is horizon_action:
-            self.add_horizon_at(event.scenePos())
+            fraction = self.horizon_fraction_at(event.scenePos().y())
+            if not self.run_as_command(f"(add horizon {_number(fraction)})"):
+                self.add_horizon_at(event.scenePos())
         elif chosen is auto_action:
             self.auto_label()
         elif chosen is clear_action:

@@ -161,6 +161,28 @@ class CommandInterpreter:
             )
         return fraction
 
+    def _as_canvas_fraction(self, argument) -> float:
+        """A position down the canvas, allowed to fall outside the frame.
+
+        The scene is much larger than the reference frame, so a figure can be
+        built above or below it. ``0`` is still the top of the frame and ``1``
+        the bottom; ``-0.5`` and ``1.5`` are half a frame beyond each.
+
+        Args:
+            argument: A fraction or decimal, or a form yielding one.
+
+        Returns:
+            The value, unclamped.
+        """
+        value = self._value(argument)
+        fraction = parse_fraction(value)
+        if fraction is None:
+            raise CommandError(
+                f"Couldn't read {value!r} as a position. Use a fraction like "
+                "1/3 or a decimal like 0.5."
+            )
+        return fraction
+
     def _as_point(self, argument) -> PointItem:
         value = self._value(argument)
         if isinstance(value, PointItem):
@@ -253,7 +275,8 @@ class CommandInterpreter:
             "  (add point <across> <down>) a point placed on the canvas;\n"
             "                              0 0 = top-left, 1 1 = bottom-right\n"
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
-            "                              0 = top of canvas, 1 = bottom\n"
+            "                              0 = top of canvas, 1 = bottom;\n"
+            "                              outside that is beyond the frame\n"
             "  (add line <angle> <point>)  line through a point, at an angle in\n"
             "                              degrees clockwise from horizontal;\n"
             "                              pinned to the point\n"
@@ -311,9 +334,10 @@ class CommandInterpreter:
         if not args:
             raise CommandError(
                 "Usage: (add horizon <fraction>)\n"
-                "  0 = top of canvas, 1 = bottom. e.g. (add horizon 1/3)"
+                "  0 = top of canvas, 1 = bottom; outside that is above or\n"
+                "  below the frame. e.g. (add horizon 1/3)"
             )
-        return self.scene.add_horizon(self._as_fraction(args[0]))
+        return self.scene.add_horizon(self._as_canvas_fraction(args[0]))
 
     def _add_line(self, args) -> LineItem:
         if len(args) != 2:

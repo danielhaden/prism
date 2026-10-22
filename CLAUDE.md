@@ -111,10 +111,20 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   lines — before this there was no way to *create* a line through a single
   point except the console.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
-  adds an unattached point there, and **Add Horizon**
-  (`CanvasScene.add_horizon_at`) a horizontal orientation-locked line at the
-  clicked height. `add_horizon(fraction)` and `add_horizon_at(pos)` share
-  `_add_horizon_at_y()`. The scene's `contextMenuEvent` routes to the
+  adds an unattached point there, and **Add Horizon** a horizontal
+  orientation-locked line at the clicked height.
+- **Canvas actions should run as console commands.** `MainWindow` hands the
+  scene `console.run_command` via `set_command_runner()`; an action calls
+  `scene.run_as_command("(…)")`, which returns False when no runner is set so
+  the caller can fall back to doing the work directly (keeps the scene usable
+  headless). Add Horizon is the first: it converts the click with
+  `horizon_fraction_at()` and fires `(add horizon <fraction>)`, so the command
+  is echoed *and recorded into the next saved script* — a figure built by
+  clicking replays as one built by typing. Follow this pattern for new canvas
+  actions that have a console equivalent.
+- `(add horizon …)` accepts fractions **outside 0-1** (above/below the frame)
+  via `_as_canvas_fraction`; `_as_fraction` stays strict for the other forms.
+  Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
   the real modal menu opens and the test hangs). Patch the module's name

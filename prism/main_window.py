@@ -41,6 +41,9 @@ class MainWindow(QMainWindow):
 
         self.console = ConsolePanel(self.scene, self)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console)
+        # Canvas actions with a console equivalent run as that command, so the
+        # two ways of working produce the same echo and the same script.
+        self.scene.set_command_runner(self.console.run_command)
 
         self.selection = SelectionPanel(self.scene, self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.selection)

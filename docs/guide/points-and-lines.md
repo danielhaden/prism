@@ -131,7 +131,9 @@ the point so it reads cleanly instead of dissolving into a knot of ink.
 ## Lines
 
 Right-click blank canvas → **Add Horizon** drops a horizontal,
-[orientation-locked](#locked-orientation) line at the height you clicked.
+[orientation-locked](#locked-orientation) line at the height you clicked. It
+runs the [`(add horizon …)`](console.md#add-horizon-fraction) console command
+to do it, so the command is echoed and recorded like any other.
 
 Lines are **infinite projective entities**. When you draw a line through two
 points, it extends across the whole canvas; the two points you clicked become
