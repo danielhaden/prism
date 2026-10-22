@@ -11,7 +11,7 @@ import math
 from typing import Callable
 
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -968,6 +968,27 @@ class CanvasScene(QGraphicsScene):
         finally:
             self._updating = False
 
+    def items_at(self, scene_pos: QPointF) -> list:
+        """Items under a scene position, topmost first.
+
+        Hit-tests through the view's transform, which matters for points:
+        they carry ``ItemIgnoresTransformations`` so their clickable radius is
+        in *screen pixels*. Without the transform Qt reads that radius as scene
+        units instead, which shrinks the target as you zoom out — a point was
+        winning a click only within about one pixel at the default zoom.
+
+        Args:
+            scene_pos: Where to look, in scene coordinates.
+
+        Returns:
+            The items there, topmost first.
+        """
+        views = self.views()
+        transform = views[0].viewportTransform() if views else QTransform()
+        return self.items(
+            scene_pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform
+        )
+
     def _is_depended_on(self, item) -> bool:
         """Whether any geometry in the scene is computed from ``item``."""
         for other in self.items():
@@ -997,7 +1018,7 @@ class CanvasScene(QGraphicsScene):
         # Route to the topmost label / point / line under the cursor; a blank
         # spot shows the scene-level menu.
         target = None
-        for item in self.items(event.scenePos()):
+        for item in self.items_at(event.scenePos()):
             if isinstance(item, (LabelItem, PointItem, LineItem)):
                 target = item
                 break

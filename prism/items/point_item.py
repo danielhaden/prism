@@ -40,6 +40,10 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: so dragging it rotates it to wherever you want.
     NEW_LINE_ANGLE = 45.0
 
+    #: Clickable radius, in screen pixels. The drawn dot is radius 1, far too
+    #: small to aim at; this is the target you actually get.
+    HIT_PX = 6.0
+
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
         # trigger boundingRect()/itemChange() (which read these attributes).
@@ -97,13 +101,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     # -- Geometry ----------------------------------------------------------
 
     def boundingRect(self) -> QRectF:
-        r = max(self._radius + 4.0, self._glow_radius) + 2.0
+        r = max(self._radius + 4.0, self._glow_radius, self.HIT_PX) + 2.0
         return QRectF(-r, -r, 2 * r, 2 * r)
 
     def shape(self) -> QPainterPath:
-        # Hit area is the dot itself; the glow is purely decorative.
+        # The dot is drawn at radius 1 by default and the glow around it is
+        # decorative, so the hit area is neither: it is a fixed target in
+        # screen pixels, comparable to a line's band, since points sit above
+        # lines and are the more specific thing to aim at. (These coordinates
+        # are screen pixels: the item ignores view transformations.)
         path = QPainterPath()
-        r = self._radius + 2.0
+        r = max(self._radius + 2.0, self.HIT_PX)
         path.addEllipse(QPointF(0, 0), r, r)
         return path
 

@@ -251,6 +251,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   nothing" report.
 - **Right-click never changes the selection** (swallowed in
   `CanvasScene.mousePressEvent`) so selection-based menus survive.
+- **Hit-test through the view transform**: `CanvasScene.items_at()` passes the
+  viewport transform to `items()`. Points carry `ItemIgnoresTransformations`,
+  so their clickable radius is in *screen pixels*; without the transform Qt
+  reads it as scene units, shrinking the target as you zoom out. A point was
+  winning a right-click only within ~1px at the default zoom (and ~4px zoomed
+  in), so clicks meant for a point landed on the line under it. `PointItem`
+  also has `HIT_PX = 6` — the drawn dot is radius 1, far too small to aim at.
 - **Context menus are routed by hand**, so `CanvasScene.contextMenuEvent` must
   `event.setPos(target.mapFromScene(event.scenePos()))` before calling an
   item's handler. Qt fills `pos()` in only when *it* delivers the event; routed
