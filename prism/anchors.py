@@ -81,7 +81,7 @@ class MeetAnchor(Anchor):
     kind = "meet"
     persistent = False
 
-    def __init__(self, lines):
+    def __init__(self, lines: list):
         """
         Args:
             lines: The lines that meet here; two or more.
@@ -105,6 +105,6 @@ class MeetAnchor(Anchor):
     def references_line(self, line) -> bool:
         return any(other is line for other in self.lines)
 
-    def set_lines(self, lines) -> None:
+    def set_lines(self, lines: list) -> None:
         """Replace the set of lines meeting here."""
         self.lines = list(lines)

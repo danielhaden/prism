@@ -63,8 +63,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
     concurrent lines give one point, not three stacked (stage 3). Read the
     same relation from the other side with `LineItem.meets()`.
   - `LineAnchor(line, t)` — keeps a point on a line; **dragging slides** it.
-- `PointItem.is_intersection()` / `has_anchor()` / `set_anchor()` /
-  `clear_anchor()`. `itemChange` applies the anchor's drag rule; a `_syncing`
+- `PointItem.is_meet()` / `meeting_lines()` / `has_anchor()` / `set_anchor()` /
+  `clear_anchor()` / `is_determined()`. `itemChange` applies the anchor's drag rule; a `_syncing`
   guard lets the scene reposition anchored points without detaching/churning.
 - Default point styling: **radius 1, glow 7, black** (glow = a background-color
   disc drawn behind the dot but over the lines, so converging lines are cut
@@ -77,15 +77,16 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   still meet there. `(hide …)`, `(show …)`, `(show -all)`, and a canvas-menu
   entry bring them back; `shown` is persisted for placed points and, like
   labels, for crossings keyed by their line pair.
-- **`is_intersection()` is no longer a gate** (stage 2). Where a limit is
+- **Being a meet is no longer a gate** (stage 2; the predicate was then
+  called `is_intersection()`). Where a limit is
   real it is now stated as a *constraint*: `PointItem.is_determined()` ("the
   lines pin it completely, so it has no freedom to give"), which is what
   "Snap Point to Line" tests. Grouping a crossing is allowed — a group moves
   its children, and a determined point simply stays where its lines put it.
-  `is_intersection()` survives only where derivation genuinely matters:
-  snapshots and templates don't store crossings (they are recomputed), `rm`
-  hides rather than removes, and `(list)` describes one as `[meet of L1, L2]`
-  — the relation, not a kind.
+  The meet test survives only where derivation genuinely matters: snapshots
+  and templates don't store meets (they are recomputed), `rm` hides rather
+  than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
+  relation, not a kind.
 - `PointItem.contextMenuEvent` shows **Add Line Through Points disabled, with
   the reason**, when the selection isn't exactly two ("3 points selected, need
   2", "right-click one of the two"). It used to vanish silently, which read as
@@ -107,10 +108,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
   add-line-through, joining two crossings, console `(add line … X)`. Updates
   run in dependency order (see **Propagation**), so what you build follows.
-  Still excluded, deliberately: **grouping** (a group moves its children, and a
-  computed point can't be moved), anchoring a crossing to a line (its position
-  is already determined), `rm` of a crossing (it would come straight back), and
-  storing crossings in snapshots/templates (they're recomputed).
+  Still excluded, deliberately: anchoring a meet to a line (its position is
+  already determined — `is_determined()`), `rm` of a meet (it hides instead,
+  since the lines still meet), and storing meets in snapshots/templates
+  (they're recomputed). Grouping a meet **is** allowed as of stage 2.
 
 ### Lines (`LineItem`)
 
@@ -171,12 +172,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 ### Intersections
 
-- The scene auto-maintains an intersection point (a `PointItem` +
-  `IntersectionAnchor`) for every crossing pair, in `_intersections` (keyed by
-  ordered line-id pair). Reused across recomputes (so selection/label sticks);
-  removed when the crossing is gone; a crossing coincident with a placed point
-  is skipped.
-- `auto_label` labels intersection points **too** (it used to skip them). A
+- The scene auto-maintains one point per **place** where lines meet, in
+  `_meets` (see **Stage 3** above). Reused across recomputes so a selection or
+  label sticks; kept but undefined when the crossing goes and something
+  depends on it, is labelled or is hidden; a crossing coincident with an
+  existing point is skipped — that point *is* the meet.
+- `auto_label` labels meets **too** (it used to skip them). A
   label follows its marker as the lines move and through undo/redo, but a
   crossing that stops existing takes its label with it — the marker that comes
   back is a new one.
