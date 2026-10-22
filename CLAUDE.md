@@ -251,6 +251,16 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   nothing" report.
 - **Right-click never changes the selection** (swallowed in
   `CanvasScene.mousePressEvent`) so selection-based menus survive.
+- **Context menus are routed by hand**, so `CanvasScene.contextMenuEvent` must
+  `event.setPos(target.mapFromScene(event.scenePos()))` before calling an
+  item's handler. Qt fills `pos()` in only when *it* delivers the event; routed
+  by hand it stays `(0, 0)`, which reads as "the click landed on the item's own
+  origin". That silently broke **Add Point to Line** on every line except one
+  passing through its item origin — a horizon at 1/2 worked, every other height
+  failed. Tests that build a `QGraphicsSceneContextMenuEvent` and call the
+  handler directly will not catch this: they set `pos()` themselves. Drive a
+  real `QContextMenuEvent` at `view.viewport()` instead
+  (`scratchpad/real_path_check.py` pattern).
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).
 - Delete/Backspace deletes; Ctrl+G/Ctrl+Shift+G group/ungroup; Ctrl+Z /
   Ctrl+Shift+Z undo/redo.

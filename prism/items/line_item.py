@@ -123,7 +123,9 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         # (The canvas menu's version does require selection — out there, on
         # blank canvas, which line you mean is a real question.)
         add_point_action = None
-        if self.click_is_on_line(event.pos()):
+        # From scenePos, not pos(): correct however the event reached us.
+        local_pos = self.mapFromScene(event.scenePos())
+        if self.click_is_on_line(local_pos):
             add_point_action = menu.addAction("Add Point to Line")
             menu.addSeparator()
         line_props_action = menu.addAction("Line Properties…")
@@ -157,7 +159,7 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
         elif chosen is proj_action:
-            self._add_projectivity_at(event.pos())
+            self._add_projectivity_at(local_pos)
         elif chosen is range_action:
             self.open_visible_range_dialog()
         elif show_full_action is not None and chosen is show_full_action:

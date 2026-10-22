@@ -1003,6 +1003,10 @@ class CanvasScene(QGraphicsScene):
                 break
 
         if target is not None:
+            # Qt fills in pos() only when it delivers the event to an item
+            # itself; routing it by hand leaves pos() at (0, 0), which silently
+            # told handlers every click landed on the item's own origin.
+            event.setPos(target.mapFromScene(event.scenePos()))
             target.contextMenuEvent(event)
             return
 
