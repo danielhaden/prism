@@ -68,6 +68,19 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - Default point styling: **radius 1, glow 7, black** (glow = a background-color
   disc drawn behind the dot but over the lines, so converging lines are cut
   away — the harmonic-net look).
+- **Visibility is a property** (`Definable.is_shown`/`set_shown`, stage 1 of
+  flattening the point model): an item is drawn only when it is both *defined*
+  and *shown*. Hiding is a choice and changes nothing else — position, label
+  and dependents all survive, and you can build on a hidden point. Delete and
+  `(rm …)` on a crossing **hide** it rather than refusing, since the lines
+  still meet there. `(hide …)`, `(show …)`, `(show -all)`, and a canvas-menu
+  entry bring them back; `shown` is persisted for placed points and, like
+  labels, for crossings keyed by their line pair.
+- **Known wart, to fix in stage 2/3:** `_intersections` is keyed by *line
+  pair*, so N concurrent lines leave N stacked markers at one spot (3 lines →
+  3 points, all at the same position). Hiding one therefore does nothing
+  visible in a pencil. One point per concurrency is the fix, with the incidence
+  held by the lines.
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
   add-line-through, joining two crossings, console `(add line … X)`. Updates
   run in dependency order (see **Propagation**), so what you build follows.

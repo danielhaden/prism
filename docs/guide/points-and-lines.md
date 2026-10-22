@@ -86,6 +86,26 @@ The point jumps onto the line and is now constrained to it:
 Right-click the point → **Remove Anchor** to release it. Deleting the line also
 releases anything anchored to it.
 
+### Hiding a point
+
+A dense figure has a point at every crossing, and most of them are scaffolding
+you'd rather not look at. **Hide** one and it stops being drawn — nothing else
+changes. It keeps its position and its label, anything built on it carries on
+working, and you can build on it while it's hidden.
+
+```
+(hide P3)       # stop drawing it
+(show P3)       # draw it again
+(show -all)     # bring back everything hidden
+```
+
+Pressing ++delete++ on a crossing, or `(rm P3)`, hides it too: the two lines
+still meet there, so the point can't honestly be removed — but it can be got
+out of the way. Right-click blank canvas for **Show N Hidden Point(s)** when
+you want them back.
+
+`(list)` marks hidden points `[hidden]`, so nothing disappears without trace.
+
 ### Point context menu (right-click)
 
 - **Modify Display Properties…** — see [Display properties](#display-properties).

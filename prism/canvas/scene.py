@@ -989,6 +989,27 @@ class CanvasScene(QGraphicsScene):
             scene_pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform
         )
 
+    def hidden_points(self) -> list:
+        """Every point currently hidden by choice."""
+        return [
+            it
+            for it in self.items()
+            if isinstance(it, PointItem) and not it.is_shown()
+        ]
+
+    def show_all_points(self) -> int:
+        """Show every hidden point again.
+
+        Returns:
+            How many were shown.
+        """
+        hidden = self.hidden_points()
+        for point in hidden:
+            point.set_shown(True)
+        if hidden:
+            self.commit_undo()
+        return len(hidden)
+
     def _is_depended_on(self, item) -> bool:
         """Whether any geometry in the scene is computed from ``item``."""
         for other in self.items():
@@ -1041,6 +1062,10 @@ class CanvasScene(QGraphicsScene):
         free_point_action = menu.addAction("Add Free Point")
         horizon_action = menu.addAction("Add Horizon")
         menu.addSeparator()
+        hidden = self.hidden_points()
+        show_action = (
+            menu.addAction(f"Show {len(hidden)} Hidden Point(s)") if hidden else None
+        )
         auto_action = menu.addAction("Auto-label Scene")
         clear_action = menu.addAction("Clear All Labels")
         chosen = menu.exec(event.screenPos())
@@ -1052,6 +1077,8 @@ class CanvasScene(QGraphicsScene):
             fraction = self.horizon_fraction_at(event.scenePos().y())
             if not self.run_as_command(f"(add horizon {_number(fraction)})"):
                 self.add_horizon_at(event.scenePos())
+        elif show_action is not None and chosen is show_action:
+            self.show_all_points()
         elif chosen is auto_action:
             self.auto_label()
         elif chosen is clear_action:
@@ -1180,9 +1207,11 @@ class CanvasScene(QGraphicsScene):
 
     def delete_selected(self) -> None:
         for item in list(self.selectedItems()):
-            # An intersection point is computed and re-created by the recompute;
-            # deleting it directly would leave a stale entry, so skip it.
+            # A crossing can't be removed — the lines still meet there, and the
+            # recompute would put it straight back. Hiding it is what deleting
+            # one can honestly mean.
             if isinstance(item, PointItem) and item.is_intersection():
+                item.set_shown(False)
                 continue
             self._remove_geometry(item)
         self.recompute_intersections()

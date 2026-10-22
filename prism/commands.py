@@ -54,6 +54,8 @@ class CommandInterpreter:
             "add": self._form_add,
             "point": self._form_point,
             "rm": self._form_rm,
+            "hide": self._form_hide,
+            "show": self._form_show,
             "label": self._form_label,
             "list": self._form_list,
             "help": self._form_help,
@@ -291,6 +293,8 @@ class CommandInterpreter:
             "  (label -auto)               label everything: points A, B, C…\n"
             "                              and lines a, b, c…\n"
             "  (label -clear)              remove every label\n"
+            "  (hide <element>)            stop drawing it; nothing is lost\n"
+            "  (show <element> | -all)     draw it again\n"
             "  (list [-points | -lines])   list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
@@ -384,10 +388,14 @@ class CommandInterpreter:
             )
         element = self._as_element(args[0])
         if isinstance(element, PointItem) and element.is_intersection():
-            raise CommandError(
-                "That's an intersection point: it's computed from the lines "
-                "that cross there and would come straight back. Remove one of "
-                "those lines instead."
+            # The lines still meet there, so the point can't be removed — but
+            # it can be put out of the way, which is what was meant.
+            described = self._render(element)
+            element.set_shown(False)
+            self.scene.commit_undo()
+            return (
+                f"Hid {described}\n"
+                "  (the lines still cross there; (show -all) brings it back)"
             )
         # Describe it while it's still on the canvas — ids are positional.
         described = self._render(element)
@@ -418,6 +426,31 @@ class CommandInterpreter:
         element = self._as_element(args[0])
         self.scene.label_element(element, str(self._value(args[1])))
         return element
+
+    def _form_hide(self, args) -> str:
+        if len(args) != 1:
+            raise CommandError("Usage: (hide <element>)  e.g. (hide P3)")
+        element = self._as_element(args[0])
+        described = self._render(element)
+        if not element.set_shown(False):
+            return f"{described} was already hidden."
+        self.scene.commit_undo()
+        return f"Hid {described}"
+
+    def _form_show(self, args) -> str:
+        if len(args) != 1:
+            raise CommandError(
+                "Usage: (show <element>) or (show -all)  e.g. (show P3)"
+            )
+        first = args[0]
+        if isinstance(first, str) and first.lstrip("-").lower() == "all":
+            return f"Showed {_count(self.scene.show_all_points(), 'point')}."
+        element = self._as_element(first)
+        described = self._render(element)
+        if not element.set_shown(True):
+            return f"{described} was already showing."
+        self.scene.commit_undo()
+        return f"Showing {described}"
 
     def _form_list(self, args) -> str:
         show_points = show_lines = True
@@ -470,6 +503,8 @@ class CommandInterpreter:
             tag = "  [on-line]"
         else:
             tag = ""
+        if not point.is_shown():
+            tag += "  [hidden]"
         return f"({c.x():.1f}, {c.y():.1f}){label}{tag}"
 
     def _list_points(self) -> str:

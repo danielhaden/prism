@@ -5,8 +5,9 @@ command, the scene is snapshotted after each action and rebuilt on undo. The
 format is plain data (JSON-able), so it can also back save/load later.
 
 Derived geometry (intersection markers) is not stored - it is recomputed. A
-*label* put on one is the user's work rather than derived, so that much is
-kept, keyed by the pair of lines whose crossing it marks.
+*label* put on one, or a decision to hide it, is the user's work rather than
+derived, so that much is kept, keyed by the pair of lines whose crossing it
+marks.
 """
 
 from PySide6.QtCore import QPointF, Qt
@@ -113,6 +114,7 @@ def capture(scene) -> dict:
                 "glow_color": style["glow_color"].name(),
                 "label": _capture_label(point),
                 "anchor": anchor,
+                "shown": point.is_shown(),
             }
         )
 
@@ -159,13 +161,14 @@ def capture(scene) -> dict:
         if anchor is None or anchor.kind != "intersection":
             continue
         label = _capture_label(marker)
-        if label is None:
-            continue
+        shown = marker.is_shown()
+        if label is None and shown:
+            continue  # nothing about this one worth keeping
         first, second = l_index.get(id(anchor.a)), l_index.get(id(anchor.b))
         if first is None or second is None:
             continue
         crossing_labels.append(
-            {"lines": sorted((first, second)), "label": label}
+            {"lines": sorted((first, second)), "label": label, "shown": shown}
         )
 
     groups = []
@@ -205,6 +208,7 @@ def restore(scene, state: dict) -> None:
             glow_color=QColor(data["glow_color"]),
         )
         _restore_label(point, data["label"])
+        point.set_shown(data.get("shown", True))
         points.append(point)
 
     lines = []
@@ -277,3 +281,4 @@ def _restore_crossing_labels(scene, lines, entries) -> None:
         marker = markers.get(frozenset((id(lines[first]), id(lines[second]))))
         if marker is not None:
             _restore_label(marker, entry["label"])
+            marker.set_shown(entry.get("shown", True))
