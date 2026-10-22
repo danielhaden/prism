@@ -37,6 +37,16 @@ dock on the right, and a **Console** dock at the bottom.
 
 See [Tools & Canvas](tools.md) for the full set of tools and shortcuts.
 
+## Your drawing is still there next time
+
+Prism keeps the canvas when you quit and puts it back when you open it again —
+points, lines, labels, what you've hidden, and the relationships between them,
+including pencils pinned to a crossing. There's nothing to save.
+
+It's written when you close the window, so a crash loses that session's work.
+If the file is ever unreadable Prism opens with an empty canvas rather than
+refusing to start.
+
 ## Building the documentation (optional)
 
 This site is built with MkDocs:

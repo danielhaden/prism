@@ -99,14 +99,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   list, claiming an existing point when it shares **two** lines with a place
   (so a label and anything built on it stay attached as lines come and go).
   `PointItem.is_meet()`/`meeting_lines()` replace `is_intersection()`.
-- **Open gap, found by stage 3:** snapshots don't store meets (they are
-  recomputed), so a **pivot or endpoint binding onto a meet is silently
-  dropped by undo/redo** — `capture()` writes `"pivot": None` because the meet
-  has no index in the stored point list. It arrived with "geometry can be
-  built on a crossing" and was hidden until concurrency collapsed to one
-  point. The fix is to key such relationships on the meet's *lines*, the way
-  crossing labels already are. Until then a net built on crossings loses its
-  pinning on undo.
+- **Relationships onto a meet survive persistence** (the gap stage 3 found,
+  now closed): a meet has no index in the stored point list, so `capture()`
+  names it `{"meet": [line indices]}` via `point_ref()`, and `restore()` wires
+  those in a **second pass after the recompute** (`_wire_lines(meets_ready)`),
+  because meets don't exist until then. Before this a pivot onto a crossing
+  was silently dropped — `"pivot": None` — so a net built on crossings lost
+  its pinning on every undo.
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
   add-line-through, joining two crossings, console `(add line … X)`. Updates
   run in dependency order (see **Propagation**), so what you build follows.
@@ -255,6 +254,20 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   width (`_fitted_zoom`); `QPdfPageNavigator.jump()` to the page it's already on
   emits nothing, so the controls are synced by hand after a load; page rendering
   is **asynchronous**, so a pixel check needs an event-pumping wait.
+
+## The drawing, between sessions
+
+- `MainWindow` writes the canvas to `settings.drawing_path()` on close
+  (`canvas.json` in the app-data dir; `PRISM_DRAWING` overrides, as the tests
+  use) and reads it back in `__init__` **before `init_history()`**, so undo
+  starts from the restored drawing rather than from an empty canvas.
+- It is `scene_state.capture()`/`restore()` wrapped with `DRAWING_VERSION`; a
+  file from a different version, or one that is missing, unreadable or
+  malformed, is ignored and Prism opens empty. A bad file must never stop the
+  app opening.
+- Saved **on close only**, so a crash loses the session. Fine for a
+  convenience; a real save/load to a file of the user's choosing is still open
+  (next steps).
 
 ## Window layout
 
