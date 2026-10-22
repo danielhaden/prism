@@ -821,10 +821,13 @@ class CanvasScene(QGraphicsScene):
             A ``(points, line)`` tuple, or ``(None, None)`` when the selection
                 isn't exactly one line plus at least one point.
         """
+        # A point the lines already pin completely has no freedom to give to
+        # another line, so it isn't offered — not because of what kind of point
+        # it is, but because of how it is constrained.
         points = [
             it
             for it in self.selectedItems()
-            if isinstance(it, PointItem) and not it.is_intersection()
+            if isinstance(it, PointItem) and not it.is_determined()
         ]
         lines = [it for it in self.selectedItems() if isinstance(it, LineItem)]
         if points and len(lines) == 1:
@@ -1024,8 +1027,9 @@ class CanvasScene(QGraphicsScene):
         kind, point = a.display_line().intersects(b.display_line())
         if kind != QLineF.IntersectionType.BoundedIntersection:
             return None
-        # Skip crossings that coincide with a placed/free point (e.g. a shared
-        # vertex), so we don't stack a marker on top of an existing point.
+        # One point per place: if something is already there, that point *is*
+        # the meet, and a second one stacked on it would be the same point
+        # twice. (N concurrent lines still leave N stacked — see CLAUDE.md.)
         radius = self.snap_radius()
         for item in self.items():
             if isinstance(item, PointItem) and not item.is_intersection():
@@ -1164,7 +1168,6 @@ class CanvasScene(QGraphicsScene):
             it
             for it in self.selectedItems()
             if isinstance(it, (PointItem, LineItem, GroupItem))
-            and not (isinstance(it, PointItem) and it.is_intersection())
             and it.parentItem() is None
         ]
         if len(items) < 2:

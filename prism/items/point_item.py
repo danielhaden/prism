@@ -125,7 +125,10 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         display_action = menu.addAction("Modify Display Properties…")
         menu.addSeparator()
 
-        # Line through exactly two selected points.
+        # Line through exactly two selected points. When the selection isn't
+        # two, say so in a disabled entry rather than silently omitting it —
+        # a stray selected point (a crossing caught by a rubber band, say)
+        # used to make the command vanish with no explanation.
         line_action = None
         two_points = (
             scene.selected_points()
@@ -135,6 +138,12 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if len(two_points) == 2 and self in two_points:
             line_action = menu.addAction("Add Line Through Points")
             menu.addSeparator()
+        elif scene is not None:
+            reason = self._join_unavailable_reason(two_points)
+            if reason is not None:
+                unavailable = menu.addAction(f"Add Line Through Points — {reason}")
+                unavailable.setEnabled(False)
+                menu.addSeparator()
 
         # Lines drawn *through* this point. The lines are new, so nothing can
         # depend on them yet and no cycle is possible — a crossing is as good a
@@ -195,6 +204,24 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         else:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _join_unavailable_reason(self, selected) -> str | None:
+        """Why two points can't be joined right now, phrased for the menu.
+
+        Args:
+            selected: The points currently selected.
+
+        Returns:
+            A short reason, or None when there's nothing worth saying.
+        """
+        count = len(selected)
+        if count > 2:
+            return f"{count} points selected, need 2"
+        if count == 2:
+            return "right-click one of the two"
+        if count == 1 and self in selected:
+            return "select one more point"
+        return None
 
     def _add_lines_through(self) -> None:
         """Draw a pencil of lines through this point, at angles you choose."""
@@ -283,6 +310,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         from prism.anchors import LineAnchor
 
         self.set_anchor(LineAnchor(line, line.param_of(self.center())))
+
+    def is_determined(self) -> bool:
+        """Whether this point's position is fully fixed by what defines it.
+
+        A point at the meet of two lines has no freedom left: it is where those
+        lines put it. A point anchored to one line still slides along it, and a
+        free point goes anywhere. Prefer this over asking what *kind* of point
+        it is — what matters is how much freedom it has.
+        """
+        anchor = self._anchor
+        return anchor is not None and anchor.kind == "intersection"
 
     def anchor_references_line(self, line) -> bool:
         return self._anchor is not None and self._anchor.references_line(line)

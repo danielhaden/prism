@@ -498,7 +498,11 @@ class CommandInterpreter:
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
         if point.is_intersection():
-            tag = "  [intersection]"
+            anchor = point.anchor()
+            pair = ", ".join(
+                sorted(self._line_name(ln) for ln in (anchor.a, anchor.b))
+            )
+            tag = f"  [meet of {pair}]"
         elif point.has_anchor():
             tag = "  [on-line]"
         else:

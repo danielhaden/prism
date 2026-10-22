@@ -76,7 +76,20 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   still meet there. `(hide …)`, `(show …)`, `(show -all)`, and a canvas-menu
   entry bring them back; `shown` is persisted for placed points and, like
   labels, for crossings keyed by their line pair.
-- **Known wart, to fix in stage 2/3:** `_intersections` is keyed by *line
+- **`is_intersection()` is no longer a gate** (stage 2). Where a limit is
+  real it is now stated as a *constraint*: `PointItem.is_determined()` ("the
+  lines pin it completely, so it has no freedom to give"), which is what
+  "Snap Point to Line" tests. Grouping a crossing is allowed — a group moves
+  its children, and a determined point simply stays where its lines put it.
+  `is_intersection()` survives only where derivation genuinely matters:
+  snapshots and templates don't store crossings (they are recomputed), `rm`
+  hides rather than removes, and `(list)` describes one as `[meet of L1, L2]`
+  — the relation, not a kind.
+- `PointItem.contextMenuEvent` shows **Add Line Through Points disabled, with
+  the reason**, when the selection isn't exactly two ("3 points selected, need
+  2", "right-click one of the two"). It used to vanish silently, which read as
+  a bug — see the RCA in the session log.
+- **Known wart, to fix in stage 3:** `_intersections` is keyed by *line
   pair*, so N concurrent lines leave N stacked markers at one spot (3 lines →
   3 points, all at the same position). Hiding one therefore does nothing
   visible in a pencil. One point per concurrency is the fix, with the incidence

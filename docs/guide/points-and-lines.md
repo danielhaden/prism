@@ -115,8 +115,9 @@ you want them back.
 - **Add Lines Through Point…** — the same, for a whole
   [pencil](projectivities.md): choose a start angle, an end angle and how many
   lines. This is the quick way to fan lines out of a vanishing point.
-- **Add Line Through Points** — appears when **two** points are selected, and
-  joins them; each endpoint is bound to its point.
+- **Add Line Through Points** — joins **two** selected points, binding each
+  endpoint to its point. Select anything other than two and the entry is
+  still there, greyed out, saying what it needs.
 - **Snap Point to Line** / **Remove Anchor** — see
   [Anchoring](#anchoring-a-point-to-a-line).
 - **Pin Lines Through Point / Unpin** — turn the lines *already* passing
