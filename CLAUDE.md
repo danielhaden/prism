@@ -126,7 +126,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   was silently dropped — `"pivot": None` — so a net built on crossings lost
   its pinning on every undo.
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
-  add-line-through, joining two crossings, console `(add line … X)`. Updates
+  add-line-through, joining two crossings, console `(add-line … (list X))`. Updates
   run in dependency order (see **Propagation**), so what you build follows.
   Still excluded, deliberately: anchoring a meet to a line (its position is
   already determined — `is_determined()`), `rm` of a meet (it hides instead,
@@ -233,11 +233,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 ## The console (S-expression CLI)
 
 - Commands are **S-expressions**; forms **return the element they create**, so
-  they compose: `(add line 260 (point L1 2/3))`.
+  they compose: `(add-line 260 (point L1 2/3))`.
 - Reader: `prism/sexpr.py` (supports `;` comments). Interpreter:
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
-  `(add line <angle> <point>)`, `(add line <point> <point>)`,
+  `(add-line <angle> <points>)`, `(add-line <points> <points>)`,
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`,
@@ -258,6 +258,18 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   used, and says so plainly if nothing is left — otherwise the user sees
   `Internal C++ object (PointItem) already deleted`. `_on_canvas()` checks
   `shiboken6.isValid` **before** touching the wrapper at all.
+- **`(add-line …)` always takes lists.** It replaced `(add line …)` outright
+  — hyphenated, a form of its own rather than a kind of `add`, since `add`'s
+  other subforms take numbers and this one takes elements. One-element lists
+  are the plain case; longer ones draw the **cross product**, every point of
+  the first list joined to every point of the second, which is how a net grows
+  a round at a time. Bare points still work (`_flatten` treats one as a list of
+  one), and the canvas menus emit the explicit list form so a recorded script
+  teaches the shape. It reuses an existing side via `_join()`, skips a point
+  paired with itself, and refuses above `JOIN_LIMIT` pairs. `_only()` returns
+  the bare line when just one came of it, so a single join prints and composes
+  as it always did. `(add line …)` is kept **only** as an error that says where
+  it went.
 - `(draw-triangle …)` takes three points **or a list of three** and joins
   them pairwise, returning the sides as a list. `_join()` **reuses an existing
   side** (a line bound to both points) rather than drawing a second one —
@@ -477,7 +489,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    recorded-relation rule, so the three forms always agree.
    `_as_point`/`_as_line`/`_as_element` **unwrap a one-element list**
    (`_one()`), so a filter returning a single element composes where that
-   element is wanted — `(add line P6 (points-off L2 tri))`. Several or none
+   element is wanted — `(point (take 1 (lines)) 1/2)`. Several or none
    is reported with the elements named; `_describe()` keeps a raw Python
    repr out of every message. `repeat` is a *special
    form*: it keeps its argument unevaluated and re-evaluates it each round, so

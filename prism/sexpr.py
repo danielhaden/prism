@@ -3,7 +3,7 @@
 Commands are written as parenthesised forms, e.g.::
 
     (add horizon 1/3)
-    (add line 260 (point L1 2/3))
+    (add-line 260 (point L1 2/3))
 
 Parsing yields nested lists of string atoms; the interpreter gives them
 meaning. Several forms may appear in one line, which is what makes scripting

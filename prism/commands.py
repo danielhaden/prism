@@ -4,8 +4,8 @@ Commands are S-expressions, so they compose: a form's value can be fed
 straight into another form.
 
     (add horizon 1/3)
-    (add line 260 P1)
-    (add line 260 (point L1 2/3))
+    (add-line 260 P1)
+    (add-line 260 (point L1 2/3))
 
 Atoms are passed to each form as raw text and interpreted by that form (an
 angle, a fraction, an element name); nested forms are evaluated first and yield
@@ -60,6 +60,7 @@ class CommandInterpreter:
         self._variables: dict = {}
         self._forms = {
             "add": self._form_add,
+            "add-line": self._form_add_line,
             "point": self._form_point,
             "rm": self._form_rm,
             "hide": self._form_hide,
@@ -360,18 +361,20 @@ class CommandInterpreter:
         return (
             "Commands are S-expressions, e.g. (add horizon 1/3).\n"
             "Forms return the element they make, so they nest:\n"
-            "  (add line 260 (point L1 2/3))\n"
+            "  (add-line 260 (point L1 2/3))\n"
             "\n"
             "  (add point <across> <down>) a point placed on the canvas;\n"
             "                              0 0 = top-left, 1 1 = bottom-right\n"
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
             "                              0 = top of canvas, 1 = bottom;\n"
             "                              outside that is beyond the frame\n"
-            "  (add line <angle> <point>)  line through a point, at an angle in\n"
-            "                              degrees clockwise from horizontal;\n"
-            "                              pinned to the point\n"
-            "  (add line <point> <point>)  line through two points, bound to\n"
-            "                              both\n"
+            "  (add-line <pts> <pts>)      a line from each of the first points\n"
+            "                              to each of the second, bound to both;\n"
+            "                              one of each is the plain case, as in\n"
+            "                              (add-line (list P1) (list P2))\n"
+            "  (add-line <angle> <pts>)    a line through each point, at an\n"
+            "                              angle in degrees clockwise from\n"
+            "                              horizontal; pinned to the point\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
             "  (point <line> <line>)       the point where two lines meet\n"
@@ -410,22 +413,29 @@ class CommandInterpreter:
     def _form_add(self, args):
         if not args:
             raise CommandError(
-                "Usage: (add point <across> <down>), (add line <angle> "
-                "<point>), or (add horizon <fraction>)"
+                "Usage: (add point <across> <down>) or (add horizon "
+                "<fraction>); a line is (add-line …)"
             )
         what = args[0]
         if not isinstance(what, str):
-            raise CommandError("Usage: (add horizon ...) or (add line ...)")
+            raise CommandError(
+                "Usage: (add point ...) or (add horizon ...); a line is "
+                "(add-line ...)"
+            )
         what = what.lower()
         if what == "horizon":
             return self._add_horizon(args[1:])
-        if what == "line":
-            return self._add_line(args[1:])
         if what == "point":
             return self._add_point(args[1:])
+        if what == "line":
+            raise CommandError(
+                "(add line …) is now (add-line …), and it takes lists:\n"
+                "  (add-line (list P1) (list P2))   the line P1-P2\n"
+                "  (add-line 30 (list P1))          at 30 degrees through P1"
+            )
         raise CommandError(
             f"Don't know how to add {args[0]!r}. Try (add point <across> "
-            "<down>), (add line <angle> <point>) or (add horizon <fraction>)."
+            "<down>) or (add horizon <fraction>); a line is (add-line …)."
         )
 
     def _add_point(self, args) -> PointItem:
@@ -449,28 +459,75 @@ class CommandInterpreter:
             )
         return self.scene.add_horizon(self._as_canvas_fraction(args[0]))
 
-    def _add_line(self, args) -> LineItem:
+    #: How the form describes itself when it is called wrongly.
+    _ADD_LINE_USAGE = (
+        "Usage: (add-line <points> <points>)  - each of the first joined\n"
+        "                                       to each of the second\n"
+        "   or: (add-line <angle> <points>)   - through each point\n"
+        "  angle:  degrees clockwise from horizontal (e.g. 30, -45)\n"
+        "  points: a label (A), an id (P1), a form like (point L1 2/3), or a\n"
+        "          list of them, like (list P1 P2) — one of each draws one line"
+    )
+
+    def _form_add_line(self, args):
+        """``(add-line (list P1) (list P2 P3))`` — join each of these to each of those.
+
+        Takes lists throughout. One-element lists are the plain case, so
+        ``(add-line (list P1) (list P2))`` is the single line P1–P2; given
+        longer lists, a line is drawn from every point of the first to every
+        point of the second, which is how a net grows a round at a time. A
+        pair already joined is reused rather than drawn over.
+
+        The angle form takes a list too: ``(add-line 30 (list P1 P2))`` pins a
+        line at 30° through each of those points.
+
+        Returns:
+            The line, if one came of it; otherwise the lines, as a list.
+        """
         if len(args) != 2:
-            raise CommandError(
-                "Usage: (add line <angle> <point>)  - through a point\n"
-                "   or: (add line <point> <point>)  - through two points\n"
-                "  angle: degrees clockwise from horizontal (e.g. 30, -45)\n"
-                "  point: a label (A), an id (P1), or a form like (point L1 2/3)"
-            )
+            raise CommandError(self._ADD_LINE_USAGE)
         first = args[0]
         if isinstance(first, str) and _is_number(first):
-            # (add line <angle> <point>)
-            return self.scene.add_line_through(
-                self._as_point(args[1]), float(first)
+            # (add-line <angle> <points>)
+            angle = float(first)
+            points = self._flatten(args[1:], PointItem, "point")
+            if not points:
+                raise CommandError("No points to draw a line through.")
+            return self._only(
+                [self.scene.add_line_through(point, angle) for point in points]
             )
-        # (add line <point> <point>)
-        a, b = self._as_point(args[0]), self._as_point(args[1])
-        line = self.scene.add_line_between(a, b)
-        if line is None:
+        # (add-line <points> <points>)
+        starts = self._flatten([args[0]], PointItem, "point")
+        ends = self._flatten([args[1]], PointItem, "point")
+        if not starts or not ends:
+            raise CommandError("No points to join: one of those lists is empty.")
+        pairs = len(starts) * len(ends)
+        if pairs > self.JOIN_LIMIT:
             raise CommandError(
-                "Can't draw a line: those two points are in the same place."
+                f"That would draw up to {pairs} lines, from {len(starts)} "
+                f"points to {len(ends)} (the limit is {self.JOIN_LIMIT}). "
+                "Narrow the lists — (take …) or (without …) — and draw a part "
+                "of them."
             )
-        return line
+        drawn = []
+        for a in starts:
+            for b in ends:
+                if a is b or a.center() == b.center():
+                    continue
+                line = self._join(a, b)
+                if not any(other is line for other in drawn):
+                    drawn.append(line)
+        if not drawn:
+            raise CommandError(
+                "Can't draw a line: those are the same point, or two points in "
+                "the same place."
+            )
+        return self._only(drawn)
+
+    @staticmethod
+    def _only(lines: list):
+        """One line on its own, so a single join reads as it always did."""
+        return lines[0] if len(lines) == 1 else lines
 
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:

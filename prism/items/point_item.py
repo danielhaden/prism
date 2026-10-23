@@ -207,12 +207,12 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             self.open_display_dialog()
         elif line_action is not None and chosen is line_action:
             first, second = (scene.point_id(p) for p in two_points)
-            if not scene.run_as_command(f"(add line {first} {second})"):
+            if not scene.run_as_command(f"(add-line (list {first}) (list {second}))"):
                 scene.add_line_between(two_points[0], two_points[1])
         elif one_line_action is not None and chosen is one_line_action:
             angle = self.NEW_LINE_ANGLE
             if not scene.run_as_command(
-                f"(add line {angle:g} {scene.point_id(self)})"
+                f"(add-line {angle:g} (list {scene.point_id(self)}))"
             ):
                 scene.add_line_through(self, angle)
         elif pencil_action is not None and chosen is pencil_action:
@@ -290,7 +290,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # One command per ray, so the pencil replays from a script.
         name = scene.point_id(self)
         for angle in angles:
-            if not scene.run_as_command(f"(add line {angle:g} {name})"):
+            if not scene.run_as_command(f"(add-line {angle:g} (list {name}))"):
                 scene.add_projectivity(self, [angle])
 
     def open_display_dialog(self) -> None:

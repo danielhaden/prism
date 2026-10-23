@@ -21,7 +21,7 @@ creates, so forms nest. Instead of placing a point and then referring to it,
 you can describe it inline:
 
 ```
-(add line 260 (point L1 2/3))
+(add-line 260 (point L1 2/3))
 ```
 
 That reads: *add a line at 260°, through the point two-thirds of the way along
@@ -30,7 +30,7 @@ line L1.* The inner form makes the point; the outer form uses it.
 You can also put several forms on one line, which is the seed of scripting:
 
 ```
-(add horizon 1/3) (add line 250 (point L1 1/3))
+(add horizon 1/3) (add-line 250 (point L1 1/3))
 ```
 
 ## Naming elements
@@ -62,7 +62,7 @@ bottom-right.
 The point it returns can be fed straight to other forms:
 
 ```
-(add line 45 (add point 1/2 1/2))
+(add-line 45 (add point 1/2 1/2))
 ```
 
 ### `(add horizon <fraction>)`
@@ -90,36 +90,57 @@ Otherwise it's an ordinary infinite line — style it, label it, hang pencils of
 it, drag it up and down. Dragging an endpoint handle slides the whole line
 rather than tilting it.
 
-### `(add line <angle> <point>)`
+### `(add-line <points> <points>)`
 
-Add an infinite line, in one of two forms.
+Add infinite lines, in one of two forms. Both take **lists**, and a one-element
+list is the plain case — one line.
 
-**Through a point, at an angle:**
+**Joining points to points:**
 
 ```
-(add line 30 A)                  # 30° through the point labelled A
-(add line -45 P2)                # -45° through the point listed as P2
-(add line 260 (point L1 2/3))    # through a point defined inline
+(add-line (list A) (list B))             # the single line A-B
+(add-line (list P1) (list P2 P3))        # P1-P2 and P1-P3
+(add-line (list P1 P2) (list P3 P4))     # all four joins
+(add-line P1 P2)                         # a bare point counts as a list of one
+```
+
+A line is drawn from **every** point of the first list to **every** point of
+the second, which is how a net grows a round at a time:
+
+```
+(add-line (points-off L1 tri) (points-on L1 (points)))
+```
+
+Each endpoint is **bound** to its point, so the line follows them as they move.
+A pair that is **already joined** is reused rather than drawn over, so
+overlapping rounds don't stack lines on top of each other. A point paired with
+itself is skipped.
+
+The value is the line when only one came of it, and the list of lines
+otherwise — so it feeds straight into [`(format …)`](#format-line-thickness-colour-style)
+or [`(define …)`](#define-name-value).
+
+**Through points, at an angle** (the first argument is a number):
+
+```
+(add-line 30 (list A))               # 30° through the point labelled A
+(add-line -45 (list P1 P2))          # -45° through each of two points
+(add-line 260 (point L1 2/3))        # through a point defined inline
 ```
 
 - **angle** — degrees **clockwise from the horizontal** (the same convention as
   [projectivities](projectivities.md)). `0` is horizontal, `90` vertical.
-- **point** — a label, an id, or a nested form that yields a point.
+- **points** — a label, an id, a nested form that yields a point, or a list of
+  any of those.
 
-The line is **pinned** to the point, so it stays through it and rotates about
+Each line is **pinned** to its point, so it stays through it and rotates about
 it. Repeating the command on one point builds a [pencil](projectivities.md)
 line by line.
 
-**Through two points** (the first argument isn't a number):
-
-```
-(add line A B)                              # through points A and B
-(add line P1 P2)                            # through the listed points
-(add line (point L1 1/4) (point L1 3/4))    # through two inline points
-```
-
-Each endpoint is **bound** to its point, so the line follows them as they move.
-(This is also available by selecting two points and right-clicking.)
+!!! note "It used to be `(add line …)`"
+    Two words, and one point on each side. The form now always takes lists, so
+    it is hyphenated — `(add-line …)`, a form in its own right rather than a
+    kind of `add`. The old spelling says so if you type it.
 
 ### `(point <line> <fraction>)`
 
@@ -201,7 +222,7 @@ forms are a single undo step, and both are the console equivalent of
     ```
     (add point 1/4 1/2)
     (label P1 A)
-    (add line 30 A)       ; still works however the ids shift
+    (add-line 30 A)       ; still works however the ids shift
     ```
 
 ### `(draw-triangle <point> <point> <point>)`
@@ -433,16 +454,18 @@ points they cross at, the other from a point to the lines through it. They
 compose — `(meets (lines-through P1))` is every crossing on the pencil through
 `P1`. A list of points gives the lines through any of them, each once.
 
-A filter that comes back with exactly **one** element can be used wherever
-that one element is wanted, so these compose directly:
+A filter's result goes straight into another form, so these compose directly:
 
 ```
-(add line P6 (points-off L2 (list P1 P2 P3)))
+(add-line P6 (points-off L2 (list P1 P2 P3)))
 ```
 
 `L2` is the side `P1P2`, so the only vertex off it is `P3` — and the line is
-drawn from `P6` to it. If the filter gives back several, the command says how
-many and shows them rather than guessing; if it gives none, it says that too.
+drawn from `P6` to it. Where a form draws one thing *per* element,
+[`(add-line …)`](#add-line-points-points) among them, a filter giving several
+simply draws several. Where one element is wanted and a filter gives several,
+the command says how many and shows them rather than guessing; if it gives
+none, it says that too.
 
 `(points-on …)` and `(points-off …)` are exact complements, and each is the
 dual of `(lines-through …)` — one asks a point which lines it lies on, the
@@ -490,9 +513,9 @@ can work on the canvas and come away with the script for what you did.
 | Add Horizon | `(add horizon <fraction>)` |
 | Add Point to Line | `(point <line> <fraction>)` |
 | Add Point at Intersection | `(point <line> <line>)` |
-| Add Line Through Point | `(add line 45 <point>)` |
-| Add Lines Through Point… | one `(add line <angle> <point>)` per ray |
-| Add Line Through Points | `(add line <point> <point>)` |
+| Add Line Through Point | `(add-line 45 (list <point>))` |
+| Add Lines Through Point… | one `(add-line <angle> (list <point>))` per ray |
+| Add Line Through Points | `(add-line (list <point>) (list <point>))` |
 | Add / Edit / Remove Label | `(label <element> "…")` |
 | Auto-label Scene / Clear All Labels | `(label -auto)` / `(label -clear)` |
 | Delete Point / Hide Point | `(rm <element>)` |
@@ -556,7 +579,7 @@ Scripts may contain blank lines and `;` comments:
 ```
 ; a horizon with a vanishing point
 (add horizon 1/3)
-(add line 250 (point L1 1/3))   ; the pencil's first ray
+(add-line 250 (point L1 1/3))   ; the pencil's first ray
 ```
 
 ## Worked example
@@ -566,8 +589,8 @@ and no hand-placed points:
 
 ```
 (add horizon 1/3)
-(add line 250 (point L1 1/3))
-(add line 265 P1) (add line 280 P1) (add line 295 P1)
-(add line 230 (point L1 2/3))
-(add line 245 P2) (add line 260 P2) (add line 275 P2)
+(add-line 250 (point L1 1/3))
+(add-line 265 P1) (add-line 280 P1) (add-line 295 P1)
+(add-line 230 (point L1 2/3))
+(add-line 245 P2) (add-line 260 P2) (add-line 275 P2)
 ```
