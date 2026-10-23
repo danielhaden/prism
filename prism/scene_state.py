@@ -5,8 +5,9 @@ command, the scene is snapshotted after each action and rebuilt on undo. The
 format is plain data (JSON-able), so it can also back save/load later.
 
 Derived geometry (intersection markers) is not stored - it is recomputed. A
-*label* put on one is the user's work rather than derived, so that much is
-kept, keyed by the pair of lines whose crossing it marks.
+*label* put on one, or a decision to hide it, is the user's work rather than
+derived, so that much is kept, keyed by the pair of lines whose crossing it
+marks.
 """
 
 from PySide6.QtCore import QPointF, Qt
@@ -85,13 +86,31 @@ def capture(scene) -> dict:
         (
             it
             for it in scene.items()
-            if isinstance(it, PointItem) and not it.is_intersection()
+            if isinstance(it, PointItem) and not it.is_meet()
         ),
         key=lambda it: getattr(it, "_seq", 0),
     )
     lines = sorted(scene._lines(), key=lambda it: getattr(it, "_seq", 0))
     p_index = {id(p): i for i, p in enumerate(points)}
     l_index = {id(ln): i for i, ln in enumerate(lines)}
+
+    def point_ref(point):
+        """How to name a point in the snapshot.
+
+        A placed point is an index into the stored points. A **meet** has no
+        index — meets are recomputed, not stored — so it is named by the lines
+        that make it, and found again once the recompute has run.
+        """
+        if point is None:
+            return None
+        if id(point) in p_index:
+            return p_index[id(point)]
+        if point.is_meet():
+            indices = [l_index.get(id(line)) for line in point.meeting_lines()]
+            indices = [index for index in indices if index is not None]
+            if len(indices) >= 2:
+                return {"meet": sorted(indices)}
+        return None
 
     point_data = []
     for point in points:
@@ -103,7 +122,11 @@ def capture(scene) -> dict:
             and pt_anchor.kind == "line"
             and id(pt_anchor.line) in l_index
         ):
-            anchor = {"line": l_index[id(pt_anchor.line)], "t": pt_anchor.t}
+            anchor = {
+                "line": l_index[id(pt_anchor.line)],
+                "t": pt_anchor.t,
+                "locked": getattr(pt_anchor, "locked", False),
+            }
         point_data.append(
             {
                 "xy": [point.center().x(), point.center().y()],
@@ -113,6 +136,7 @@ def capture(scene) -> dict:
                 "glow_color": style["glow_color"].name(),
                 "label": _capture_label(point),
                 "anchor": anchor,
+                "shown": point.is_shown(),
             }
         )
 
@@ -123,9 +147,9 @@ def capture(scene) -> dict:
         visible_range = None
         if line.has_visible_range():
             anchor = line.range_anchor()
-            if anchor is not None and id(anchor) in p_index:
+            if anchor is not None and point_ref(anchor) is not None:
                 visible_range = {
-                    "anchor": p_index[id(anchor)],
+                    "anchor": point_ref(anchor),
                     "neg": line._range_neg,
                     "pos": line._range_pos,
                 }
@@ -140,10 +164,10 @@ def capture(scene) -> dict:
                     "style": pen.style().value,
                 },
                 "bind": [
-                    p_index.get(id(line.bound_point(1))) if line.bound_point(1) else None,
-                    p_index.get(id(line.bound_point(2))) if line.bound_point(2) else None,
+                    point_ref(line.bound_point(1)),
+                    point_ref(line.bound_point(2)),
                 ],
-                "pivot": p_index.get(id(pivot)) if pivot is not None else None,
+                "pivot": point_ref(pivot),
                 "range": visible_range,
                 "locked": line.is_orientation_locked(),
                 "label": _capture_label(line),
@@ -154,18 +178,19 @@ def capture(scene) -> dict:
     # need keeping — against the lines that produce them, since the markers
     # themselves won't be the same objects afterwards.
     crossing_labels = []
-    for marker in getattr(scene, "_intersections", {}).values():
+    for marker in getattr(scene, "_meets", []):
         anchor = marker.anchor()
-        if anchor is None or anchor.kind != "intersection":
+        if anchor is None or anchor.kind != "meet":
             continue
         label = _capture_label(marker)
-        if label is None:
-            continue
-        first, second = l_index.get(id(anchor.a)), l_index.get(id(anchor.b))
-        if first is None or second is None:
+        shown = marker.is_shown()
+        if label is None and shown:
+            continue  # nothing about this one worth keeping
+        indices = [l_index.get(id(line)) for line in anchor.lines]
+        if any(index is None for index in indices) or len(indices) < 2:
             continue
         crossing_labels.append(
-            {"lines": sorted((first, second)), "label": label}
+            {"lines": sorted(indices), "label": label, "shown": shown}
         )
 
     groups = []
@@ -205,6 +230,7 @@ def restore(scene, state: dict) -> None:
             glow_color=QColor(data["glow_color"]),
         )
         _restore_label(point, data["label"])
+        point.set_shown(data.get("shown", True))
         points.append(point)
 
     lines = []
@@ -220,27 +246,20 @@ def restore(scene, state: dict) -> None:
         lines.append(line)
 
     # Wire relationships once both sides exist.
-    for line, data in zip(lines, state["lines"]):
-        bind1, bind2 = data["bind"]
-        if bind1 is not None:
-            line.bind_endpoint(1, points[bind1])
-        if bind2 is not None:
-            line.bind_endpoint(2, points[bind2])
-        if data["pivot"] is not None:
-            line.set_pivot(points[data["pivot"]])
-        if data["range"] is not None:
-            line.set_visible_range(
-                points[data["range"]["anchor"]],
-                data["range"]["neg"],
-                data["range"]["pos"],
-            )
+    _wire_lines(lines, points, state["lines"], meets_ready=False)
 
     from prism.anchors import LineAnchor
 
     for point, data in zip(points, state["points"]):
         if data["anchor"] is not None:
             line = lines[data["anchor"]["line"]]
-            point.set_anchor(LineAnchor(line, data["anchor"]["t"]))
+            point.set_anchor(
+                LineAnchor(
+                    line,
+                    data["anchor"]["t"],
+                    data["anchor"].get("locked", False),
+                )
+            )
 
     for members in state.get("groups", []):
         group = GroupItem()
@@ -251,6 +270,9 @@ def restore(scene, state: dict) -> None:
     scene._point_style = _restore_point_style(state.get("point_style"))
     scene.recompute_intersections()
     _restore_crossing_labels(scene, lines, state.get("crossings", []))
+    # Meets exist only now, so relationships naming one are wired here. Doing
+    # it earlier is why a pivot onto a crossing used to be dropped silently.
+    _wire_lines(lines, points, state["lines"], meets_ready=True, scene=scene)
     # Undefined-ness is derived, never stored, so work it out afresh.
     scene.settle_definitions()
 
@@ -265,15 +287,89 @@ def _restore_crossing_labels(scene, lines, entries) -> None:
     """
     if not entries:
         return
-    markers = {}
-    for marker in getattr(scene, "_intersections", {}).values():
+    markers = []
+    for marker in getattr(scene, "_meets", []):
         anchor = marker.anchor()
-        if anchor is not None and anchor.kind == "intersection":
-            markers[frozenset((id(anchor.a), id(anchor.b)))] = marker
+        if anchor is not None and anchor.kind == "meet":
+            markers.append((frozenset(id(ln) for ln in anchor.lines), marker))
     for entry in entries:
-        first, second = entry["lines"]
-        if first >= len(lines) or second >= len(lines):
+        wanted = entry["lines"]
+        if any(index >= len(lines) for index in wanted):
             continue
-        marker = markers.get(frozenset((id(lines[first]), id(lines[second]))))
+        ids = frozenset(id(lines[index]) for index in wanted)
+        # Match on the lines they have in common: a meet is the same meet while
+        # two of its lines are, even if others have joined or left since.
+        marker = next(
+            (m for key, m in markers if len(key & ids) >= 2), None
+        )
         if marker is not None:
             _restore_label(marker, entry["label"])
+            marker.set_shown(entry.get("shown", True))
+
+
+def _resolve_point(ref, points, scene=None):
+    """Turn a stored point reference back into a point.
+
+    Args:
+        ref: An index into the stored points, or ``{"meet": [line indices]}``.
+        points: The restored points, in snapshot order.
+        scene: Needed to find a meet; omit while meets don't exist yet.
+
+    Returns:
+        The point, or None if it can't be resolved yet.
+    """
+    if ref is None:
+        return None
+    if isinstance(ref, int):
+        return points[ref] if ref < len(points) else None
+    if scene is None:
+        return None
+    wanted = set(ref.get("meet", []))
+    for meet in getattr(scene, "_meets", []):
+        anchor = meet.anchor()
+        if anchor is None or anchor.kind != "meet":
+            continue
+        held = {
+            index
+            for index, line in enumerate(scene.ordered_lines())
+            if anchor.references_line(line)
+        }
+        if len(held & wanted) >= 2:
+            return meet
+    return None
+
+
+def _wire_lines(lines, points, line_data, meets_ready: bool, scene=None) -> None:
+    """Re-make each line's relationships to points.
+
+    Called twice: once for placed points, and again once the recompute has
+    built the meets, for the relationships that name one.
+
+    Args:
+        lines: The restored lines.
+        points: The restored points.
+        line_data: Their snapshot entries.
+        meets_ready: Whether to wire the references that name a meet.
+        scene: The scene, required when ``meets_ready``.
+    """
+
+    def wanted(ref) -> bool:
+        is_meet_ref = isinstance(ref, dict)
+        return ref is not None and is_meet_ref == meets_ready
+
+    for line, data in zip(lines, line_data):
+        for end, ref in zip((1, 2), data["bind"]):
+            if wanted(ref):
+                point = _resolve_point(ref, points, scene)
+                if point is not None:
+                    line.bind_endpoint(end, point)
+        if wanted(data["pivot"]):
+            point = _resolve_point(data["pivot"], points, scene)
+            if point is not None:
+                line.set_pivot(point)
+        if data["range"] is not None and wanted(data["range"]["anchor"]):
+            point = _resolve_point(data["range"]["anchor"], points, scene)
+            if point is not None:
+                line.set_visible_range(
+                    point, data["range"]["neg"], data["range"]["pos"]
+                )

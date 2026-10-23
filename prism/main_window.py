@@ -10,8 +10,11 @@ from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
 from prism.selection_panel import SelectionPanel
+from prism.scene_state import capture, restore
 from prism.settings import (
     clear_window_layout,
+    load_drawing,
+    save_drawing,
     scripts_dir,
     set_scripts_dir,
     set_window_geometry,
@@ -27,6 +30,10 @@ class MainWindow(QMainWindow):
     #: would restore badly; Qt then ignores states saved under a lower number.
     LAYOUT_VERSION = 1
 
+    #: Bumped when the saved-canvas format changes in a way that can't be
+    #: read back; an older file is then ignored rather than half-restored.
+    DRAWING_VERSION = 1
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Prism")
@@ -41,6 +48,9 @@ class MainWindow(QMainWindow):
 
         self.console = ConsolePanel(self.scene, self)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console)
+        # Canvas actions with a console equivalent run as that command, so the
+        # two ways of working produce the same echo and the same script.
+        self.scene.set_command_runner(self.console.run_command)
 
         self.selection = SelectionPanel(self.scene, self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.selection)
@@ -62,6 +72,9 @@ class MainWindow(QMainWindow):
 
         self.scene.statusMessage.connect(self.statusBar().showMessage)
         self.scene.historyChanged.connect(self._update_history_actions)
+        # Bring back last session's drawing before the first snapshot, so undo
+        # starts from what's on screen rather than from an empty canvas.
+        self._restore_drawing()
         self.scene.init_history()
         self._select_tool(Tool.SELECT)
         # Snapshot the built-in layout before any saved one lands on top of it,
@@ -92,7 +105,32 @@ class MainWindow(QMainWindow):
         self.restoreState(self._default_state, self.LAYOUT_VERSION)
         self.statusBar().showMessage("Window layout reset.", 4000)
 
+    # -- The drawing -------------------------------------------------------
+
+    def _restore_drawing(self) -> None:
+        """Put back the canvas this app was last closed with."""
+        data = load_drawing()
+        if not data or data.get("version") != self.DRAWING_VERSION:
+            return
+        try:
+            restore(self.scene, data["scene"])
+        except Exception as exc:  # a bad file must not stop Prism opening
+            self.scene.clear_all()
+            self.statusBar().showMessage(
+                f"Couldn't reopen the last drawing: {exc}", 8000
+            )
+
+    def _save_drawing(self) -> None:
+        """Keep the canvas for next time."""
+        try:
+            save_drawing(
+                {"version": self.DRAWING_VERSION, "scene": capture(self.scene)}
+            )
+        except OSError:
+            pass  # nothing useful to do about it while quitting
+
     def closeEvent(self, event):
+        self._save_drawing()
         set_window_geometry(self.saveGeometry())
         set_window_state(self.saveState(self.LAYOUT_VERSION))
         super().closeEvent(event)

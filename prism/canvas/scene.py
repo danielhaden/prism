@@ -8,9 +8,10 @@ endpoints follow and intersections recompute.
 """
 
 import math
+from typing import Callable
 
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from prism.anchors import IntersectionAnchor
+from prism.anchors import MeetAnchor
 from prism.dependencies import (
     Changed,
     DependencyGraph,
@@ -40,6 +41,12 @@ def _closest_on_segment(p: QPointF, seg: QLineF) -> QPointF:
     t = ((p.x() - a.x()) * abx + (p.y() - a.y()) * aby) / denom
     t = max(0.0, min(1.0, t))
     return QPointF(a.x() + t * abx, a.y() + t * aby)
+
+
+def _number(value: float) -> str:
+    """A float as a command would be typed: short, but still exact enough."""
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _letters(index: int) -> str:
@@ -86,9 +93,11 @@ class CanvasScene(QGraphicsScene):
         self._line_start_point: PointItem | None = None
         self._preview_line: LineItem | None = None
 
-        # Intersection points (plain points with an IntersectionAnchor), keyed
+        # Intersection points (plain points with an MeetAnchor), keyed
         # by the (ordered id) line pair.
-        self._intersections: dict[tuple[int, int], PointItem] = {}
+        # Points where lines meet. One per place, however many lines concur
+        # there; the lines are held by each point's MeetAnchor.
+        self._meets: list[PointItem] = []
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._syncing_anchors = False
@@ -101,6 +110,8 @@ class CanvasScene(QGraphicsScene):
         # Display properties applied to points created from now on (None = use
         # each item's own defaults). Set via apply_point_style_to_all().
         self._point_style: dict | None = None
+        # Set by MainWindow: lets canvas actions run as console commands.
+        self._run_command = None
 
     # -- Undo / redo -------------------------------------------------------
 
@@ -470,6 +481,24 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def point_on_line_command(self, line: LineItem, scene_pos: QPointF) -> None:
+        """Put a point on a line at a click, as the console command for it.
+
+        Falls back to doing it directly when the console isn't available or
+        the line doesn't cross the frame, which is what the fraction in the
+        command is measured against.
+
+        Args:
+            line: The line to put the point on.
+            scene_pos: Where the user clicked.
+        """
+        fraction = self.fraction_along_line(line, scene_pos)
+        if fraction is not None and self.run_as_command(
+            f"(point {self.line_id(line)} {_number(fraction)})"
+        ):
+            return
+        self.add_point_on_line_at(line, scene_pos)
+
     def add_point_on_line_at(
         self, line: LineItem, scene_pos: QPointF
     ) -> PointItem:
@@ -543,7 +572,70 @@ class CanvasScene(QGraphicsScene):
             The new line.
         """
         rect = self.reference_rect()
-        y = rect.top() + fraction * rect.height()
+        return self._add_horizon_at_y(rect.top() + fraction * rect.height())
+
+    def set_command_runner(self, runner: Callable | None) -> None:
+        """Let canvas actions go through the console.
+
+        Given a ``run_command(text)`` callable, a canvas action that has a
+        console equivalent is performed *as* that command — echoed in the
+        console and recorded into the next script saved, so a figure built by
+        clicking can be replayed as one built by typing.
+
+        Args:
+            runner: Callable taking one command line, or None to go direct.
+        """
+        self._run_command = runner
+
+    def run_as_command(self, text: str) -> bool:
+        """Run a console command on the canvas's behalf, if one can be run.
+
+        Args:
+            text: The command line, e.g. ``(add horizon 1/3)``.
+
+        Returns:
+            Whether it went through the console; False means the caller should
+                do the work itself.
+        """
+        if self._run_command is None:
+            return False
+        self._run_command(text)
+        return True
+
+    def horizon_fraction_at(self, y: float) -> float:
+        """Where a height sits down the reference frame, as a fraction.
+
+        The inverse of what :meth:`add_horizon` does with its argument. Values
+        outside 0-1 mean above or below the frame, which is allowed — the
+        canvas is bigger than the frame.
+
+        Args:
+            y: A height in scene coordinates.
+
+        Returns:
+            The fraction.
+        """
+        rect = self.reference_rect()
+        return (y - rect.top()) / rect.height()
+
+    def add_horizon_at(self, scene_pos: QPointF) -> LineItem:
+        """Add a horizon through a position on the canvas.
+
+        The same thing :meth:`add_horizon` makes, placed where you clicked
+        rather than at a fraction of the reference frame — so it can be put
+        against the geometry already on the canvas instead of measured out.
+
+        Args:
+            scene_pos: Where to put it, in scene coordinates; only the height
+                matters, since the line is horizontal.
+
+        Returns:
+            The new line.
+        """
+        return self._add_horizon_at_y(scene_pos.y())
+
+    def _add_horizon_at_y(self, y: float) -> LineItem:
+        rect = self.reference_rect()
         line = self.add_line(QPointF(rect.left(), y), QPointF(rect.right(), y))
         line.set_orientation_locked(True)
         self.on_line_changed(line)
@@ -698,10 +790,8 @@ class CanvasScene(QGraphicsScene):
         Drop it from the managed intersection set so it becomes a free point;
         the crossing gets a fresh marker on the next recompute.
         """
-        for key, managed in list(self._intersections.items()):
-            if managed is point:
-                del self._intersections[key]
-                break
+        if point in self._meets:
+            self._meets.remove(point)
 
     # -- Pencils (pinning lines through a point) --------------------------
 
@@ -749,10 +839,13 @@ class CanvasScene(QGraphicsScene):
             A ``(points, line)`` tuple, or ``(None, None)`` when the selection
                 isn't exactly one line plus at least one point.
         """
+        # A point the lines already pin completely has no freedom to give to
+        # another line, so it isn't offered — not because of what kind of point
+        # it is, but because of how it is constrained.
         points = [
             it
             for it in self.selectedItems()
-            if isinstance(it, PointItem) and not it.is_intersection()
+            if isinstance(it, PointItem) and not it.is_determined()
         ]
         lines = [it for it in self.selectedItems() if isinstance(it, LineItem)]
         if points and len(lines) == 1:
@@ -786,7 +879,7 @@ class CanvasScene(QGraphicsScene):
             it
             for it in self.items()
             if isinstance(it, PointItem)
-            and not it.is_intersection()
+            and not it.is_meet()
             and it.anchor_references_line(line)
         ]
 
@@ -848,53 +941,233 @@ class CanvasScene(QGraphicsScene):
         return f'{base} "{label}"' if label else base
 
     def recompute_intersections(self) -> None:
-        """Maintain an intersection point at every line crossing.
+        """Maintain one point wherever lines meet.
 
-        Each is a plain point carrying an IntersectionAnchor; the scene keeps
-        it positioned. It stays the same object as lines move (so a selection or
-        label sticks with it) until its crossing is gone.
+        Crossings are gathered first and then **grouped by place**: lines that
+        concur give a single point carrying all of them, not one point per
+        pair stacked on top of each other. A point keeps its identity — and so
+        its label, selection and anything built on it — while at least two of
+        its lines still meet there.
         """
         if self._updating:
             return
         self._updating = True
         try:
-            # An undefined line has no position, so it crosses nothing.
-            lines = [ln for ln in self._lines() if not ln.position_undefined()]
-            seen: set[tuple[int, int]] = set()
-            for i in range(len(lines)):
-                for j in range(i + 1, len(lines)):
-                    a, b = lines[i], lines[j]
-                    point = self._intersection_of(a, b)
-                    if point is None:
-                        continue
-                    key = (min(id(a), id(b)), max(id(a), id(b)))
-                    seen.add(key)
-                    existing = self._intersections.get(key)
-                    if existing is None:
-                        marker = PointItem(point)
-                        marker.set_anchor(IntersectionAnchor(a, b))
-                        self._apply_default_point_style(marker)
-                        self._tag(marker)
-                        self.addItem(marker)
-                        self._intersections[key] = marker
-                    else:
-                        # The crossing is back (or never left).
-                        existing.set_position_undefined(False)
-                        existing.sync_to_anchor()
-            for key in list(self._intersections):
-                if key in seen:
-                    continue
-                marker = self._intersections[key]
-                if self._is_depended_on(marker):
-                    # Something is built on this crossing, so the marker has to
-                    # outlive it: keep it undefined, ready to come back when
-                    # the lines meet again. Dropping it would strand whatever
-                    # depends on it.
-                    marker.set_position_undefined(True)
-                else:
-                    self.removeItem(self._intersections.pop(key))
+            self._apply_meets(self._gather_meeting_places())
         finally:
             self._updating = False
+
+    def _gather_meeting_places(self) -> list:
+        """Where lines currently meet, and which lines meet at each place.
+
+        Returns:
+            ``[[position, [lines…]], …]``, one entry per place.
+        """
+        # An undefined line has no position, so it crosses nothing.
+        lines = [ln for ln in self._lines() if not ln.position_undefined()]
+        tolerance = self.snap_radius()
+        places: list = []
+        for first in range(len(lines)):
+            for second in range(first + 1, len(lines)):
+                a, b = lines[first], lines[second]
+                where = self._intersection_of(a, b)
+                if where is None:
+                    continue
+                place = None
+                for candidate in places:
+                    if QLineF(candidate[0], where).length() <= tolerance:
+                        place = candidate
+                        break
+                if place is None:
+                    places.append([where, [a, b]])
+                else:
+                    for line in (a, b):
+                        if not any(other is line for other in place[1]):
+                            place[1].append(line)
+        return places
+
+    def _apply_meets(self, places: list) -> None:
+        """Bring the scene's meet points into line with ``places``."""
+        spare = list(self._meets)
+        for where, lines in places:
+            point = self._claim_meet(spare, lines)
+            if point is None:
+                point = PointItem(where)
+                point.set_anchor(MeetAnchor(lines))
+                self._apply_default_point_style(point)
+                self._tag(point)
+                self.addItem(point)
+                self._meets.append(point)
+            else:
+                spare.remove(point)
+                point.anchor().set_lines(lines)
+                point.set_position_undefined(False)
+                point.sync_to_anchor()
+        for point in spare:
+            if point.anchor() is None or point.anchor().kind != "meet":
+                # Released (its anchor was removed): an ordinary point now, and
+                # not the scene's to manage.
+                self._meets.remove(point)
+                continue
+            if self._is_depended_on(point) or point.label_text() or not point.is_shown():
+                # Something is built on this meet, or you have said something
+                # about it, so it outlives the crossing: undefined, ready to
+                # come back when the lines meet again.
+                point.set_position_undefined(True)
+            else:
+                self._meets.remove(point)
+                self.removeItem(point)
+
+    @staticmethod
+    def _claim_meet(candidates: list, lines: list):
+        """The existing meet point that belongs to ``lines``, if any.
+
+        Identity follows the lines: a point is the same point while two of the
+        lines meeting there are still the ones that defined it. That keeps a
+        label and anything built on it attached as other lines come and go.
+        """
+        for point in candidates:
+            anchor = point.anchor()
+            if anchor is None or anchor.kind != "meet":
+                continue  # no longer a meet; it will be dropped below
+            shared = sum(1 for line in lines if anchor.references_line(line))
+            if shared >= 2:
+                return point
+        return None
+
+    def items_at(self, scene_pos: QPointF) -> list:
+        """Items under a scene position, topmost first.
+
+        Hit-tests through the view's transform, which matters for points:
+        they carry ``ItemIgnoresTransformations`` so their clickable radius is
+        in *screen pixels*. Without the transform Qt reads that radius as scene
+        units instead, which shrinks the target as you zoom out — a point was
+        winning a click only within about one pixel at the default zoom.
+
+        Args:
+            scene_pos: Where to look, in scene coordinates.
+
+        Returns:
+            The items there, topmost first.
+        """
+        views = self.views()
+        transform = views[0].viewportTransform() if views else QTransform()
+        return self.items(
+            scene_pos, Qt.IntersectsItemShape, Qt.DescendingOrder, transform
+        )
+
+    def selected_lines(self) -> list:
+        """The selected lines, in the order they were created."""
+        return sorted(
+            (it for it in self.selectedItems() if isinstance(it, LineItem)),
+            key=lambda it: getattr(it, "_seq", 0),
+        )
+
+    def meet_of(self, a: LineItem, b: LineItem) -> PointItem | None:
+        """The point where two lines meet, if they meet on the canvas.
+
+        There is no making one: a point is already kept wherever lines cross,
+        so this finds it. It may be hidden — that is a choice about drawing,
+        not about whether the point is there.
+
+        Args:
+            a: One line.
+            b: The other.
+
+        Returns:
+            The meet point, or None when the two don't currently cross.
+        """
+        for point in self._meets:
+            if point.position_undefined():
+                continue
+            anchor = point.anchor()
+            if anchor.references_line(a) and anchor.references_line(b):
+                return point
+        return None
+
+    def point_id(self, point: PointItem) -> str:
+        """The console id for a point (``P1``), as ``(list)`` numbers them."""
+        ordered = self.ordered_points()
+        return f"P{ordered.index(point) + 1}" if point in ordered else "P?"
+
+    def element_id(self, item) -> str:
+        """The console id for a point or line."""
+        if isinstance(item, PointItem):
+            return self.point_id(item)
+        if isinstance(item, LineItem):
+            return self.line_id(item)
+        return "?"
+
+    def canvas_fractions(self, scene_pos: QPointF) -> tuple:
+        """A position as the across/down fractions the console uses.
+
+        The inverse of :meth:`add_point_at`, so a click can be expressed as
+        the command that would place a point there.
+
+        Args:
+            scene_pos: A position in scene coordinates.
+
+        Returns:
+            An ``(across, down)`` pair; outside 0-1 means outside the frame.
+        """
+        rect = self.reference_rect()
+        return (
+            (scene_pos.x() - rect.left()) / rect.width(),
+            (scene_pos.y() - rect.top()) / rect.height(),
+        )
+
+    def fraction_along_line(
+        self, line: LineItem, scene_pos: QPointF
+    ) -> float | None:
+        """How far along a line's visible span a position lies.
+
+        The inverse of :meth:`add_point_on_line`, so a click on a line can be
+        expressed as the command that would put a point there.
+
+        Args:
+            line: The line.
+            scene_pos: A position on (or beside) it.
+
+        Returns:
+            The fraction, or None if the line doesn't cross the frame.
+        """
+        span = line.span_in_rect(self.reference_rect())
+        if span is None:
+            return None
+        start, end = span
+        dx, dy = end.x() - start.x(), end.y() - start.y()
+        length_squared = dx * dx + dy * dy
+        if length_squared == 0:
+            return None
+        return (
+            (scene_pos.x() - start.x()) * dx + (scene_pos.y() - start.y()) * dy
+        ) / length_squared
+
+    def line_id(self, line: LineItem) -> str:
+        """The console id for a line (``L1``), as ``(list)`` numbers them."""
+        ordered = self.ordered_lines()
+        return f"L{ordered.index(line) + 1}" if line in ordered else "L?"
+
+    def hidden_points(self) -> list:
+        """Every point currently hidden by choice."""
+        return [
+            it
+            for it in self.items()
+            if isinstance(it, PointItem) and not it.is_shown()
+        ]
+
+    def show_all_points(self) -> int:
+        """Show every hidden point again.
+
+        Returns:
+            How many were shown.
+        """
+        hidden = self.hidden_points()
+        for point in hidden:
+            point.set_shown(True)
+        if hidden:
+            self.commit_undo()
+        return len(hidden)
 
     def _is_depended_on(self, item) -> bool:
         """Whether any geometry in the scene is computed from ``item``."""
@@ -910,11 +1183,12 @@ class CanvasScene(QGraphicsScene):
         kind, point = a.display_line().intersects(b.display_line())
         if kind != QLineF.IntersectionType.BoundedIntersection:
             return None
-        # Skip crossings that coincide with a placed/free point (e.g. a shared
-        # vertex), so we don't stack a marker on top of an existing point.
+        # One point per place: if something is already there, that point *is*
+        # the meet, and a second one stacked on it would be the same point
+        # twice. (N concurrent lines still leave N stacked — see CLAUDE.md.)
         radius = self.snap_radius()
         for item in self.items():
-            if isinstance(item, PointItem) and not item.is_intersection():
+            if isinstance(item, PointItem) and not item.is_meet():
                 if QLineF(point, item.center()).length() <= radius:
                     return None
         return point
@@ -925,12 +1199,16 @@ class CanvasScene(QGraphicsScene):
         # Route to the topmost label / point / line under the cursor; a blank
         # spot shows the scene-level menu.
         target = None
-        for item in self.items(event.scenePos()):
+        for item in self.items_at(event.scenePos()):
             if isinstance(item, (LabelItem, PointItem, LineItem)):
                 target = item
                 break
 
         if target is not None:
+            # Qt fills in pos() only when it delivers the event to an item
+            # itself; routing it by hand leaves pos() at (0, 0), which silently
+            # told handlers every click landed on the item's own origin.
+            event.setPos(target.mapFromScene(event.scenePos()))
             target.contextMenuEvent(event)
             return
 
@@ -942,18 +1220,36 @@ class CanvasScene(QGraphicsScene):
             menu.addAction("Add Point to Line") if near_line is not None else None
         )
         free_point_action = menu.addAction("Add Free Point")
+        horizon_action = menu.addAction("Add Horizon")
         menu.addSeparator()
+        hidden = self.hidden_points()
+        show_action = (
+            menu.addAction(f"Show {len(hidden)} Hidden Point(s)") if hidden else None
+        )
         auto_action = menu.addAction("Auto-label Scene")
         clear_action = menu.addAction("Clear All Labels")
         chosen = menu.exec(event.screenPos())
         if line_point_action is not None and chosen is line_point_action:
-            self.add_point_on_line_at(near_line, event.scenePos())
+            self.point_on_line_command(near_line, event.scenePos())
         elif chosen is free_point_action:
-            self.add_free_point(event.scenePos())
+            across, down = self.canvas_fractions(event.scenePos())
+            if not self.run_as_command(
+                f"(add point {_number(across)} {_number(down)})"
+            ):
+                self.add_free_point(event.scenePos())
+        elif chosen is horizon_action:
+            fraction = self.horizon_fraction_at(event.scenePos().y())
+            if not self.run_as_command(f"(add horizon {_number(fraction)})"):
+                self.add_horizon_at(event.scenePos())
+        elif show_action is not None and chosen is show_action:
+            if not self.run_as_command("(show -all)"):
+                self.show_all_points()
         elif chosen is auto_action:
-            self.auto_label()
+            if not self.run_as_command("(label -auto)"):
+                self.auto_label()
         elif chosen is clear_action:
-            self.clear_labels()
+            if not self.run_as_command("(label -clear)"):
+                self.clear_labels()
         event.accept()
 
     def label_element(self, item: PointItem | LineItem, text: str) -> None:
@@ -1035,7 +1331,6 @@ class CanvasScene(QGraphicsScene):
             it
             for it in self.selectedItems()
             if isinstance(it, (PointItem, LineItem, GroupItem))
-            and not (isinstance(it, PointItem) and it.is_intersection())
             and it.parentItem() is None
         ]
         if len(items) < 2:
@@ -1078,9 +1373,11 @@ class CanvasScene(QGraphicsScene):
 
     def delete_selected(self) -> None:
         for item in list(self.selectedItems()):
-            # An intersection point is computed and re-created by the recompute;
-            # deleting it directly would leave a stale entry, so skip it.
-            if isinstance(item, PointItem) and item.is_intersection():
+            # A crossing can't be removed — the lines still meet there, and the
+            # recompute would put it straight back. Hiding it is what deleting
+            # one can honestly mean.
+            if isinstance(item, PointItem) and item.is_meet():
+                item.set_shown(False)
                 continue
             self._remove_geometry(item)
         self.recompute_intersections()
@@ -1132,6 +1429,6 @@ class CanvasScene(QGraphicsScene):
     def clear_all(self) -> None:
         self._cancel_line()
         self.clear()
-        self._intersections.clear()
+        self._meets.clear()
         self._snap_indicator = None
         self.commit_undo()

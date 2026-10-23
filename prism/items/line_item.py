@@ -117,12 +117,35 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
     # -- Context menu / line styling --------------------------------------
 
     def contextMenuEvent(self, event):
+        scene = self.scene()
         menu = QMenu()
-        # Offered only on a selected line, and only for a click that actually
-        # landed on it — the line has to be the thing you meant.
+        # Offered for a click that actually landed on this line. No selection
+        # needed: opening *this* line's menu already says which line is meant.
+        # (The canvas menu's version does require selection — out there, on
+        # blank canvas, which line you mean is a real question.)
         add_point_action = None
-        if self.isSelected() and self.click_is_on_line(event.pos()):
+        # From scenePos, not pos(): correct however the event reached us.
+        local_pos = self.mapFromScene(event.scenePos())
+        if self.click_is_on_line(local_pos):
             add_point_action = menu.addAction("Add Point to Line")
+            menu.addSeparator()
+
+        # Two lines selected: the point where they meet.
+        meet_action = None
+        selected_lines = (
+            scene.selected_lines()
+            if scene is not None and hasattr(scene, "selected_lines")
+            else []
+        )
+        if len(selected_lines) == 2 and self in selected_lines:
+            meet_action = menu.addAction("Add Point at Intersection")
+            menu.addSeparator()
+        elif scene is not None and len(selected_lines) > 2:
+            unavailable = menu.addAction(
+                f"Add Point at Intersection — {len(selected_lines)} lines "
+                "selected, need 2"
+            )
+            unavailable.setEnabled(False)
             menu.addSeparator()
         line_props_action = menu.addAction("Line Properties…")
         proj_action = menu.addAction("Add Projectivity…")
@@ -132,7 +155,6 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         )
 
         # Anchor a point to this line when the selection is one line + point(s).
-        scene = self.scene()
         snap_action = None
         sel_points, sel_line = (
             scene.selected_point_line_pair()
@@ -149,13 +171,15 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         chosen = menu.exec(event.screenPos())
         if add_point_action is not None and chosen is add_point_action:
             if scene is not None:
-                scene.add_point_on_line_at(self, event.scenePos())
+                scene.point_on_line_command(self, event.scenePos())
+        elif meet_action is not None and chosen is meet_action:
+            self._add_meet_point(selected_lines)
         elif chosen is line_props_action:
             self.open_line_style_dialog()
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
         elif chosen is proj_action:
-            self._add_projectivity_at(event.pos())
+            self._add_projectivity_at(local_pos)
         elif chosen is range_action:
             self.open_visible_range_dialog()
         elif show_full_action is not None and chosen is show_full_action:
@@ -163,6 +187,22 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         elif chosen is not None:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _add_meet_point(self, lines: list) -> None:
+        """Surface the point where two selected lines meet.
+
+        Runs the console form, so clicking and typing stay the same thing and
+        the command is recorded into the next script saved.
+
+        Args:
+            lines: The two selected lines.
+        """
+        scene = self.scene()
+        if scene is None:
+            return
+        first, second = (scene.line_id(line) for line in lines)
+        if not scene.run_as_command(f"(point {first} {second})"):
+            scene.meet_of(*lines)
 
     def _add_projectivity_at(self, local_pos: QPointF) -> None:
         """Add a pencil centered at the clicked point on this line."""
@@ -380,6 +420,28 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         """
         offset = QLineF(local_pos, self._project_local(local_pos)).length()
         return offset <= self._px(self.HIT_PX) / 2
+
+    def meets(self) -> list:
+        """The points where this line meets others.
+
+        The same relation :class:`~prism.anchors.MeetAnchor` holds, read from
+        the line's side: these are points this line helps determine.
+
+        Returns:
+            The meet points on this line, in scene order of creation.
+        """
+        scene = self.scene()
+        if scene is None:
+            return []
+        from prism.items.point_item import PointItem
+
+        return [
+            it
+            for it in scene.items()
+            if isinstance(it, PointItem)
+            and it.is_meet()
+            and it.anchor().references_line(self)
+        ]
 
     def closest_scene_point(self, scene_pos: QPointF) -> QPointF:
         """The place on this line nearest ``scene_pos``, in scene coordinates.

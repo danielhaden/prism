@@ -40,6 +40,10 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: so dragging it rotates it to wherever you want.
     NEW_LINE_ANGLE = 45.0
 
+    #: Clickable radius, in screen pixels. The drawn dot is radius 1, far too
+    #: small to aim at; this is the target you actually get.
+    HIT_PX = 6.0
+
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
         # trigger boundingRect()/itemChange() (which read these attributes).
@@ -97,13 +101,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     # -- Geometry ----------------------------------------------------------
 
     def boundingRect(self) -> QRectF:
-        r = max(self._radius + 4.0, self._glow_radius) + 2.0
+        r = max(self._radius + 4.0, self._glow_radius, self.HIT_PX) + 2.0
         return QRectF(-r, -r, 2 * r, 2 * r)
 
     def shape(self) -> QPainterPath:
-        # Hit area is the dot itself; the glow is purely decorative.
+        # The dot is drawn at radius 1 by default and the glow around it is
+        # decorative, so the hit area is neither: it is a fixed target in
+        # screen pixels, comparable to a line's band, since points sit above
+        # lines and are the more specific thing to aim at. (These coordinates
+        # are screen pixels: the item ignores view transformations.)
         path = QPainterPath()
-        r = self._radius + 2.0
+        r = max(self._radius + 2.0, self.HIT_PX)
         path.addEllipse(QPointF(0, 0), r, r)
         return path
 
@@ -117,28 +125,40 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         display_action = menu.addAction("Modify Display Properties…")
         menu.addSeparator()
 
-        # Line through exactly two selected points.
-        line_action = None
+        # Line through exactly two selected points. When the selection isn't
+        # two, say so in a disabled entry rather than silently omitting it —
+        # a stray selected point (a crossing caught by a rubber band, say)
+        # used to make the command vanish with no explanation.
+        line_action = one_line_action = pencil_action = None
         two_points = (
             scene.selected_points()
             if scene is not None and hasattr(scene, "selected_points")
             else []
         )
-        if len(two_points) == 2 and self in two_points:
+        joining = len(two_points) == 2 and self in two_points
+        if joining:
+            # With two points picked, joining them is the thing you mean. The
+            # single-point commands below would be three ways to draw a line
+            # in one menu, so they stand down.
             line_action = menu.addAction("Add Line Through Points")
             menu.addSeparator()
+        elif scene is not None:
+            reason = self._join_unavailable_reason(two_points)
+            if reason is not None:
+                unavailable = menu.addAction(f"Add Line Through Points — {reason}")
+                unavailable.setEnabled(False)
+                menu.addSeparator()
 
         # Lines drawn *through* this point. The lines are new, so nothing can
         # depend on them yet and no cycle is possible — a crossing is as good a
         # centre for a pencil as any other point.
-        one_line_action = pencil_action = None
-        if scene is not None:
+        if scene is not None and not joining:
             one_line_action = menu.addAction("Add Line Through Point")
             pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()
 
         # Anchor a point to a line when the selection is one line + point(s).
-        snap_action = unsnap_action = None
+        snap_action = None
         sel_points, sel_line = (
             scene.selected_point_line_pair()
             if scene is not None and hasattr(scene, "selected_point_line_pair")
@@ -146,9 +166,12 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         )
         if sel_line is not None and sel_points:
             snap_action = menu.addAction("Snap Point to Line")
-        if self.has_anchor():
-            unsnap_action = menu.addAction("Remove Anchor")
-        if snap_action is not None or unsnap_action is not None:
+        lock_action = None
+        if self._anchor is not None and self._anchor.kind == "line":
+            lock_action = menu.addAction(
+                "Unlock From Line" if self.is_locked_to_line() else "Lock to Line"
+            )
+        if snap_action or lock_action:
             menu.addSeparator()
 
         # Pinning uses this point as a pivot. A computed point can drive lines
@@ -163,6 +186,18 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
                 unpin_action = menu.addAction("Unpin Lines From Point")
             pin_action = menu.addAction("Pin Lines Through Point")
             menu.addSeparator()
+
+        # Removing this point. A meet can only be hidden — the lines still
+        # cross there — so the entry says what it will actually do.
+        selected = [p for p in two_points if p is not self]
+        if self.is_meet():
+            delete_action = menu.addAction("Hide Point")
+        elif selected and self in two_points:
+            delete_action = menu.addAction(f"Delete {len(two_points)} Points")
+        else:
+            delete_action = menu.addAction("Delete Point")
+        menu.addSeparator()
+
         label_actions = self.add_label_actions(menu)
 
         chosen = menu.exec(event.screenPos())
@@ -171,15 +206,24 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if chosen is display_action:
             self.open_display_dialog()
         elif line_action is not None and chosen is line_action:
-            scene.add_line_between(two_points[0], two_points[1])
+            first, second = (scene.point_id(p) for p in two_points)
+            if not scene.run_as_command(f"(add line {first} {second})"):
+                scene.add_line_between(two_points[0], two_points[1])
         elif one_line_action is not None and chosen is one_line_action:
-            scene.add_line_through(self, self.NEW_LINE_ANGLE)
+            angle = self.NEW_LINE_ANGLE
+            if not scene.run_as_command(
+                f"(add line {angle:g} {scene.point_id(self)})"
+            ):
+                scene.add_line_through(self, angle)
         elif pencil_action is not None and chosen is pencil_action:
             self._add_lines_through()
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
-        elif unsnap_action is not None and chosen is unsnap_action:
-            self.clear_anchor()
+        elif lock_action is not None and chosen is lock_action:
+            if self.set_locked_to_line(not self.is_locked_to_line()):
+                scene.commit_undo()
+        elif chosen is delete_action:
+            self._delete_requested(two_points)
         elif chosen is pin_action:
             scene.pin_lines_through(self)
         elif chosen is unpin_action:
@@ -187,6 +231,50 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         else:
             self.handle_label_action(chosen, label_actions)
         event.accept()
+
+    def _delete_requested(self, selected) -> None:
+        """Remove this point — or the whole selection, if it is one.
+
+        A meet is hidden rather than removed: its lines still cross there, so
+        the next recompute would bring it straight back.
+
+        Args:
+            selected: The points currently selected.
+        """
+        scene = self.scene()
+        if scene is None:
+            return
+        targets = selected if (len(selected) > 1 and self in selected) else [self]
+        # Highest id first: removing a point renumbers the ones after it, so
+        # commands written for the lower ids would then name the wrong points.
+        ordered = sorted(targets, key=scene.ordered_points().index, reverse=True)
+        for point in ordered:
+            if not scene.run_as_command(f"(rm {scene.point_id(point)})"):
+                if point.is_meet():
+                    point.set_shown(False)
+                else:
+                    scene._remove_geometry(point)
+        scene.recompute_intersections()
+        scene.settle_definitions()
+        scene.commit_undo()
+
+    def _join_unavailable_reason(self, selected) -> str | None:
+        """Why two points can't be joined right now, phrased for the menu.
+
+        Args:
+            selected: The points currently selected.
+
+        Returns:
+            A short reason, or None when there's nothing worth saying.
+        """
+        count = len(selected)
+        if count > 2:
+            return f"{count} points selected, need 2"
+        if count == 2:
+            return "right-click one of the two"
+        if count == 1 and self in selected:
+            return "select one more point"
+        return None
 
     def _add_lines_through(self) -> None:
         """Draw a pencil of lines through this point, at angles you choose."""
@@ -197,8 +285,13 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             return
         parent = scene.views()[0] if scene.views() else None
         angles = ProjectivityDialog.get_angles(parent)
-        if angles:
-            scene.add_projectivity(self, angles)
+        if not angles:
+            return
+        # One command per ray, so the pencil replays from a script.
+        name = scene.point_id(self)
+        for angle in angles:
+            if not scene.run_as_command(f"(add line {angle:g} {name})"):
+                scene.add_projectivity(self, [angle])
 
     def open_display_dialog(self) -> None:
         """Edit this point's display properties (optionally applying to all)."""
@@ -242,7 +335,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             # Notify so bound endpoints / anchored points / intersections
             # update. An intersection point moved *by the scene* has nothing
             # depending on it, so skip that to avoid needless churn.
-            if not (self._syncing and self.is_intersection()):
+            if not (self._syncing and self.is_meet()):
                 scene = self.scene()
                 if scene is not None and hasattr(scene, "on_point_moved"):
                     scene.on_point_moved(self)
@@ -257,9 +350,43 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     def has_anchor(self) -> bool:
         return self._anchor is not None
 
-    def is_intersection(self) -> bool:
-        """Whether this point is currently pinned to a line intersection."""
-        return self._anchor is not None and self._anchor.kind == "intersection"
+    def is_meet(self) -> bool:
+        """Whether this point is where a set of lines meet.
+
+        Not a kind of point — a statement about what currently determines it.
+        Ask :meth:`meeting_lines` for the lines themselves.
+        """
+        return self._anchor is not None and self._anchor.kind == "meet"
+
+    def is_locked_to_line(self) -> bool:
+        """Whether this point is held at a fixed place on its line."""
+        anchor = self._anchor
+        return (
+            anchor is not None
+            and anchor.kind == "line"
+            and getattr(anchor, "locked", False)
+        )
+
+    def set_locked_to_line(self, locked: bool) -> bool:
+        """Hold the point where it is on its line, or let it slide again.
+
+        Args:
+            locked: Whether it should be held.
+
+        Returns:
+            Whether anything changed.
+        """
+        anchor = self._anchor
+        if anchor is None or anchor.kind != "line":
+            return False
+        if bool(locked) == getattr(anchor, "locked", False):
+            return False
+        anchor.locked = bool(locked)
+        return True
+
+    def meeting_lines(self) -> list:
+        """The lines that meet at this point, or an empty list."""
+        return list(self._anchor.lines) if self.is_meet() else []
 
     def set_anchor(self, anchor) -> None:
         """Pin this point with ``anchor`` and snap it to the anchor's position."""
@@ -267,14 +394,39 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         self.sync_to_anchor()
 
     def clear_anchor(self) -> None:
-        """Release the point; it moves freely again."""
+        """Release the point; it moves freely again.
+
+        The scene is told, because it keeps its own list of the points that
+        mark where lines meet. Leaving a released point in that list gives it
+        an entry with no anchor, which the next recompute walks straight into.
+        """
+        was_meet = self.is_meet()
         self._anchor = None
+        scene = self.scene()
+        if was_meet and scene is not None and hasattr(scene, "on_point_detached"):
+            scene.on_point_detached(self)
 
     def set_anchor_line(self, line) -> None:
         """Convenience: constrain the point to slide along ``line``."""
         from prism.anchors import LineAnchor
 
         self.set_anchor(LineAnchor(line, line.param_of(self.center())))
+
+    def is_determined(self) -> bool:
+        """Whether this point's position is fully fixed by what defines it.
+
+        A point at the meet of two lines has no freedom left: it is where those
+        lines put it. A point anchored to one line still slides along it, and a
+        free point goes anywhere. Prefer this over asking what *kind* of point
+        it is — what matters is how much freedom it has.
+        """
+        anchor = self._anchor
+        if anchor is None:
+            return False
+        if anchor.kind == "meet":
+            return True
+        # A point locked to its line has no freedom left either.
+        return anchor.kind == "line" and getattr(anchor, "locked", False)
 
     def anchor_references_line(self, line) -> bool:
         return self._anchor is not None and self._anchor.references_line(line)

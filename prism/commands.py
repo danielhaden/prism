@@ -54,6 +54,8 @@ class CommandInterpreter:
             "add": self._form_add,
             "point": self._form_point,
             "rm": self._form_rm,
+            "hide": self._form_hide,
+            "show": self._form_show,
             "label": self._form_label,
             "list": self._form_list,
             "help": self._form_help,
@@ -161,6 +163,28 @@ class CommandInterpreter:
             )
         return fraction
 
+    def _as_canvas_fraction(self, argument) -> float:
+        """A position down the canvas, allowed to fall outside the frame.
+
+        The scene is much larger than the reference frame, so a figure can be
+        built above or below it. ``0`` is still the top of the frame and ``1``
+        the bottom; ``-0.5`` and ``1.5`` are half a frame beyond each.
+
+        Args:
+            argument: A fraction or decimal, or a form yielding one.
+
+        Returns:
+            The value, unclamped.
+        """
+        value = self._value(argument)
+        fraction = parse_fraction(value)
+        if fraction is None:
+            raise CommandError(
+                f"Couldn't read {value!r} as a position. Use a fraction like "
+                "1/3 or a decimal like 0.5."
+            )
+        return fraction
+
     def _as_point(self, argument) -> PointItem:
         value = self._value(argument)
         if isinstance(value, PointItem):
@@ -253,7 +277,8 @@ class CommandInterpreter:
             "  (add point <across> <down>) a point placed on the canvas;\n"
             "                              0 0 = top-left, 1 1 = bottom-right\n"
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
-            "                              0 = top of canvas, 1 = bottom\n"
+            "                              0 = top of canvas, 1 = bottom;\n"
+            "                              outside that is beyond the frame\n"
             "  (add line <angle> <point>)  line through a point, at an angle in\n"
             "                              degrees clockwise from horizontal;\n"
             "                              pinned to the point\n"
@@ -261,6 +286,7 @@ class CommandInterpreter:
             "                              both\n"
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
+            "  (point <line> <line>)       the point where two lines meet\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
             "  (label <element> <text>)    name a point or line; quote text\n"
@@ -268,6 +294,8 @@ class CommandInterpreter:
             "  (label -auto)               label everything: points A, B, C…\n"
             "                              and lines a, b, c…\n"
             "  (label -clear)              remove every label\n"
+            "  (hide <element>)            stop drawing it; nothing is lost\n"
+            "  (show <element> | -all)     draw it again\n"
             "  (list [-points | -lines])   list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
@@ -303,17 +331,18 @@ class CommandInterpreter:
                 "  down:   0 = top of canvas, 1 = bottom\n"
                 "  e.g. (add point 1/3 1/3)"
             )
-        across = self._as_fraction(args[0])
-        down = self._as_fraction(args[1])
+        across = self._as_canvas_fraction(args[0])
+        down = self._as_canvas_fraction(args[1])
         return self.scene.add_point_at(across, down)
 
     def _add_horizon(self, args) -> LineItem:
         if not args:
             raise CommandError(
                 "Usage: (add horizon <fraction>)\n"
-                "  0 = top of canvas, 1 = bottom. e.g. (add horizon 1/3)"
+                "  0 = top of canvas, 1 = bottom; outside that is above or\n"
+                "  below the frame. e.g. (add horizon 1/3)"
             )
-        return self.scene.add_horizon(self._as_fraction(args[0]))
+        return self.scene.add_horizon(self._as_canvas_fraction(args[0]))
 
     def _add_line(self, args) -> LineItem:
         if len(args) != 2:
@@ -341,14 +370,38 @@ class CommandInterpreter:
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:
             raise CommandError(
-                "Usage: (point <line> <fraction>)\n"
+                "Usage: (point <line> <fraction>)  a point along a line\n"
+                "   or: (point <line> <line>)      where two lines meet\n"
                 "  0 = the line's left-hand end, 1 = its right-hand end"
             )
         line = self._as_line(args[0])
-        fraction = self._as_fraction(args[1])
+        second = self._value(args[1])
+        if isinstance(second, LineItem) or (
+            isinstance(second, str) and parse_fraction(second) is None
+        ):
+            return self._meet_of(line, self._as_line(args[1]))
+        fraction = self._as_canvas_fraction(args[1])
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
+        return point
+
+    def _meet_of(self, a: LineItem, b: LineItem) -> PointItem:
+        """The point where two lines meet, shown if it was hidden.
+
+        Nothing is created: a point is already kept wherever lines cross. If
+        it was hidden, asking for it is a good enough reason to draw it again.
+        """
+        if a is b:
+            raise CommandError("A line meets itself everywhere.")
+        point = self.scene.meet_of(a, b)
+        if point is None:
+            raise CommandError(
+                f"{self._line_name(a)} and {self._line_name(b)} don't meet on "
+                "the canvas — they may be parallel, or cross off it."
+            )
+        if point.set_shown(True):
+            self.scene.commit_undo()
         return point
 
     def _form_rm(self, args) -> str:
@@ -359,11 +412,15 @@ class CommandInterpreter:
                 "  e.g. (rm P1)"
             )
         element = self._as_element(args[0])
-        if isinstance(element, PointItem) and element.is_intersection():
-            raise CommandError(
-                "That's an intersection point: it's computed from the lines "
-                "that cross there and would come straight back. Remove one of "
-                "those lines instead."
+        if isinstance(element, PointItem) and element.is_meet():
+            # The lines still meet there, so the point can't be removed — but
+            # it can be put out of the way, which is what was meant.
+            described = self._render(element)
+            element.set_shown(False)
+            self.scene.commit_undo()
+            return (
+                f"Hid {described}\n"
+                "  (the lines still cross there; (show -all) brings it back)"
             )
         # Describe it while it's still on the canvas — ids are positional.
         described = self._render(element)
@@ -394,6 +451,31 @@ class CommandInterpreter:
         element = self._as_element(args[0])
         self.scene.label_element(element, str(self._value(args[1])))
         return element
+
+    def _form_hide(self, args) -> str:
+        if len(args) != 1:
+            raise CommandError("Usage: (hide <element>)  e.g. (hide P3)")
+        element = self._as_element(args[0])
+        described = self._render(element)
+        if not element.set_shown(False):
+            return f"{described} was already hidden."
+        self.scene.commit_undo()
+        return f"Hid {described}"
+
+    def _form_show(self, args) -> str:
+        if len(args) != 1:
+            raise CommandError(
+                "Usage: (show <element>) or (show -all)  e.g. (show P3)"
+            )
+        first = args[0]
+        if isinstance(first, str) and first.lstrip("-").lower() == "all":
+            return f"Showed {_count(self.scene.show_all_points(), 'point')}."
+        element = self._as_element(first)
+        described = self._render(element)
+        if not element.set_shown(True):
+            return f"{described} was already showing."
+        self.scene.commit_undo()
+        return f"Showing {described}"
 
     def _form_list(self, args) -> str:
         show_points = show_lines = True
@@ -440,12 +522,17 @@ class CommandInterpreter:
     def _describe_point(self, point) -> str:
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
-        if point.is_intersection():
-            tag = "  [intersection]"
+        if point.is_meet():
+            names = ", ".join(
+                sorted(self._line_name(ln) for ln in point.meeting_lines())
+            )
+            tag = f"  [meet of {names}]"
         elif point.has_anchor():
             tag = "  [on-line]"
         else:
             tag = ""
+        if not point.is_shown():
+            tag += "  [hidden]"
         return f"({c.x():.1f}, {c.y():.1f}){label}{tag}"
 
     def _list_points(self) -> str:

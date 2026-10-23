@@ -53,9 +53,9 @@ def dependencies_of(item: Geometry) -> list:
         if anchor is not None:
             if anchor.kind == "line":
                 add(anchor.line)
-            elif anchor.kind == "intersection":
-                add(anchor.a)
-                add(anchor.b)
+            elif anchor.kind == "meet":
+                for line in anchor.lines:
+                    add(line)
     return found
 
 

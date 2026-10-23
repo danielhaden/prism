@@ -58,23 +58,80 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **All points are `PointItem`.** There is no `IntersectionPointItem` anymore.
 - A point may carry an invisible **anchor** (`prism/anchors.py`) that *pins its
   position*. Anchors are pseudo-points, never drawn:
-  - `IntersectionAnchor(a, b)` — pins a point to the crossing of two lines.
-    **Dragging detaches** it (becomes a free point; the crossing gets a fresh
-    marker).
-  - `LineAnchor(line, t)` — keeps a point on a line; **dragging slides** it.
-- `PointItem.is_intersection()` / `has_anchor()` / `set_anchor()` /
-  `clear_anchor()`. `itemChange` applies the anchor's drag rule; a `_syncing`
+  - `MeetAnchor(lines)` — pins a point to where a **set** of lines meet. Two
+    determine it; further concurrent lines **join the same anchor**, so three
+    concurrent lines give one point, not three stacked (stage 3). Read the
+    same relation from the other side with `LineItem.meets()`.
+  - `LineAnchor(line, t, locked)` — keeps a point on a line; **dragging
+    slides** it, unless `locked`, when it is held at `t`. A locked anchor's
+    `constrain_drag` returns its current position: returning `None` means
+    "the anchor let go", which is the opposite of locking. `locked` is
+    persisted, and counts towards `is_determined()`.
+- `PointItem.is_meet()` / `meeting_lines()` / `has_anchor()` / `set_anchor()` /
+  `clear_anchor()` / `is_determined()`. `itemChange` applies the anchor's drag rule; a `_syncing`
   guard lets the scene reposition anchored points without detaching/churning.
 - Default point styling: **radius 1, glow 7, black** (glow = a background-color
   disc drawn behind the dot but over the lines, so converging lines are cut
   away — the harmonic-net look).
+- **Visibility is a property** (`Definable.is_shown`/`set_shown`, stage 1 of
+  flattening the point model): an item is drawn only when it is both *defined*
+  and *shown*. Hiding is a choice and changes nothing else — position, label
+  and dependents all survive, and you can build on a hidden point. Delete and
+  `(rm …)` on a crossing **hide** it rather than refusing, since the lines
+  still meet there. `(hide …)`, `(show …)`, `(show -all)`, and a canvas-menu
+  entry bring them back; `shown` is persisted for placed points and, like
+  labels, for crossings keyed by their line pair.
+- **Being a meet is no longer a gate** (stage 2; the predicate was then
+  called `is_intersection()`). Where a limit is
+  real it is now stated as a *constraint*: `PointItem.is_determined()` ("the
+  lines pin it completely, so it has no freedom to give"), which is what
+  "Snap Point to Line" tests. Grouping a crossing is allowed — a group moves
+  its children, and a determined point simply stays where its lines put it.
+  The meet test survives only where derivation genuinely matters: snapshots
+  and templates don't store meets (they are recomputed), `rm` hides rather
+  than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
+  relation, not a kind.
+- **An anchored point cannot be set loose.** There is no "Remove Anchor"
+  command any more, and `MeetAnchor.constrain_drag` returns its position
+  rather than `None`, so dragging a crossing no longer detaches it into a free
+  point. Hiding is the way to be rid of a point you don't want drawn. The
+  removed command was also the **crash when dragging** from the session log:
+  `clear_anchor()` left a released point in `scene._meets` with no anchor, and
+  the next recompute (one per drag step) died in `_claim_meet` with
+  `AttributeError: 'NoneType' has no attribute 'references_line'` — it
+  vanished on restart because reopening rebuilds `_meets`. `clear_anchor()`
+  now tells the scene and `_apply_meets` drops anchorless entries defensively,
+  so the API is safe even though the menu no longer calls it.
+- A point's menu also carries **Lock to Line / Unlock From Line** (only when
+  it has a `LineAnchor`) and **Delete Point** — which reads **Delete N
+  Points** for a multi-selection and **Hide Point** on a meet, since a meet
+  can only be hidden.
+- `PointItem.contextMenuEvent` shows **Add Line Through Points disabled, with
+  the reason**, when the selection isn't exactly two ("3 points selected, need
+  2", "right-click one of the two"). It used to vanish silently, which read as
+  a bug — see the RCA in the session log. When the join *is* available the two
+  single-point line commands are **omitted** (`joining` flag): with a pair
+  selected, three ways to draw a line in one menu is noise.
+- **Stage 3 (done):** meets are grouped **by place**, not by line pair.
+  `_gather_meeting_places()` collects crossings and clusters them within
+  `snap_radius()`; `_apply_meets()` reconciles them with the scene's `_meets`
+  list, claiming an existing point when it shares **two** lines with a place
+  (so a label and anything built on it stay attached as lines come and go).
+  `PointItem.is_meet()`/`meeting_lines()` replace `is_intersection()`.
+- **Relationships onto a meet survive persistence** (the gap stage 3 found,
+  now closed): a meet has no index in the stored point list, so `capture()`
+  names it `{"meet": [line indices]}` via `point_ref()`, and `restore()` wires
+  those in a **second pass after the recompute** (`_wire_lines(meets_ready)`),
+  because meets don't exist until then. Before this a pivot onto a crossing
+  was silently dropped — `"pivot": None` — so a net built on crossings lost
+  its pinning on every undo.
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
   add-line-through, joining two crossings, console `(add line … X)`. Updates
   run in dependency order (see **Propagation**), so what you build follows.
-  Still excluded, deliberately: **grouping** (a group moves its children, and a
-  computed point can't be moved), anchoring a crossing to a line (its position
-  is already determined), `rm` of a crossing (it would come straight back), and
-  storing crossings in snapshots/templates (they're recomputed).
+  Still excluded, deliberately: anchoring a meet to a line (its position is
+  already determined — `is_determined()`), `rm` of a meet (it hides instead,
+  since the lines still meet), and storing meets in snapshots/templates
+  (they're recomputed). Grouping a meet **is** allowed as of stage 2.
 
 ### Lines (`LineItem`)
 
@@ -92,11 +149,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
   move, can't rotate). The horizon uses this.
 - Line properties dialog: color, thickness (cosmetic), dash style.
-- Right-click a **selected** line → **Add Point to Line** adds a line-anchored
-  point where you clicked (`CanvasScene.add_point_on_line_at`, which projects
-  the click with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it
-  takes a position, not a fraction, so it works past the reference frame. The
-  entry is gated on `isSelected()` and `click_is_on_line()`.
+- Right-click a line → **Add Point to Line** adds a line-anchored point where
+  you clicked (`CanvasScene.add_point_on_line_at`, which projects the click
+  with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
+  position, not a fraction, so it works past the reference frame. Gated on
+  `click_is_on_line()` only: **not** on selection, which was tried and removed
+  — a new line isn't selected and any stray click clears the selection, so the
+  natural flow (add a horizon, right-click it) never offered the command.
 - The same entry appears in the **canvas** menu when the click is blank space
   within `CanvasScene.NEAR_LINE_PX` (40 screen px) of a selected line
   (`nearest_selected_line`, nearest wins). Without it the command is
@@ -110,8 +169,34 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   depend on them yet and no cycle is possible. Note "Pin Lines Through Point" only pins *existing*
   lines — before this there was no way to *create* a line through a single
   point except the console.
+- Select **two lines**, right-click either → **Add Point at Intersection**
+  (`CanvasScene.meet_of`, console `(point <line> <line>)`). It *finds* the
+  meet rather than creating one — since stage 3 a point already exists wherever
+  lines cross — and shows it if hidden. Disabled with a reason when more than
+  two lines are selected. Fires the console command, like Add Horizon.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
-  adds an unattached point there. The scene's `contextMenuEvent` routes to the
+  adds an unattached point there, and **Add Horizon** a horizontal
+  orientation-locked line at the clicked height.
+- **Canvas actions should run as console commands.** `MainWindow` hands the
+  scene `console.run_command` via `set_command_runner()`; an action calls
+  `scene.run_as_command("(…)")`, which returns False when no runner is set so
+  the caller can fall back to doing the work directly (keeps the scene usable
+  headless). **Every canvas action with a console equivalent now does this**
+  — a figure built by clicking replays as one built by typing. Conversions
+  live on the scene: `canvas_fractions()`, `horizon_fraction_at()`,
+  `fraction_along_line()`, `point_id()`/`line_id()`/`element_id()`. Deleting
+  several points writes `(rm …)` **highest id first**, since removing one
+  renumbers those after it. A label containing `"` is applied directly — the
+  s-expression reader has no escapes. Still with no console form, so they
+  write nothing: display/line properties, visible range, Show Full Line, Snap
+  Point to Line, Lock to Line, Pin Lines Through Point.
+- `(add point …)` and `(point <line> <fraction>)` take fractions **outside
+  0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
+  does: a click outside the frame is ordinary and the menu must be able to
+  express it.
+- `(add horizon …)` accepts fractions **outside 0-1** (above/below the frame)
+  via `_as_canvas_fraction`; `_as_fraction` stays strict for the other forms.
+  Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
   the real modal menu opens and the test hangs). Patch the module's name
@@ -120,12 +205,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 ### Intersections
 
-- The scene auto-maintains an intersection point (a `PointItem` +
-  `IntersectionAnchor`) for every crossing pair, in `_intersections` (keyed by
-  ordered line-id pair). Reused across recomputes (so selection/label sticks);
-  removed when the crossing is gone; a crossing coincident with a placed point
-  is skipped.
-- `auto_label` labels intersection points **too** (it used to skip them). A
+- The scene auto-maintains one point per **place** where lines meet, in
+  `_meets` (see **Stage 3** above). Reused across recomputes so a selection or
+  label sticks; kept but undefined when the crossing goes and something
+  depends on it, is labelled or is hidden; a crossing coincident with an
+  existing point is skipped — that point *is* the meet.
+- `auto_label` labels meets **too** (it used to skip them). A
   label follows its marker as the lines move and through undo/redo, but a
   crossing that stops existing takes its label with it — the marker that comes
   back is a new one.
@@ -197,6 +282,20 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   emits nothing, so the controls are synced by hand after a load; page rendering
   is **asynchronous**, so a pixel check needs an event-pumping wait.
 
+## The drawing, between sessions
+
+- `MainWindow` writes the canvas to `settings.drawing_path()` on close
+  (`canvas.json` in the app-data dir; `PRISM_DRAWING` overrides, as the tests
+  use) and reads it back in `__init__` **before `init_history()`**, so undo
+  starts from the restored drawing rather than from an empty canvas.
+- It is `scene_state.capture()`/`restore()` wrapped with `DRAWING_VERSION`; a
+  file from a different version, or one that is missing, unreadable or
+  malformed, is ignored and Prism opens empty. A bad file must never stop the
+  app opening.
+- Saved **on close only**, so a crash loses the session. Fine for a
+  convenience; a real save/load to a file of the user's choosing is still open
+  (next steps).
+
 ## Window layout
 
 - `MainWindow` saves `saveGeometry()`/`saveState()` to QSettings on close and
@@ -236,6 +335,23 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   nothing" report.
 - **Right-click never changes the selection** (swallowed in
   `CanvasScene.mousePressEvent`) so selection-based menus survive.
+- **Hit-test through the view transform**: `CanvasScene.items_at()` passes the
+  viewport transform to `items()`. Points carry `ItemIgnoresTransformations`,
+  so their clickable radius is in *screen pixels*; without the transform Qt
+  reads it as scene units, shrinking the target as you zoom out. A point was
+  winning a right-click only within ~1px at the default zoom (and ~4px zoomed
+  in), so clicks meant for a point landed on the line under it. `PointItem`
+  also has `HIT_PX = 6` — the drawn dot is radius 1, far too small to aim at.
+- **Context menus are routed by hand**, so `CanvasScene.contextMenuEvent` must
+  `event.setPos(target.mapFromScene(event.scenePos()))` before calling an
+  item's handler. Qt fills `pos()` in only when *it* delivers the event; routed
+  by hand it stays `(0, 0)`, which reads as "the click landed on the item's own
+  origin". That silently broke **Add Point to Line** on every line except one
+  passing through its item origin — a horizon at 1/2 worked, every other height
+  failed. Tests that build a `QGraphicsSceneContextMenuEvent` and call the
+  handler directly will not catch this: they set `pos()` themselves. Drive a
+  real `QContextMenuEvent` at `view.viewport()` instead
+  (`scratchpad/real_path_check.py` pattern).
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).
 - Delete/Backspace deletes; Ctrl+G/Ctrl+Shift+G group/ungroup; Ctrl+Z /
   Ctrl+Shift+Z undo/redo.

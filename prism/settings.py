@@ -13,6 +13,7 @@ Geometry* — pointed at from **Settings > Book (PDF)…**, overridable with
 whenever the book is pointed somewhere new.
 """
 
+import json
 import os
 import re
 
@@ -162,3 +163,51 @@ def clear_window_layout() -> None:
     stored = QSettings()
     stored.remove(_WINDOW_GEOMETRY_KEY)
     stored.remove(_WINDOW_STATE_KEY)
+
+
+# -- The drawing ---------------------------------------------------------
+
+#: File the canvas is kept in between sessions.
+DRAWING_FILE = "canvas.json"
+
+
+def drawing_path() -> str:
+    """Where the canvas is kept between sessions."""
+    override = os.environ.get("PRISM_DRAWING")
+    if override:
+        return override
+    base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+    if not base:
+        base = os.path.expanduser("~/.prism")
+    return os.path.join(base, DRAWING_FILE)
+
+
+def save_drawing(data: dict) -> str:
+    """Write the canvas out.
+
+    Args:
+        data: Plain data from :func:`prism.scene_state.capture`, wrapped with
+            a version.
+
+    Returns:
+        The path written.
+    """
+    path = drawing_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    return path
+
+
+def load_drawing() -> dict | None:
+    """Read the saved canvas, or None if there isn't a usable one.
+
+    A missing, unreadable or malformed file is not an error worth stopping
+    for: it just means starting with an empty canvas.
+    """
+    try:
+        with open(drawing_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None

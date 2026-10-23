@@ -21,9 +21,9 @@ it.
   (these are never drawn). A point at a line **crossing** is simply a point
   anchored to that intersection; a point [anchored to a
   line](#anchoring-a-point-to-a-line) is one anchored to slide along it.
-  **Dragging** an intersection point **detaches** it — it becomes an ordinary
-  free point, and a fresh point re-marks the crossing. (A line-anchored point,
-  by contrast, slides along its line when dragged.) Geometry **can** be built
+  **Dragging** a point the lines determine does nothing: it is where they put
+  it, and a slip of the mouse shouldn't turn it into something else. (A
+  line-anchored point, by contrast, slides along its line when dragged.) Geometry **can** be built
   on a computed point: bind a line to a crossing, pin a pencil through it, join
   two crossings — updates run in dependency order, so what you build follows.
 
@@ -58,16 +58,14 @@ appears at that spot, already anchored to the line. The click is projected onto
 the line, so the point sits exactly on it however roughly you aimed, and it
 works anywhere along the line — including out past the reference frame.
 
-The entry needs the line to be **selected** — right-clicking never changes the
-selection, so select the line with a left click first. After that your aim is
-forgiving: right-click *near* a selected line, up to about 40 pixels away, and
-the canvas menu offers **Add Point to Line** alongside **Add Free Point**. You
-have already said which line you mean, so you don't have to hit it again.
+Right-clicking **on** the line is enough — the line's own menu opens, so which
+line you mean is already settled. Nothing needs selecting first.
 
-With several lines selected, the point goes on the nearest one.
-
-(Clicking the line itself — within about 6 pixels — opens the line's own menu
-instead, which carries the same entry along with its other commands.)
+Your aim can be looser than that too: **select** a line and you can right-click
+up to about 40 pixels away from it, on blank canvas, and the canvas menu offers
+**Add Point to Line** beside **Add Free Point**. Selecting is what says which
+line you mean out there, where the click alone doesn't. With several lines
+selected, the point goes on the nearest one.
 
 !!! tip "Vanishing points"
     Put a point on the horizon this way, then right-click *that point* →
@@ -85,8 +83,35 @@ The point jumps onto the line and is now constrained to it:
 - **Dragging the point** slides it *along* the line.
 - **Moving or rotating the line** carries the point with it.
 
-Right-click the point → **Remove Anchor** to release it. Deleting the line also
-releases anything anchored to it.
+Right-click the point → **Lock to Line** to hold it where it is: it stays on
+the line, but dragging no longer slides it along. **Unlock From Line** gives it
+back its freedom. Locking is useful once a point is where you want it in a
+construction and you'd rather not nudge it by accident while moving things
+around it.
+
+A point anchored to a line stays on it. There is no command to pull it off
+again — if you want it out of the way, [hide it](#hiding-a-point) rather than
+setting it loose. Deleting the line does release anything anchored to it.
+
+### Hiding a point
+
+A dense figure has a point at every crossing, and most of them are scaffolding
+you'd rather not look at. **Hide** one and it stops being drawn — nothing else
+changes. It keeps its position and its label, anything built on it carries on
+working, and you can build on it while it's hidden.
+
+```
+(hide P3)       # stop drawing it
+(show P3)       # draw it again
+(show -all)     # bring back everything hidden
+```
+
+Pressing ++delete++ on a crossing, or `(rm P3)`, hides it too: the two lines
+still meet there, so the point can't honestly be removed — but it can be got
+out of the way. Right-click blank canvas for **Show N Hidden Point(s)** when
+you want them back.
+
+`(list)` marks hidden points `[hidden]`, so nothing disappears without trace.
 
 ### Point context menu (right-click)
 
@@ -97,13 +122,25 @@ releases anything anchored to it.
 - **Add Lines Through Point…** — the same, for a whole
   [pencil](projectivities.md): choose a start angle, an end angle and how many
   lines. This is the quick way to fan lines out of a vanishing point.
-- **Add Line Through Points** — appears when **two** points are selected, and
-  joins them; each endpoint is bound to its point.
-- **Snap Point to Line** / **Remove Anchor** — see
-  [Anchoring](#anchoring-a-point-to-a-line).
+- **Add Line Through Points** — joins **two** selected points, binding each
+  endpoint to its point.
+
+With two points selected, joining them is clearly what you mean, so the menu
+offers **only** that: the two single-point commands stand down rather than
+giving you three ways to draw a line at once. They come back as soon as the
+selection isn't a pair. Select anything other than two and the join is still
+listed, greyed out, saying what it needs.
+- **Snap Point to Line** — see [Anchoring](#anchoring-a-point-to-a-line).
 - **Pin Lines Through Point / Unpin** — turn the lines *already* passing
   through the point into a [pencil](projectivities.md) (or release them). This
   one draws nothing; use **Add Line(s) Through Point** to create lines.
+- **Lock to Line / Unlock From Line** — on a point anchored to a line, hold it
+  in place or let it slide again. See
+  [Anchoring](#anchoring-a-point-to-a-line).
+- **Delete Point** — remove it. With several points selected it reads
+  **Delete N Points** and removes them all. On a crossing it reads **Hide
+  Point** instead: the lines still meet there, so it can only be
+  [hidden](#hiding-a-point).
 - **Add / Edit / Remove Label**, **Label Properties…** — see
   [Labels](#labels). Intersection points can be labelled like any other.
 
@@ -129,6 +166,11 @@ the point so it reads cleanly instead of dissolving into a knot of ink.
     including intersection points as they're recomputed.
 
 ## Lines
+
+Right-click blank canvas → **Add Horizon** drops a horizontal,
+[orientation-locked](#locked-orientation) line at the height you clicked. It
+runs the [`(add horizon …)`](console.md#add-horizon-fraction) console command
+to do it, so the command is echoed and recorded like any other.
 
 Lines are **infinite projective entities**. When you draw a line through two
 points, it extends across the whole canvas; the two points you clicked become
@@ -161,9 +203,13 @@ A line's **orientation can be locked**, freezing its direction: it can still be
 moved, but nothing rotates it — dragging an endpoint handle slides the whole
 line through the cursor rather than tilting it, and pivot rotation is refused.
 
-The [`add horizon`](console.md#add-horizon) console command creates a
-horizontal line with its orientation locked; otherwise it's an ordinary
-infinite line.
+A **horizon** is such a line: horizontal, orientation-locked, otherwise an
+ordinary infinite line. Make one by **right-clicking blank canvas → Add
+Horizon**, which puts it at the height you clicked, or with the
+[`(add horizon <fraction>)`](console.md#add-horizon-fraction) console command,
+which measures a fraction down the reference frame instead. The menu is the one
+to reach for when the height should sit against geometry already on the canvas;
+the console form when you want it measured.
 
 ### Line properties
 
