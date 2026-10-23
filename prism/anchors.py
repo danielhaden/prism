@@ -46,9 +46,17 @@ class LineAnchor(Anchor):
     kind = "line"
     persistent = True
 
-    def __init__(self, line, t: float = 0.0):
+    def __init__(self, line: object, t: float = 0.0, locked: bool = False):
+        """
+        Args:
+            line: The line the point lies on.
+            t: Where along it, as the line's own parameter.
+            locked: Whether the point is fixed at ``t`` rather than free to
+                slide.
+        """
         self.line = line
         self.t = t
+        self.locked = locked
 
     def position(self) -> QPointF | None:
         if self.line.scene() is None:
@@ -56,6 +64,10 @@ class LineAnchor(Anchor):
         return self.line.point_at_param(self.t)
 
     def constrain_drag(self, scene_pos: QPointF) -> QPointF | None:
+        if self.locked:
+            # Held where it is. Returning None would mean "the anchor let go",
+            # which is the opposite of what locking asks for.
+            return self.position()
         projected = self.line.project_scene(scene_pos)
         self.t = self.line.param_of(projected)
         return projected  # slide along the line; never detaches

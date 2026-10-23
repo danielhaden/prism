@@ -62,7 +62,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
     determine it; further concurrent lines **join the same anchor**, so three
     concurrent lines give one point, not three stacked (stage 3). Read the
     same relation from the other side with `LineItem.meets()`.
-  - `LineAnchor(line, t)` — keeps a point on a line; **dragging slides** it.
+  - `LineAnchor(line, t, locked)` — keeps a point on a line; **dragging
+    slides** it, unless `locked`, when it is held at `t`. A locked anchor's
+    `constrain_drag` returns its current position: returning `None` means
+    "the anchor let go", which is the opposite of locking. `locked` is
+    persisted, and counts towards `is_determined()`.
 - `PointItem.is_meet()` / `meeting_lines()` / `has_anchor()` / `set_anchor()` /
   `clear_anchor()` / `is_determined()`. `itemChange` applies the anchor's drag rule; a `_syncing`
   guard lets the scene reposition anchored points without detaching/churning.
@@ -87,6 +91,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   and templates don't store meets (they are recomputed), `rm` hides rather
   than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
   relation, not a kind.
+- A point's menu also carries **Lock to Line / Unlock From Line** (only when
+  it has a `LineAnchor`) and **Delete Point** — which reads **Delete N
+  Points** for a multi-selection and **Hide Point** on a meet, since a meet
+  can only be hidden.
 - `PointItem.contextMenuEvent` shows **Add Line Through Points disabled, with
   the reason**, when the selection isn't exactly two ("3 points selected, need
   2", "right-click one of the two"). It used to vanish silently, which read as

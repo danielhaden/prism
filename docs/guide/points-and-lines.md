@@ -83,8 +83,14 @@ The point jumps onto the line and is now constrained to it:
 - **Dragging the point** slides it *along* the line.
 - **Moving or rotating the line** carries the point with it.
 
-Right-click the point → **Remove Anchor** to release it. Deleting the line also
-releases anything anchored to it.
+Right-click the point → **Lock to Line** to hold it where it is: it stays on
+the line, but dragging no longer slides it along. **Unlock From Line** gives it
+back its freedom. Locking is useful once a point is where you want it in a
+construction and you'd rather not nudge it by accident while moving things
+around it.
+
+Right-click the point → **Remove Anchor** to release it from the line
+altogether. Deleting the line also releases anything anchored to it.
 
 ### Hiding a point
 
@@ -128,6 +134,13 @@ listed, greyed out, saying what it needs.
 - **Pin Lines Through Point / Unpin** — turn the lines *already* passing
   through the point into a [pencil](projectivities.md) (or release them). This
   one draws nothing; use **Add Line(s) Through Point** to create lines.
+- **Lock to Line / Unlock From Line** — on a point anchored to a line, hold it
+  in place or let it slide again. See
+  [Anchoring](#anchoring-a-point-to-a-line).
+- **Delete Point** — remove it. With several points selected it reads
+  **Delete N Points** and removes them all. On a crossing it reads **Hide
+  Point** instead: the lines still meet there, so it can only be
+  [hidden](#hiding-a-point).
 - **Add / Edit / Remove Label**, **Label Properties…** — see
   [Labels](#labels). Intersection points can be labelled like any other.
 

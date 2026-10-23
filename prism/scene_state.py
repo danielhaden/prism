@@ -122,7 +122,11 @@ def capture(scene) -> dict:
             and pt_anchor.kind == "line"
             and id(pt_anchor.line) in l_index
         ):
-            anchor = {"line": l_index[id(pt_anchor.line)], "t": pt_anchor.t}
+            anchor = {
+                "line": l_index[id(pt_anchor.line)],
+                "t": pt_anchor.t,
+                "locked": getattr(pt_anchor, "locked", False),
+            }
         point_data.append(
             {
                 "xy": [point.center().x(), point.center().y()],
@@ -249,7 +253,13 @@ def restore(scene, state: dict) -> None:
     for point, data in zip(points, state["points"]):
         if data["anchor"] is not None:
             line = lines[data["anchor"]["line"]]
-            point.set_anchor(LineAnchor(line, data["anchor"]["t"]))
+            point.set_anchor(
+                LineAnchor(
+                    line,
+                    data["anchor"]["t"],
+                    data["anchor"].get("locked", False),
+                )
+            )
 
     for members in state.get("groups", []):
         group = GroupItem()
