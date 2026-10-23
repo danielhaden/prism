@@ -209,7 +209,7 @@ forms are a single undo step, and both are the console equivalent of
 Remove a point or a line from the canvas.
 
 ```
-(rm P1)             # by id, as (list) shows it
+(rm P1)             # by id, as (ls) shows it
 (rm A)              # by label
 (rm L2)             # a line
 ```
@@ -226,22 +226,71 @@ cross there and would reappear immediately; remove one of those lines instead.
 
 !!! warning "Ids shift"
     Ids are positional — `P1` is simply the first point. Removing `P1` renumbers
-    everything after it, so re-run `(list)` before leaning on an id again.
+    everything after it, so re-run `(ls)` before leaning on an id again.
     Labels are stable, and worth using in a script that removes things.
 
-### `(list [-points | -lines])`
+### `(ls [-points | -lines])`
 
 List the elements on the canvas.
 
 ```
-(list)            # everything
-(list -points)    # points only
-(list -lines)     # lines only
+(ls)            # everything
+(ls -points)    # points only
+(ls -lines)     # lines only
 ```
 
-Points show coordinates, label, `on-line` if anchored, and `[intersection]` for
-derived points. Lines show their defining endpoints, `infinite` or `range[…]`,
-plus `locked`, `pivot`, and their label.
+Points show coordinates, label, `on-line` if anchored, `[meet of …]` for a
+point where lines cross, and `[hidden]`. Lines show their defining endpoints,
+`infinite` or `range[…]`, plus `locked`, `pivot`, and their label.
+
+!!! note "This used to be `(list)`"
+    `(list …)` now gathers elements into a list value, so listing the canvas
+    moved to `(ls)`. Typing the old spelling says so rather than doing
+    something surprising. No saved script is affected — inspection commands
+    were never recorded.
+
+### `(list <element> …)`
+
+Gather elements into a **list value**.
+
+```
+(list P1 P2 P3)       # a list of three points
+(list L1 L2)          # lines work too
+```
+
+On its own a list isn't much use — name it with
+[`(define …)`](#define-name-value) and then act on all of it at once. Lists
+**flatten**, so they compose: `(list tri P4)` is a list of four points, not a
+list containing a list.
+
+### `(define <name> <value>)`
+
+Give a value a name.
+
+```
+(define tri (list P1 P2 P3))
+(define apex P4)
+```
+
+The name can then be used wherever the value could be, and a name you define
+takes precedence over a label of the same text — you chose it deliberately.
+
+Several commands take a list and act on each element:
+
+```
+(label tri V)     # labels them V1, V2, V3
+(hide tri)
+(show tri)
+(rm tri)
+```
+
+`(label …)` numbers the elements, since one name across three points would be
+ambiguous.
+
+!!! warning "Names don't outlive the session"
+    A definition lives as long as the app is open. The canvas persists between
+    sessions but the names you gave it don't, so a script that defines what it
+    needs is the durable form.
 
 ### `(help)`
 
@@ -289,7 +338,7 @@ Anything you build from the console can be saved and replayed.
 
 Click **Save Script…** next to the input and give it a name. The session's
 **building** commands are written out in order — inspection commands
-(`(list)`, `(help)`) are left out, so the script is just the construction.
+(`(ls)`, `(help)`) are left out, so the script is just the construction.
 
 ### The Scripts panel
 

@@ -233,8 +233,25 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
   `(add line <angle> <point>)`, `(add line <point> <point>)`,
-  `(point <line> <fraction>)`, `(rm <element>)`, `(label <element> <text>)`,
-  `(label -auto|-clear)`, `(list [-points|-lines])`, `(help)`.
+  `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
+  `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
+  `(list <element> …)`, `(define <name> <value>)`, `(ls [-points|-lines])`,
+  `(help)`.
+- **Lists and names** (first step of triangle support): `(list …)` gathers
+  elements into a Python list and **flattens** nested lists so they compose;
+  `(define <name> <value>)` binds it in `CommandInterpreter._variables`.
+  `_value()` resolves a bare word to a variable **before** falling through to
+  labels/ids, so a defined name shadows a label of the same text. `_each()`
+  applies a form to one element or to every element of a list — `rm`, `hide`,
+  `show` and `label` use it (`label` numbers them: `V1 V2 V3`). `(rm <list>)`
+  reads every name **before** removing anything, since ids are positional and
+  would otherwise all print as `P1`.
+  Variables are **in-memory only** — they don't survive a restart, while the
+  canvas does. A script that defines what it needs is the durable form.
+- The canvas inspector moved from `(list)` to **`(ls)`** so `(list …)` could
+  be the constructor. `(list)` and `(list -points)` now explain the move
+  rather than failing oddly. Nothing in saved scripts breaks: inspection
+  commands were always in `NON_RECORDING`.
 - `(label …)` delegates to `CanvasScene.label_element` / `auto_label` /
   `clear_labels`; the scene owns the convention (points upright, lines italic).
   `auto_label` and `clear_labels` now `commit_undo()` themselves — they didn't,

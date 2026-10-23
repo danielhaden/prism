@@ -50,6 +50,9 @@ def parse_fraction(text: str) -> float | None:
 class CommandInterpreter:
     def __init__(self, scene):
         self.scene = scene
+        #: Names bound with ``(define …)``. A name shadows a label of the
+        #: same text, since you chose it deliberately.
+        self._variables: dict = {}
         self._forms = {
             "add": self._form_add,
             "point": self._form_point,
@@ -58,13 +61,15 @@ class CommandInterpreter:
             "show": self._form_show,
             "label": self._form_label,
             "list": self._form_list,
+            "ls": self._form_ls,
+            "define": self._form_define,
             "help": self._form_help,
         }
 
     # -- Entry point -------------------------------------------------------
 
     #: Forms that only inspect; they aren't worth recording into a script.
-    NON_RECORDING = {"list", "help"}
+    NON_RECORDING = {"ls", "help"}
 
     def execute(self, text: str) -> str:
         """Run one or more forms and return the output text."""
@@ -135,9 +140,15 @@ class CommandInterpreter:
         return form(expression[1:])
 
     def _value(self, argument):
-        """Evaluate an argument: nested forms run, atoms pass through as text."""
+        """Evaluate an argument.
+
+        Nested forms run; a bare word that names a variable gives its value;
+        anything else passes through as text for the form to interpret.
+        """
         if isinstance(argument, list):
             return self._eval(argument)
+        if isinstance(argument, str) and argument in self._variables:
+            return self._variables[argument]
         return argument
 
     # -- Argument coercion -------------------------------------------------
@@ -226,12 +237,12 @@ class CommandInterpreter:
 
         Crossings count as points here: geometry can be built on them.
         """
-        points = self._points()  # same order/numbering as the (list) command
+        points = self._points()  # same order/numbering as the (ls) command
         match = _match_by_label(points, name) or _match_by_id(points, name, "p")
         if match is None:
             raise CommandError(
                 f"No point named {name!r}. Use a label (e.g. A) or an id from "
-                "(list) (e.g. P1)."
+                "(ls) (e.g. P1)."
             )
         return match
 
@@ -251,7 +262,7 @@ class CommandInterpreter:
         if match is None:
             raise CommandError(
                 f"No element named {name!r}. Use a label (A, a) or an id from "
-                "(list) (P1, L1)."
+                "(ls) (P1, L1)."
             )
         return match
 
@@ -262,7 +273,7 @@ class CommandInterpreter:
         if match is None:
             raise CommandError(
                 f"No line named {name!r}. Use a label (e.g. a) or an id from "
-                "(list) (e.g. L1)."
+                "(ls) (e.g. L1)."
             )
         return match
 
@@ -296,10 +307,12 @@ class CommandInterpreter:
             "  (label -clear)              remove every label\n"
             "  (hide <element>)            stop drawing it; nothing is lost\n"
             "  (show <element> | -all)     draw it again\n"
-            "  (list [-points | -lines])   list canvas elements\n"
+            "  (list <element> …)          gather elements into a list\n"
+            "  (define <name> <value>)     give a value a name\n"
+            "  (ls [-points | -lines])     list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
-            "Elements are named by label (A, a) or by id from (list) (P1, L1)."
+            "Elements are named by label (A, a) or by id from (ls) (P1, L1)."
         )
 
     def _form_add(self, args):
@@ -404,26 +417,55 @@ class CommandInterpreter:
             self.scene.commit_undo()
         return point
 
+    def _each(self, argument, what):
+        """Apply ``what`` to one element or to every element in a list.
+
+        Args:
+            argument: An element, or a list of them.
+            what: Callable taking one element and returning a line of output.
+
+        Returns:
+            The outputs, newline-joined.
+        """
+        value = self._value(argument)
+        if isinstance(value, list):
+            if not value:
+                raise CommandError("That list is empty.")
+            return "\n".join(what(item) for item in value)
+        return what(self._as_element(argument))
+
     def _form_rm(self, args) -> str:
         if len(args) != 1:
             raise CommandError(
                 "Usage: (rm <element>)\n"
-                "  element: a label (A, a) or an id from (list) (P1, L1)\n"
+                "  element: a label (A, a) or an id from (ls) (P1, L1)\n"
                 "  e.g. (rm P1)"
             )
-        element = self._as_element(args[0])
+        value = self._value(args[0])
+        if isinstance(value, list):
+            if not value:
+                raise CommandError("That list is empty.")
+            # Names are positional, so read them all before removing any:
+            # otherwise every line of the output says P1.
+            described = [self._render(item) for item in value]
+            return "\n".join(
+                self._remove_one(item, text)
+                for item, text in zip(value, described)
+            )
+        return self._remove_one(self._as_element(args[0]))
+
+    def _remove_one(self, element, described: str | None = None) -> str:
+        if described is None:
+            described = self._render(element)
         if isinstance(element, PointItem) and element.is_meet():
             # The lines still meet there, so the point can't be removed — but
             # it can be put out of the way, which is what was meant.
-            described = self._render(element)
             element.set_shown(False)
             self.scene.commit_undo()
             return (
                 f"Hid {described}\n"
                 "  (the lines still cross there; (show -all) brings it back)"
             )
-        # Describe it while it's still on the canvas — ids are positional.
-        described = self._render(element)
         self.scene.remove_element(element)
         return f"Removed {described}"
 
@@ -448,14 +490,24 @@ class CommandInterpreter:
             )
         if len(args) != 2:
             raise CommandError(_LABEL_USAGE)
+        text = str(self._value(args[1]))
+        value = self._value(args[0])
+        if isinstance(value, list):
+            # One name would be ambiguous across several elements, so each
+            # gets the text with its position appended: A1, A2, A3.
+            for index, element in enumerate(value, 1):
+                self.scene.label_element(element, f"{text}{index}")
+            return self._render(value)
         element = self._as_element(args[0])
-        self.scene.label_element(element, str(self._value(args[1])))
+        self.scene.label_element(element, text)
         return element
 
     def _form_hide(self, args) -> str:
         if len(args) != 1:
             raise CommandError("Usage: (hide <element>)  e.g. (hide P3)")
-        element = self._as_element(args[0])
+        return self._each(args[0], self._hide_one)
+
+    def _hide_one(self, element) -> str:
         described = self._render(element)
         if not element.set_shown(False):
             return f"{described} was already hidden."
@@ -470,14 +522,56 @@ class CommandInterpreter:
         first = args[0]
         if isinstance(first, str) and first.lstrip("-").lower() == "all":
             return f"Showed {_count(self.scene.show_all_points(), 'point')}."
-        element = self._as_element(first)
-        described = self._render(element)
-        if not element.set_shown(True):
-            return f"{described} was already showing."
-        self.scene.commit_undo()
-        return f"Showing {described}"
+        return self._each(first, self._show_one)
 
-    def _form_list(self, args) -> str:
+    def _show_one(self, element) -> str:
+        if not element.set_shown(True):
+            return f"{self._render(element)} was already showing."
+        self.scene.commit_undo()
+        return f"Showing {self._render(element)}"  # described as it now is
+
+    def _form_list(self, args) -> list:
+        """``(list P1 P2 L1)`` — gather elements into a list value."""
+        if not args:
+            raise CommandError(
+                "(list …) gathers elements, e.g. (list P1 P2 P3).\n"
+                "  To see what's on the canvas, use (ls)."
+            )
+        gathered = []
+        for argument in args:
+            value = self._value(argument)
+            if isinstance(value, str) and value.lstrip("-").lower() in (
+                "points", "point", "p", "lines", "line", "l"
+            ):
+                raise CommandError(
+                    f"(list …) gathers elements now; use (ls {value}) to see "
+                    "what's on the canvas."
+                )
+            if isinstance(value, list):
+                gathered.extend(value)  # lists flatten, so they compose
+            else:
+                gathered.append(self._as_element(argument))
+        return gathered
+
+    def _form_define(self, args) -> str:
+        """``(define tri (list P1 P2 P3))`` — give a value a name."""
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (define <name> <value>)\n"
+                "  e.g. (define tri (list P1 P2 P3))"
+            )
+        name = args[0]
+        if not isinstance(name, str):
+            raise CommandError("A name must be a bare word, e.g. (define tri …).")
+        if parse_fraction(name) is not None:
+            raise CommandError(f"{name!r} is a number, not a name.")
+        value = self._value(args[1])
+        if isinstance(value, str):
+            value = self._as_element(args[1])
+        self._variables[name] = value
+        return f"{name} = {self._render(value)}"
+
+    def _form_ls(self, args) -> str:
         show_points = show_lines = True
         if args:
             show_points = show_lines = False
@@ -503,6 +597,9 @@ class CommandInterpreter:
     def _render(self, value) -> str:
         if value is None:
             return ""
+        if isinstance(value, list):
+            inner = " ".join(self._element_name(item) for item in value)
+            return f"({inner})"
         if isinstance(value, str):
             return value
         if isinstance(value, PointItem):
@@ -510,6 +607,14 @@ class CommandInterpreter:
         if isinstance(value, LineItem):
             return f"{self._line_name(value)}  {self._describe_line(value)}"
         return str(value)
+
+    def _element_name(self, item) -> str:
+        """``P1``/``L1`` for an element, or the rendering of anything else."""
+        if isinstance(item, PointItem):
+            return self._point_name(item)
+        if isinstance(item, LineItem):
+            return self._line_name(item)
+        return str(item)
 
     def _point_name(self, point) -> str:
         points = self._points()
