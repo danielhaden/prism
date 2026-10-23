@@ -33,6 +33,24 @@ You can also put several forms on one line, which is the seed of scripting:
 (add horizon 1/3) (add-line 250 (point L1 1/3))
 ```
 
+## Remarks
+
+A **`;`** begins a remark that runs to the end of the line, as in lisp — in
+the console as well as in a [script](#scripts):
+
+```
+; a horizon, and a point two-thirds along it
+(add horizon 1/3)         ; locked to the horizontal
+(add-line
+  250                     ; degrees clockwise from horizontal
+  (point L1 1/3))
+```
+
+A remark may sit inside a form, as above, and it ends an element's name as
+well: `(rm P1;why)` reads as `(rm P1` — and so reports a missing `)`, since
+the bracket was inside the remark. A `;` in `"quoted text"` is ordinary text,
+so labels can contain one.
+
 ## Naming elements
 
 Elements are referred to either by their **label** (`A`, `a` — matched
@@ -666,7 +684,7 @@ edit them in any editor as well as in the panel. Choose the folder from **Settin
 it defaults to a per-user application-data directory, and the panel shows the
 current path at the bottom.
 
-Scripts may contain blank lines and `;` comments:
+Scripts may contain blank lines and [remarks](#remarks):
 
 ```
 ; a horizon with a vanishing point

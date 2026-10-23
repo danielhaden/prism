@@ -234,7 +234,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 - Commands are **S-expressions**; forms **return the element they create**, so
   they compose: `(add-line 260 (point L1 2/3))`.
-- Reader: `prism/sexpr.py` (supports `;` comments). Interpreter:
+- Reader: `prism/sexpr.py`. `;` starts a remark to end of line, **and ends an
+  atom**, as in lisp — so `(rm P1;why)` loses its `)` to the remark and reports
+  a missing bracket, which is what lisp does too. A `;` inside `"quoted text"`
+  is ordinary text, since the quote branch is tried first. Interpreter:
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
   `(add-line <angle> <points>)`, `(add-line <points> <points>)`,
