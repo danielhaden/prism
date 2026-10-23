@@ -204,6 +204,32 @@ forms are a single undo step, and both are the console equivalent of
     (add line 30 A)       ; still works however the ids shift
     ```
 
+### `(draw-triangle <point> <point> <point>)`
+
+Draw the three sides joining three points.
+
+```
+(draw-triangle P1 P2 P3)
+(draw-triangle tri)            # or a list of three
+```
+
+Each side is a line **bound to its two vertices**, so the figure stays a
+triangle as you drag them — move a vertex and the two sides through it follow.
+The command returns the three sides as a list, so you can name them:
+
+```
+(define sides (draw-triangle tri))
+(label sides s)                # s1, s2, s3
+```
+
+A side that is **already drawn is reused**, not drawn again. Triangles sharing
+an edge — which is most of what a net is made of — therefore don't stack lines
+on top of each other.
+
+In the projective sense a triangle needs three points **not on a line**, so
+collinear points are refused rather than given three copies of the same side.
+The same goes for the same point twice.
+
 ### `(rm <element>)`
 
 Remove a point or a line from the canvas.

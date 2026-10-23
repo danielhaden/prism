@@ -235,8 +235,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(add line <angle> <point>)`, `(add line <point> <point>)`,
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
-  `(list <element> …)`, `(define <name> <value>)`, `(ls [-points|-lines])`,
-  `(help)`.
+  `(list <element> …)`, `(define <name> <value>)`,
+  `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(help)`.
 - **Lists and names** (first step of triangle support): `(list …)` gathers
   elements into a Python list and **flattens** nested lists so they compose;
   `(define <name> <value>)` binds it in `CommandInterpreter._variables`.
@@ -248,6 +248,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   would otherwise all print as `P1`.
   Variables are **in-memory only** — they don't survive a restart, while the
   canvas does. A script that defines what it needs is the durable form.
+- `(draw-triangle …)` takes three points **or a list of three** and joins
+  them pairwise, returning the sides as a list. `_join()` **reuses an existing
+  side** (a line bound to both points) rather than drawing a second one —
+  triangles in a net share edges constantly. Collinear points and a repeated
+  point are refused: in the projective sense three points on a line bound no
+  triangle.
 - The canvas inspector moved from `(list)` to **`(ls)`** so `(list …)` could
   be the constructor. `(list)` and `(list -points)` now explain the move
   rather than failing oddly. Nothing in saved scripts breaks: inspection

@@ -63,6 +63,7 @@ class CommandInterpreter:
             "list": self._form_list,
             "ls": self._form_ls,
             "define": self._form_define,
+            "draw-triangle": self._form_draw_triangle,
             "help": self._form_help,
         }
 
@@ -307,6 +308,8 @@ class CommandInterpreter:
             "  (label -clear)              remove every label\n"
             "  (hide <element>)            stop drawing it; nothing is lost\n"
             "  (show <element> | -all)     draw it again\n"
+            "  (draw-triangle <p> <p> <p>) the three sides joining three\n"
+            "                              points (or a list of three)\n"
             "  (list <element> …)          gather elements into a list\n"
             "  (define <name> <value>)     give a value a name\n"
             "  (ls [-points | -lines])     list canvas elements\n"
@@ -433,6 +436,76 @@ class CommandInterpreter:
                 raise CommandError("That list is empty.")
             return "\n".join(what(item) for item in value)
         return what(self._as_element(argument))
+
+    def _form_draw_triangle(self, args) -> list:
+        """``(draw-triangle P1 P2 P3)`` — the three sides joining three points.
+
+        Takes three points, or a list of three: ``(draw-triangle tri)`` works
+        just as well. A side that is already drawn is reused rather than drawn
+        again, so triangles sharing an edge don't stack lines on top of each
+        other.
+
+        Returns:
+            The three sides, as a list.
+        """
+        points = []
+        for argument in args:
+            value = self._value(argument)
+            for item in value if isinstance(value, list) else [value]:
+                if isinstance(item, str):
+                    item = self.resolve_point(item)
+                if not isinstance(item, PointItem):
+                    raise CommandError(f"Expected a point, got {item!r}.")
+                points.append(item)
+        if len(points) != 3:
+            raise CommandError(
+                "Usage: (draw-triangle <point> <point> <point>)\n"
+                "   or: (draw-triangle <list of three points>)\n"
+                f"  got {len(points)} point(s)."
+            )
+        for index, point in enumerate(points):
+            if any(other is point for other in points[index + 1:]):
+                raise CommandError(
+                    "A triangle needs three distinct points; that is the same "
+                    "point twice."
+                )
+        if self._collinear(*points):
+            raise CommandError(
+                "Those three points are collinear, so they bound no triangle "
+                "— all three sides would be the same line."
+            )
+        sides = [
+            self._join(points[first], points[second])
+            for first, second in ((0, 1), (1, 2), (2, 0))
+        ]
+        return sides
+
+    @staticmethod
+    def _collinear(a: PointItem, b: PointItem, c: PointItem) -> bool:
+        """Whether three points lie on one line."""
+        first, second, third = a.center(), b.center(), c.center()
+        cross = (second.x() - first.x()) * (third.y() - first.y()) - (
+            second.y() - first.y()
+        ) * (third.x() - first.x())
+        return abs(cross) < 1e-6
+
+    def _join(self, a: PointItem, b: PointItem) -> LineItem:
+        """The line joining two points, drawn only if it isn't there already."""
+        pair = {id(a), id(b)}
+        for line in self._lines():
+            ends = {
+                id(line.bound_point(end))
+                for end in (1, 2)
+                if line.bound_point(end) is not None
+            }
+            if ends == pair:
+                return line
+        line = self.scene.add_line_between(a, b)
+        if line is None:
+            raise CommandError(
+                "Can't draw a side: two of those points are in the same place."
+            )
+        return line
 
     def _form_rm(self, args) -> str:
         if len(args) != 1:
