@@ -472,7 +472,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    `(lines)`, `(meets <lines>)`, `(join <points>)`, `(without …)`,
    `(take n …)`, `(last n …)`, `(repeat n <form>)`,
    `(lines-through <point>)` (→ `CanvasScene.lines_through`, the dual of
-   `meets`). `repeat` is a *special
+   `meets`), and its own dual pair `(points-on <line> [<points>])` /
+   `(points-off …)`, which filter a list (or the whole canvas) by the same
+   recorded-relation rule, so the three forms always agree. `repeat` is a *special
    form*: it keeps its argument unevaluated and re-evaluates it each round, so
    `(points)` inside sees what the last round made. `(last …)` is the one that
    grows a net — points come in creation order, so the tail is what the

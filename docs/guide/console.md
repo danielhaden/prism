@@ -389,6 +389,8 @@ let you talk about the canvas instead.
 | `(points)` / `(lines)` | everything on the canvas, as a list |
 | `(meets <lines>)` | the points where those lines cross |
 | `(lines-through <point>)` | the lines that point lies on |
+| `(points-on <line> [<points>])` | of those, the ones on the line |
+| `(points-off <line> [<points>])` | of those, the ones that aren't |
 | `(join <points>)` | a line between every pair of them |
 | `(without <list> <list>)` | the first list, minus the second |
 | `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
@@ -431,7 +433,18 @@ points they cross at, the other from a point to the lines through it. They
 compose — `(meets (lines-through P1))` is every crossing on the pencil through
 `P1`. A list of points gives the lines through any of them, each once.
 
-!!! warning "It reports relations, not geometry"
+`(points-on …)` and `(points-off …)` are exact complements, and each is the
+dual of `(lines-through …)` — one asks a point which lines it lies on, the
+other asks a line which points lie on it. Given a list they filter it; given
+none they take the whole canvas:
+
+```
+(points-off L1 (points))     # the triangle — none of it on the horizon
+(points-on L1)               # every point on the horizon
+(join (points-off L1 (points)))
+```
+
+!!! warning "They report relations, not geometry"
     A line counts as through a point when the figure **says** so: the point is
     its crossing, or the line is bound to it, pinned to pivot on it, anchored
     to it, or carries its visible range. Two lines that happen to cross

@@ -75,6 +75,8 @@ class CommandInterpreter:
             "lines": self._form_lines,
             "meets": self._form_meets,
             "lines-through": self._form_lines_through,
+            "points-on": self._form_points_on,
+            "points-off": self._form_points_off,
             "join": self._form_join,
             "without": self._form_without,
             "take": self._form_take,
@@ -87,8 +89,8 @@ class CommandInterpreter:
 
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {
-        "ls", "help", "points", "lines", "meets", "lines-through", "without",
-        "take", "last",
+        "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
+        "points-off", "without", "take", "last",
     }
 
     def execute(self, text: str) -> str:
@@ -362,6 +364,8 @@ class CommandInterpreter:
             "  (points) / (lines)          everything on the canvas\n"
             "  (meets <lines>)             where those lines cross\n"
             "  (lines-through <point>)     the lines it lies on\n"
+            "  (points-on <line> [<pts>])  those that lie on it\n"
+            "  (points-off <line> [<pts>]) those that do not\n"
             "  (join <points>)             a line between every pair\n"
             "  (without <list> <list>)     the first minus the second\n"
             "  (take <n> <list>)           the first n of a list\n"
@@ -660,6 +664,36 @@ class CommandInterpreter:
                 if not any(other is line for other in found):
                     found.append(line)
         return found
+
+    def _form_points_on(self, args) -> list:
+        """``(points-on L1 <points>)`` — those of them that lie on the line.
+
+        With no list, every point on the line. The dual of
+        :meth:`_form_lines_through`, and it asks the same question: the figure
+        has to *say* the point is on the line — it is the line's crossing, or
+        bound, pinned or anchored to it.
+        """
+        return self._by_incidence(args, "points-on", on=True)
+
+    def _form_points_off(self, args) -> list:
+        """``(points-off L1 <points>)`` — those of them that do not."""
+        return self._by_incidence(args, "points-off", on=False)
+
+    def _by_incidence(self, args, form: str, on: bool) -> list:
+        if not args:
+            raise CommandError(f"Usage: ({form} <line> [<points>])")
+        line = self._as_line(args[0])
+        candidates = (
+            self._flatten(args[1:], PointItem, "point")
+            if len(args) > 1
+            else list(self._points())
+        )
+        through = self.scene.lines_through
+        return [
+            point
+            for point in candidates
+            if any(other is line for other in through(point)) == on
+        ]
 
     def _form_join(self, args) -> list:
         """``(join <points>)`` — a line between every pair of them.
