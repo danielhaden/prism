@@ -413,6 +413,78 @@ left, using the name says so.
     sessions but the names you gave it don't, so a script that defines what it
     needs is the durable form.
 
+### `(lambda (<name> …) <body>)`
+
+A **function**, as a value. The parameters are bare words in their own
+parentheses; the body is one or more forms, run when the function is *called*
+with the parameters bound to the arguments. Nothing in the body is evaluated
+before then.
+
+```
+(lambda (q) (add-line (list q) (points-off L1 tri)))
+```
+
+Give it a name and it reads as a command of its own:
+
+```
+(define cevian (lambda (q) (add-line (list q) (points-off L1 tri))))
+(cevian P4)
+```
+
+or write the two together, which means the same thing:
+
+```
+(define (cevian q) (add-line (list q) (points-off L1 tri)))
+```
+
+This is how the language grows **in itself**: a construction you work out at
+the console becomes a form you can call, without anything being added to
+Prism. The body's last value is the function's value, so a function that draws
+gives back what it drew.
+
+A function may also be called where it stands, with no name at all:
+
+```
+((lambda (q) (points-off q tri)) L1)
+```
+
+- Parameters **shadow** a `(define …)` name, which shadows a label — innermost
+  wins, as in any lisp.
+- A function made inside another call keeps that call's parameters, so
+  `(define (maker a) (lambda (b) (list a b)))` gives functions that remember
+  their `a`.
+- A **built-in form always wins** over a name, so `(points)` can't be
+  redefined out from under you.
+- Unlike a list of elements, a function doesn't depend on the canvas, so
+  clearing it leaves your functions intact.
+
+!!! note "A function that calls itself"
+    Allowed, but calls may not nest more than 50 deep; past that Prism says a
+    function is probably calling itself without end, rather than falling over.
+
+### `(map <function> <list>)`
+
+Call a function on **each element** of a list, in turn:
+
+```
+(map cevian (points-on L1))
+(map (lambda (q) (add-line (list q) (points-off L1 tri))) (points-on L1))
+```
+
+This is the form to reach for when the thing to draw **depends on** the
+element. Where it doesn't — where you simply want every one of these joined to
+every one of those — [`(add-line …)`](#add-line-points-points) already does
+that in one go, and is the shorter way to say it.
+
+The results are gathered into one **flat** list, as lists are everywhere else
+here, so a function drawing several lines per element still gives back a list
+of lines. The name of a built-in form works too, where it takes a single
+argument:
+
+```
+(map hide (points-on L1))
+```
+
 ### `(help)`
 
 List the available commands.

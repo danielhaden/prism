@@ -26,6 +26,31 @@ class CommandError(Exception):
     """A problem the user should see, phrased for them."""
 
 
+class Lambda:
+    """A function, made by ``(lambda (<params>) <body>)``.
+
+    The body is kept **unevaluated** — the raw s-expressions the reader
+    produced — and run afresh on each call, with the parameters bound to the
+    arguments. ``scope`` is the stack of frames in force where the lambda was
+    written, so a lambda made inside another call still sees that call's
+    parameters when it runs later.
+    """
+
+    def __init__(self, params: list, body: list, scope: list, name: str = None):
+        self.params = params
+        self.body = body
+        self.scope = scope
+        #: Set by ``(define …)``, so messages can name the function.
+        self.name = name
+
+    def described(self) -> str:
+        """How the function reads back, e.g. ``(lambda (q) …)``."""
+        return f"(lambda ({' '.join(self.params)}) …)"
+
+    def __repr__(self) -> str:
+        return f"<Lambda {self.name or '?'}({', '.join(self.params)})>"
+
+
 def parse_fraction(text: str) -> float | None:
     """Read a 0-1 position written as a fraction or a decimal.
 
@@ -58,6 +83,12 @@ class CommandInterpreter:
         #: Names bound with ``(define …)``. A name shadows a label of the
         #: same text, since you chose it deliberately.
         self._variables: dict = {}
+        #: Parameter frames, innermost last, while a lambda is running.
+        self._scope: list = []
+        #: How many calls are running. Counted apart from the scope stack,
+        #: which a closure *replaces* rather than extends, so it would never
+        #: grow for a function that calls itself.
+        self._depth = 0
         self._forms = {
             "add": self._form_add,
             "add-line": self._form_add_line,
@@ -70,6 +101,8 @@ class CommandInterpreter:
             "list": self._form_list,
             "ls": self._form_ls,
             "define": self._form_define,
+            "lambda": self._form_lambda,
+            "map": self._form_map,
             "draw-triangle": self._form_draw_triangle,
             "draw-cevians": self._form_draw_cevians,
             "points": self._form_points,
@@ -91,7 +124,7 @@ class CommandInterpreter:
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {
         "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
-        "points-off", "without", "take", "last",
+        "points-off", "without", "take", "last", "lambda",
     }
 
     def execute(self, text: str) -> str:
@@ -159,12 +192,24 @@ class CommandInterpreter:
         if not expression:
             raise CommandError("Empty form ().")
         head = expression[0]
+        if isinstance(head, list):
+            # ((lambda (q) …) P1) — written out and called on the spot.
+            return self._apply(self._eval(head), expression[1:], "that function")
         if not isinstance(head, str):
             raise CommandError("A form must start with a command name.")
         form = self._forms.get(head.lower())
-        if form is None:
-            raise CommandError(f"Unknown command: {head!r}. Type (help).")
-        return form(expression[1:])
+        if form is not None:
+            return form(expression[1:])
+        # A built-in form wins over a name, so the language can't be shadowed.
+        bound = self._lookup(head)
+        if isinstance(bound, Lambda):
+            return self._apply(bound, expression[1:], head)
+        if bound is not None:
+            raise CommandError(
+                f"{head!r} names {self._describe(bound)}, which isn't a "
+                "function, so it can't be called. Type (help)."
+            )
+        raise CommandError(f"Unknown command: {head!r}. Type (help).")
 
     def _value(self, argument):
         """Evaluate an argument.
@@ -174,9 +219,24 @@ class CommandInterpreter:
         """
         if isinstance(argument, list):
             return self._eval(argument)
-        if isinstance(argument, str) and argument in self._variables:
-            return self._surviving(argument)
+        if isinstance(argument, str):
+            bound = self._lookup(argument)
+            if bound is not None:
+                return bound
         return argument
+
+    def _lookup(self, name: str):
+        """A name's value, from the innermost scope that has it, or None.
+
+        A lambda's parameters shadow a ``(define …)`` name, which in turn
+        shadows a label — innermost wins, as in any lisp.
+        """
+        for frame in reversed(self._scope):
+            if name in frame:
+                return frame[name]
+        if name in self._variables:
+            return self._surviving(name)
+        return None
 
     def _surviving(self, name: str):
         """A name's value, minus anything no longer on the canvas.
@@ -187,6 +247,8 @@ class CommandInterpreter:
         with an error from deep inside Qt.
         """
         value = self._variables[name]
+        if isinstance(value, Lambda):
+            return value
         if isinstance(value, list):
             kept = [item for item in value if _on_canvas(item)]
             if len(kept) != len(value):
@@ -266,6 +328,8 @@ class CommandInterpreter:
 
     def _describe(self, value) -> str:
         """A value as the user would recognise it, never a raw Python repr."""
+        if isinstance(value, Lambda):
+            return value.name or value.described()
         if isinstance(value, (PointItem, LineItem)):
             return self._element_name(value)
         if isinstance(value, list):
@@ -404,6 +468,11 @@ class CommandInterpreter:
             "  (repeat <n> <form>)         run a form n times\n"
             "  (list <element> …)          gather elements into a list\n"
             "  (define <name> <value>)     give a value a name\n"
+            "  (lambda (<name> …) <body>)  a function, as a value; the names\n"
+            "                              are its parameters\n"
+            "  (define (<name> <p> …) …)   name a function, the short way;\n"
+            "                              then (<name> P1) calls it\n"
+            "  (map <function> <list>)     call it on each element in turn\n"
             "  (ls [-points | -lines])     list canvas elements\n"
             "  (help)                      show this help\n"
             "\n"
@@ -1067,10 +1136,21 @@ class CommandInterpreter:
         return gathered
 
     def _form_define(self, args) -> str:
-        """``(define tri (list P1 P2 P3))`` — give a value a name."""
+        """``(define tri (list P1 P2 P3))`` — give a value a name.
+
+        A function may be written the short way, with the name and its
+        parameters together::
+
+            (define (cevian q) (add-line (list q) (points-off L1 tri)))
+
+        which is the same as naming a :meth:`_form_lambda`.
+        """
+        if args and isinstance(args[0], list):
+            return self._define_function(args)
         if len(args) != 2:
             raise CommandError(
                 "Usage: (define <name> <value>)\n"
+                "   or: (define (<name> <param> …) <body>)   a function\n"
                 "  e.g. (define tri (list P1 P2 P3))"
             )
         name = args[0]
@@ -1079,10 +1159,161 @@ class CommandInterpreter:
         if parse_fraction(name) is not None:
             raise CommandError(f"{name!r} is a number, not a name.")
         value = self._value(args[1])
-        if isinstance(value, str):
+        if isinstance(value, Lambda):
+            value.name = name
+        elif isinstance(value, str):
             value = self._as_element(args[1])
         self._variables[name] = value
         return f"{name} = {self._render(value)}"
+
+    def _define_function(self, args) -> str:
+        """``(define (cevian q) <body>)`` — a named function, the short way."""
+        if not args[0]:
+            raise CommandError(
+                "That gives the function no name, e.g. (define (cevian q) …)."
+            )
+        name, params = args[0][0], args[0][1:]
+        if not isinstance(name, str):
+            raise CommandError(
+                "A name must be a bare word, e.g. (define (cevian q) …)."
+            )
+        if parse_fraction(name) is not None:
+            raise CommandError(f"{name!r} is a number, not a name.")
+        function = self._form_lambda([list(params)] + list(args[1:]))
+        function.name = name
+        self._variables[name] = function
+        return f"{name} = {self._render(function)}"
+
+    #: How deep calls may nest, so a function that calls itself for ever
+    #: says so rather than dying inside Python.
+    CALL_LIMIT = 50
+
+    def _form_lambda(self, args) -> Lambda:
+        """``(lambda (q) <body>)`` — a function, as a value.
+
+        The parameters are bare words in a list; the body is one or more
+        forms, run in order with the parameters bound, and the last one's
+        value is the function's value. Nothing is evaluated until it is
+        called.
+
+        Give it a name with :meth:`_form_define` and it reads as a command of
+        its own::
+
+            (define cevian (lambda (q) (add-line (list q) (points-off L1 tri))))
+            (cevian P4)
+
+        Returns:
+            The function.
+        """
+        if len(args) < 2:
+            raise CommandError(
+                "Usage: (lambda (<name> …) <body>)\n"
+                "  e.g. (lambda (q) (add-line (list q) (points-off L1 tri)))\n"
+                "  The names are the parameters; the body runs when the\n"
+                "  function is called."
+            )
+        params = args[0]
+        if not isinstance(params, list):
+            raise CommandError(
+                "A lambda's parameters go in their own parentheses, e.g. "
+                "(lambda (q) …) — one name per argument."
+            )
+        for param in params:
+            if not isinstance(param, str):
+                raise CommandError(
+                    "A parameter must be a bare word, e.g. (lambda (q) …)."
+                )
+            if parse_fraction(param) is not None:
+                raise CommandError(f"{param!r} is a number, not a name.")
+            if params.count(param) > 1:
+                raise CommandError(f"{param!r} is named twice in one lambda.")
+        return Lambda(list(params), list(args[1:]), list(self._scope))
+
+    def _apply(self, callee, args, named: str):
+        """Call a function (or a one-argument form) on arguments already read.
+
+        Args:
+            callee: A :class:`Lambda`, or the name of a built-in form.
+            args: The arguments, which may be values or raw s-expressions.
+            named: What to call the callee in a message.
+
+        Returns:
+            The body's last value.
+        """
+        if isinstance(callee, str) and callee.lower() in self._forms:
+            # (map hide …) — any one-argument form can be mapped too.
+            return self._forms[callee.lower()](list(args))
+        if not isinstance(callee, Lambda):
+            raise CommandError(
+                f"{named} isn't a function, so it can't be called — it is "
+                f"{self._describe(callee)}."
+            )
+        if len(args) != len(callee.params):
+            wanted = " ".join(callee.params) or "nothing"
+            raise CommandError(
+                f"{callee.name or named} takes {len(callee.params)} "
+                f"argument(s) ({wanted}), but got {len(args)}."
+            )
+        if self._depth >= self.CALL_LIMIT:
+            raise CommandError(
+                f"Calls are nested more than {self.CALL_LIMIT} deep — a "
+                "function is probably calling itself without end."
+            )
+        frame = {
+            param: self._value(argument)
+            for param, argument in zip(callee.params, args)
+        }
+        saved = self._scope
+        # The scope it was written in, not the one calling it.
+        self._scope = list(callee.scope) + [frame]
+        self._depth += 1
+        try:
+            value = None
+            for form in callee.body:
+                value = self._value(form)
+            return value
+        finally:
+            self._depth -= 1
+            self._scope = saved
+
+    def _form_map(self, args) -> list:
+        """``(map <function> <list>)`` — call it on each element in turn.
+
+        The lispy way to do a thing once per element, where the thing depends
+        on the element. The function may be a lambda, the name of one, or the
+        name of a form taking a single argument::
+
+            (map (lambda (q) (add-line (list q) (points-off L1 tri)))
+                 (points-on L1))
+            (map hide (points-on L1))
+
+        Results are gathered into one **flat** list, as lists are everywhere
+        else in the language, so a function drawing several lines per element
+        still gives back a list of lines.
+
+        Returns:
+            What the calls gave, flattened.
+        """
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (map <function> <list>)\n"
+                "  e.g. (map (lambda (q) (add-line (list q) tri)) (points-on L1))\n"
+                "  The function takes one argument: each element in turn."
+            )
+        callee = self._value(args[0])
+        items = self._as_list(args[1])
+        if not items:
+            raise CommandError("That list is empty, so there is nothing to map.")
+        gathered = []
+        for item in items:
+            value = self._apply(callee, [item], self._describe(callee))
+            for result in value if isinstance(value, list) else [value]:
+                if result is not None:
+                    gathered.append(result)
+        if gathered and all(isinstance(item, str) for item in gathered):
+            # A form like (hide …) answers with a message, not an element.
+            return "\n".join(gathered)
+        return gathered
 
     def _form_ls(self, args) -> str:
         show_points = show_lines = True
@@ -1115,6 +1346,8 @@ class CommandInterpreter:
             return f"({inner})"
         if isinstance(value, str):
             return value
+        if isinstance(value, Lambda):
+            return value.described()
         if isinstance(value, PointItem):
             return f"{self._point_name(value)}  {self._describe_point(value)}"
         if isinstance(value, LineItem):
@@ -1127,6 +1360,8 @@ class CommandInterpreter:
             return self._point_name(item)
         if isinstance(item, LineItem):
             return self._line_name(item)
+        if isinstance(item, Lambda):
+            return item.name or item.described()
         return str(item)
 
     def _point_name(self, point) -> str:

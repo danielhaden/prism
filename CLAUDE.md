@@ -279,6 +279,26 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   the bare line when just one came of it, so a single join prints and composes
   as it always did. `(add line …)` is kept **only** as an error that says where
   it went.
+- **Functions** (`Lambda`, `(lambda …)`, `(map …)`): the language grows in
+  itself rather than in Python. `_eval` evaluates a **list head** (inline
+  application) and falls back to a *named* `Lambda` when the head isn't a
+  built-in form — built-ins win, so the language can't be shadowed. Nothing
+  needed adding to the reader: `_eval` never pre-evaluated arguments, so every
+  form was already a special form and a lambda body is just the raw
+  s-expressions kept for later.
+  `_scope` is a stack of parameter frames; `_lookup()` walks it innermost-first
+  then `_variables`, so parameters shadow defines which shadow labels. A
+  `Lambda` captures `list(self._scope)` at creation and `_apply` **replaces**
+  the stack with `callee.scope + [frame]` — lexical, not dynamic. That is why
+  depth needs its own counter (`_depth` / `CALL_LIMIT`): the scope stack never
+  grows for a function that calls itself, so counting frames would never catch
+  runaway recursion (it dies inside Python instead).
+  `_apply` also accepts a **built-in form's name**, so `(map hide …)` works;
+  `map` flattens results and, when they are all strings, joins them as a
+  message the way `_each` does. A `Lambda` is not a canvas item, so
+  `_surviving()` must return it untouched — `shiboken6.isValid` on a non-Qt
+  object is meaningless — and the Elements panel lists functions under their
+  own **Functions** heading.
 - `(draw-triangle …)` takes three points **or a list of three** and joins
   them pairwise, returning the sides as a list. `_join()` **reuses an existing
   side** (a line bound to both points) rather than drawing a second one —

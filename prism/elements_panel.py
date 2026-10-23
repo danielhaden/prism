@@ -1,6 +1,7 @@
 """A dock listing everything on the canvas, as a tree.
 
-Points, lines, groups and the names bound with ``(define …)``, each under its
+Points, lines, groups, and the lists and functions bound with ``(define …)``,
+each under its
 own heading. Selecting a row selects that element on the canvas, and selecting
 on the canvas highlights the row, so the tree is a way to find and reach
 geometry as well as to see what is there.
@@ -11,6 +12,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QDockWidget, QTreeWidget, QTreeWidgetItem
 
+from prism.commands import Lambda
 from prism.items import GroupItem, LineItem, PointItem
 
 #: Where a row's **key** is stashed — never the item itself. Qt keeps item
@@ -105,9 +107,13 @@ class ElementsPanel(QDockWidget):
                         )
 
         names = self._variables_source() if self._variables_source else {}
-        if names:
-            parent = self._heading(f"Lists ({len(names)})", expanded)
-            for name, value in sorted(names.items()):
+        lists = {n: v for n, v in names.items() if not isinstance(v, Lambda)}
+        functions = {n: v for n, v in names.items() if isinstance(v, Lambda)}
+        for title, bound in (("Lists", lists), ("Functions", functions)):
+            if not bound:
+                continue
+            parent = self._heading(f"{title} ({len(bound)})", expanded)
+            for name, value in sorted(bound.items()):
                 QTreeWidgetItem(parent, [f"{name} = {self._describe_value(value)}"])
 
         self._syncing = False
@@ -185,6 +191,8 @@ class ElementsPanel(QDockWidget):
                 return "·"
             return self._scene.element_id(item)
 
+        if isinstance(value, Lambda):
+            return value.described()
         if isinstance(value, list):
             return "(" + " ".join(name(item) for item in value) + ")"
         if isinstance(value, (PointItem, LineItem)):
