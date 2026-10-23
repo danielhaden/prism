@@ -384,6 +384,18 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   handler directly will not catch this: they set `pos()` themselves. Drive a
   real `QContextMenuEvent` at `view.viewport()` instead
   (`scratchpad/real_path_check.py` pattern).
+- **Off-screen points are marked at the edge** (`CanvasView.drawForeground`
+  → `_draw_offscreen_points`): an arrow plus the point's name, drawn in
+  *device* coordinates (`setWorldMatrixEnabled(False)`) so it keeps its size.
+  Placed where the point's defining line leaves the view
+  (`_edge_towards` → `_rect_crossings`), falling back to straight out from the
+  middle for a point on no line; `_defining_lines()[:1]` picks **one** line
+  arbitrarily for a meet — refining that is open. Everything is drawn inside
+  the viewport (a tip past the edge is just clipped) and nudged aside from the
+  line so it doesn't sit on top of it. Hidden and undefined points get
+  nothing.
+- The view uses `FullViewportUpdate`, because an edge marker can change from
+  a scene change anywhere; the default partial updates left stale chrome.
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).
 - Delete/Backspace deletes; Ctrl+G/Ctrl+Shift+G group/ungroup; Ctrl+Z /
   Ctrl+Shift+Z undo/redo.

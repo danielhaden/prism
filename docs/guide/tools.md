@@ -67,6 +67,25 @@ often the easiest way to reach a particular point.
 The tree keeps up as the canvas changes, refreshing shortly after things
 settle rather than on every frame of a drag.
 
+## Points off the edge
+
+A construction reaches a long way off the canvas — a vanishing point can sit
+thousands of units out — and a point you can't see is easy to forget. Any
+defined point outside the view gets a small marker at the edge: an arrow
+pointing its way, with its name.
+
+The marker is placed where the **line that point sits on leaves the view**, so
+you can follow that line out to it. Zoom out, or drag along the line, and you
+arrive. A point that lies on no line is marked straight out from the middle
+instead.
+
+A point that is [hidden](points-and-lines.md#hiding-a-point) gets no marker —
+hidden means hidden.
+
+!!! note "One line is picked for you"
+    A point where several lines cross could be marked against any of them.
+    Prism picks one for now.
+
 ## Navigating the canvas
 
 - **Zoom** — mouse wheel (anchored under the cursor).
