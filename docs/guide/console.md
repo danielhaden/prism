@@ -270,8 +270,8 @@ can work on the canvas and come away with the script for what you did.
 
 Some canvas commands have no console form yet and so write nothing: **Modify
 Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Show
-Full Line**, **Snap Point to Line**, **Remove Anchor**, **Lock to Line**, and
-**Pin Lines Through Point**. A script of a session that used those will be
+Full Line**, **Snap Point to Line**, **Lock to Line**, and **Pin Lines
+Through Point**. A script of a session that used those will be
 missing those steps.
 
 !!! note "Ids shift"

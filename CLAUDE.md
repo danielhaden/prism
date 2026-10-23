@@ -91,15 +91,17 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   and templates don't store meets (they are recomputed), `rm` hides rather
   than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
   relation, not a kind.
-- **Remove Anchor** is offered only on a `LineAnchor` point (it releases the
-  point, which stays put and becomes free). It used to be offered on meets
-  too, where `clear_anchor()` left the point in `scene._meets` **with no
-  anchor** — and the next recompute, which runs on every drag step, died in
-  `_claim_meet` with `AttributeError: 'NoneType' has no attribute
-  'references_line'`. That is the "crash when dragging" from the session log;
-  it vanished on restart because reopening rebuilds `_meets`. `clear_anchor()`
-  now tells the scene, `_apply_meets` drops anchorless entries defensively,
-  and the action commits undo (it didn't).
+- **An anchored point cannot be set loose.** There is no "Remove Anchor"
+  command any more, and `MeetAnchor.constrain_drag` returns its position
+  rather than `None`, so dragging a crossing no longer detaches it into a free
+  point. Hiding is the way to be rid of a point you don't want drawn. The
+  removed command was also the **crash when dragging** from the session log:
+  `clear_anchor()` left a released point in `scene._meets` with no anchor, and
+  the next recompute (one per drag step) died in `_claim_meet` with
+  `AttributeError: 'NoneType' has no attribute 'references_line'` — it
+  vanished on restart because reopening rebuilds `_meets`. `clear_anchor()`
+  now tells the scene and `_apply_meets` drops anchorless entries defensively,
+  so the API is safe even though the menu no longer calls it.
 - A point's menu also carries **Lock to Line / Unlock From Line** (only when
   it has a `LineAnchor`) and **Delete Point** — which reads **Delete N
   Points** for a multi-selection and **Hide Point** on a meet, since a meet
@@ -187,7 +189,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   renumbers those after it. A label containing `"` is applied directly — the
   s-expression reader has no escapes. Still with no console form, so they
   write nothing: display/line properties, visible range, Show Full Line, Snap
-  Point to Line, Remove Anchor, Lock to Line, Pin Lines Through Point.
+  Point to Line, Lock to Line, Pin Lines Through Point.
 - `(add point …)` and `(point <line> <fraction>)` take fractions **outside
   0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
   does: a click outside the frame is ordinary and the menu must be able to

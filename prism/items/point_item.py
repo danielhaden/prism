@@ -158,7 +158,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             menu.addSeparator()
 
         # Anchor a point to a line when the selection is one line + point(s).
-        snap_action = unsnap_action = None
+        snap_action = None
         sel_points, sel_line = (
             scene.selected_point_line_pair()
             if scene is not None and hasattr(scene, "selected_point_line_pair")
@@ -171,9 +171,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             lock_action = menu.addAction(
                 "Unlock From Line" if self.is_locked_to_line() else "Lock to Line"
             )
-        if self._anchor is not None and self._anchor.kind == "line":
-            unsnap_action = menu.addAction("Remove Anchor")
-        if snap_action or unsnap_action or lock_action:
+        if snap_action or lock_action:
             menu.addSeparator()
 
         # Pinning uses this point as a pivot. A computed point can drive lines
@@ -221,9 +219,6 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             self._add_lines_through()
         elif snap_action is not None and chosen is snap_action:
             scene.anchor_points_to_line(sel_points, sel_line)
-        elif unsnap_action is not None and chosen is unsnap_action:
-            self.clear_anchor()
-            scene.commit_undo()
         elif lock_action is not None and chosen is lock_action:
             if self.set_locked_to_line(not self.is_locked_to_line()):
                 scene.commit_undo()

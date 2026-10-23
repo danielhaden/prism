@@ -21,9 +21,9 @@ it.
   (these are never drawn). A point at a line **crossing** is simply a point
   anchored to that intersection; a point [anchored to a
   line](#anchoring-a-point-to-a-line) is one anchored to slide along it.
-  **Dragging** an intersection point **detaches** it — it becomes an ordinary
-  free point, and a fresh point re-marks the crossing. (A line-anchored point,
-  by contrast, slides along its line when dragged.) Geometry **can** be built
+  **Dragging** a point the lines determine does nothing: it is where they put
+  it, and a slip of the mouse shouldn't turn it into something else. (A
+  line-anchored point, by contrast, slides along its line when dragged.) Geometry **can** be built
   on a computed point: bind a line to a crossing, pin a pencil through it, join
   two crossings — updates run in dependency order, so what you build follows.
 
@@ -89,13 +89,9 @@ back its freedom. Locking is useful once a point is where you want it in a
 construction and you'd rather not nudge it by accident while moving things
 around it.
 
-Right-click the point → **Remove Anchor** to release it from the line
-altogether: it stays where it is and becomes an ordinary free point. Deleting
-the line also releases anything anchored to it.
-
-**Remove Anchor** is offered only on a point held to a line — not on a
-crossing, whose position the lines decide. To be rid of a crossing's point,
-[hide it](#hiding-a-point); to detach it into a free point, drag it.
+A point anchored to a line stays on it. There is no command to pull it off
+again — if you want it out of the way, [hide it](#hiding-a-point) rather than
+setting it loose. Deleting the line does release anything anchored to it.
 
 ### Hiding a point
 
@@ -134,8 +130,7 @@ offers **only** that: the two single-point commands stand down rather than
 giving you three ways to draw a line at once. They come back as soon as the
 selection isn't a pair. Select anything other than two and the join is still
 listed, greyed out, saying what it needs.
-- **Snap Point to Line** / **Remove Anchor** — see
-  [Anchoring](#anchoring-a-point-to-a-line).
+- **Snap Point to Line** — see [Anchoring](#anchoring-a-point-to-a-line).
 - **Pin Lines Through Point / Unpin** — turn the lines *already* passing
   through the point into a [pencil](projectivities.md) (or release them). This
   one draws nothing; use **Add Line(s) Through Point** to create lines.

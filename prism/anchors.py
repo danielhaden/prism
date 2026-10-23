@@ -112,7 +112,10 @@ class MeetAnchor(Anchor):
         return None
 
     def constrain_drag(self, scene_pos: QPointF) -> QPointF | None:
-        return None  # the lines decide where this point is
+        # Held where the lines put it. Returning None would mean "the anchor
+        # let go", turning a crossing into a free point under the cursor —
+        # geometry you did not ask for, from a slip of the mouse.
+        return self.position()
 
     def references_line(self, line) -> bool:
         return any(other is line for other in self.lines)
