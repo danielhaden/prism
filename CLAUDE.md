@@ -487,6 +487,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    nothing, because `_intersection_of` skips making a meet where a point
    already sits, so no relation exists to find. Building *through* a point
    (pin or bind) records one.
+   `(draw-cevians <triangle> <line>)` is the first net step: for each
+   crossing of the line with a side, join it to the vertex *not* on that side
+   (the one with no edge to it). Reuses existing edges via `_existing_side`,
+   and refuses clearly when a side is parallel to the line or the triangle
+   isn't drawn. The three cevians are **not** concurrent — they form a second
+   triangle, which is the point of the construction.
    Still open: a form for the harmonic step itself
    (three collinear points → the fourth harmonic), which is what makes a net
    *disciplined* rather than merely dense.

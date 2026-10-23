@@ -70,6 +70,7 @@ class CommandInterpreter:
             "ls": self._form_ls,
             "define": self._form_define,
             "draw-triangle": self._form_draw_triangle,
+            "draw-cevians": self._form_draw_cevians,
             "points": self._form_points,
             "lines": self._form_lines,
             "meets": self._form_meets,
@@ -356,6 +357,8 @@ class CommandInterpreter:
             "  (show <element> | -all)     draw it again\n"
             "  (draw-triangle <p> <p> <p>) the three sides joining three\n"
             "                              points (or a list of three)\n"
+            "  (draw-cevians <tri> <line>) from each crossing on the line,\n"
+            "                              an edge to the vertex lacking one\n"
             "  (points) / (lines)          everything on the canvas\n"
             "  (meets <lines>)             where those lines cross\n"
             "  (lines-through <point>)     the lines it lies on\n"
@@ -534,6 +537,48 @@ class CommandInterpreter:
         ]
         return sides
 
+    def _form_draw_cevians(self, args) -> list:
+        """``(draw-cevians tri L1)`` — a cevian for each crossing on a line.
+
+        Each side of the triangle meets the given line somewhere, and that
+        meeting point is already joined to the two vertices of its own side.
+        The third vertex is the one with no edge to it; this draws that edge,
+        for each of the three crossings.
+
+        Returns:
+            The three cevians, as a list.
+        """
+        if len(args) < 2:
+            raise CommandError(
+                "Usage: (draw-cevians <point> <point> <point> <line>)\n"
+                "   or: (draw-cevians <triangle> <line>)"
+            )
+        across = self._as_line(args[-1])
+        corners = self._flatten(args[:-1], PointItem, "point")
+        if len(corners) != 3:
+            raise CommandError(
+                f"A triangle is three points; got {len(corners)}."
+            )
+        drawn = []
+        for index in range(3):
+            first, second = corners[index], corners[(index + 1) % 3]
+            apex = corners[(index + 2) % 3]
+            side = self._existing_side(first, second)
+            if side is None:
+                raise CommandError(
+                    f"{self._point_name(first)} and {self._point_name(second)} "
+                    "aren't joined — draw the triangle first."
+                )
+            crossing = self.scene.meet_of(side, across)
+            if crossing is None:
+                raise CommandError(
+                    f"{self._line_name(side)} doesn't meet "
+                    f"{self._line_name(across)} on the canvas, so there is no "
+                    "point there to draw to."
+                )
+            drawn.append(self._join(apex, crossing))
+        return drawn
+
     @staticmethod
     def _collinear(a: PointItem, b: PointItem, c: PointItem) -> bool:
         """Whether three points lie on one line."""
@@ -543,8 +588,8 @@ class CommandInterpreter:
         ) * (third.x() - first.x())
         return abs(cross) < 1e-6
 
-    def _join(self, a: PointItem, b: PointItem) -> LineItem:
-        """The line joining two points, drawn only if it isn't there already."""
+    def _existing_side(self, a: PointItem, b: PointItem):
+        """The line already joining two points, if one is."""
         pair = {id(a), id(b)}
         for line in self._lines():
             ends = {
@@ -554,6 +599,13 @@ class CommandInterpreter:
             }
             if ends == pair:
                 return line
+        return None
+
+    def _join(self, a: PointItem, b: PointItem) -> LineItem:
+        """The line joining two points, drawn only if it isn't there already."""
+        existing = self._existing_side(a, b)
+        if existing is not None:
+            return existing
         line = self.scene.add_line_between(a, b)
         if line is None:
             raise CommandError(

@@ -258,6 +258,30 @@ leaves the figure you care about standing out:
 
 Formatting is undoable and is kept with the drawing between sessions.
 
+### `(draw-cevians <triangle> <line>)`
+
+From each point where the line crosses the triangle, draw the edge that is
+missing.
+
+```
+(draw-triangle P1 P2 P3)
+(draw-cevians P1 P2 P3 L1)
+(draw-cevians tri L1)          # a named list works too
+```
+
+Each side meets the line somewhere, and that crossing already lies on a side —
+so it is already joined to *two* vertices. The third vertex is the one with no
+edge to it, and that edge is what gets drawn: three in all, one per crossing.
+They are the triangle's **cevians** through those points.
+
+The three cevians do **not** meet in a point. They cross one another in three
+places, forming a second triangle inside the first — which is what makes this
+the start of a harmonic construction rather than a dead end.
+
+A side parallel to the line never meets it, so there is no point to draw to;
+the command says which side and stops rather than drawing something arbitrary.
+Running it twice draws nothing new.
+
 ### `(rm <element>)`
 
 Remove a point or a line from the canvas.
