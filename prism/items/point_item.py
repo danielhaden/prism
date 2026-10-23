@@ -171,7 +171,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             lock_action = menu.addAction(
                 "Unlock From Line" if self.is_locked_to_line() else "Lock to Line"
             )
-        if self.has_anchor():
+        if self._anchor is not None and self._anchor.kind == "line":
             unsnap_action = menu.addAction("Remove Anchor")
         if snap_action or unsnap_action or lock_action:
             menu.addSeparator()
@@ -223,6 +223,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             scene.anchor_points_to_line(sel_points, sel_line)
         elif unsnap_action is not None and chosen is unsnap_action:
             self.clear_anchor()
+            scene.commit_undo()
         elif lock_action is not None and chosen is lock_action:
             if self.set_locked_to_line(not self.is_locked_to_line()):
                 scene.commit_undo()
@@ -398,8 +399,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         self.sync_to_anchor()
 
     def clear_anchor(self) -> None:
-        """Release the point; it moves freely again."""
+        """Release the point; it moves freely again.
+
+        The scene is told, because it keeps its own list of the points that
+        mark where lines meet. Leaving a released point in that list gives it
+        an entry with no anchor, which the next recompute walks straight into.
+        """
+        was_meet = self.is_meet()
         self._anchor = None
+        scene = self.scene()
+        if was_meet and scene is not None and hasattr(scene, "on_point_detached"):
+            scene.on_point_detached(self)
 
     def set_anchor_line(self, line) -> None:
         """Convenience: constrain the point to slide along ``line``."""

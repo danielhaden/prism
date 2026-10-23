@@ -1004,6 +1004,11 @@ class CanvasScene(QGraphicsScene):
                 point.set_position_undefined(False)
                 point.sync_to_anchor()
         for point in spare:
+            if point.anchor() is None or point.anchor().kind != "meet":
+                # Released (its anchor was removed): an ordinary point now, and
+                # not the scene's to manage.
+                self._meets.remove(point)
+                continue
             if self._is_depended_on(point) or point.label_text() or not point.is_shown():
                 # Something is built on this meet, or you have said something
                 # about it, so it outlives the crossing: undefined, ready to
@@ -1023,6 +1028,8 @@ class CanvasScene(QGraphicsScene):
         """
         for point in candidates:
             anchor = point.anchor()
+            if anchor is None or anchor.kind != "meet":
+                continue  # no longer a meet; it will be dropped below
             shared = sum(1 for line in lines if anchor.references_line(line))
             if shared >= 2:
                 return point

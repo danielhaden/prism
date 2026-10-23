@@ -90,7 +90,12 @@ construction and you'd rather not nudge it by accident while moving things
 around it.
 
 Right-click the point → **Remove Anchor** to release it from the line
-altogether. Deleting the line also releases anything anchored to it.
+altogether: it stays where it is and becomes an ordinary free point. Deleting
+the line also releases anything anchored to it.
+
+**Remove Anchor** is offered only on a point held to a line — not on a
+crossing, whose position the lines decide. To be rid of a crossing's point,
+[hide it](#hiding-a-point); to detach it into a free point, drag it.
 
 ### Hiding a point
 

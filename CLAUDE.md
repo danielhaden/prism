@@ -91,6 +91,15 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   and templates don't store meets (they are recomputed), `rm` hides rather
   than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
   relation, not a kind.
+- **Remove Anchor** is offered only on a `LineAnchor` point (it releases the
+  point, which stays put and becomes free). It used to be offered on meets
+  too, where `clear_anchor()` left the point in `scene._meets` **with no
+  anchor** — and the next recompute, which runs on every drag step, died in
+  `_claim_meet` with `AttributeError: 'NoneType' has no attribute
+  'references_line'`. That is the "crash when dragging" from the session log;
+  it vanished on restart because reopening rebuilds `_meets`. `clear_anchor()`
+  now tells the scene, `_apply_meets` drops anchorless entries defensively,
+  and the action commits undo (it didn't).
 - A point's menu also carries **Lock to Line / Unlock From Line** (only when
   it has a `LineAnchor`) and **Delete Point** — which reads **Delete N
   Points** for a multi-selection and **Hide Point** on a meet, since a meet
