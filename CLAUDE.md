@@ -474,7 +474,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    `(lines-through <point>)` (→ `CanvasScene.lines_through`, the dual of
    `meets`), and its own dual pair `(points-on <line> [<points>])` /
    `(points-off …)`, which filter a list (or the whole canvas) by the same
-   recorded-relation rule, so the three forms always agree. `repeat` is a *special
+   recorded-relation rule, so the three forms always agree.
+   `_as_point`/`_as_line`/`_as_element` **unwrap a one-element list**
+   (`_one()`), so a filter returning a single element composes where that
+   element is wanted — `(add line P6 (points-off L2 tri))`. Several or none
+   is reported with the elements named; `_describe()` keeps a raw Python
+   repr out of every message. `repeat` is a *special
    form*: it keeps its argument unevaluated and re-evaluates it each round, so
    `(points)` inside sees what the last round made. `(last …)` is the one that
    grows a net — points come in creation order, so the tail is what the

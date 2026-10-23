@@ -433,6 +433,17 @@ points they cross at, the other from a point to the lines through it. They
 compose — `(meets (lines-through P1))` is every crossing on the pencil through
 `P1`. A list of points gives the lines through any of them, each once.
 
+A filter that comes back with exactly **one** element can be used wherever
+that one element is wanted, so these compose directly:
+
+```
+(add line P6 (points-off L2 (list P1 P2 P3)))
+```
+
+`L2` is the side `P1P2`, so the only vertex off it is `P3` — and the line is
+drawn from `P6` to it. If the filter gives back several, the command says how
+many and shows them rather than guessing; if it gives none, it says that too.
+
 `(points-on …)` and `(points-off …)` are exact complements, and each is the
 dual of `(lines-through …)` — one asks a point which lines it lies on, the
 other asks a line which points lie on it. Given a list they filter it; given

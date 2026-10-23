@@ -245,30 +245,58 @@ class CommandInterpreter:
             )
         return fraction
 
+    def _one(self, value, noun: str):
+        """One thing from a value that may be a list of one.
+
+        The filters give back lists, so ``(points-off L2 tri)`` yielding a
+        single point should compose where a point is wanted. Several is
+        ambiguous and says so; none is said plainly too.
+        """
+        if not isinstance(value, list):
+            return value
+        if len(value) == 1:
+            return value[0]
+        if not value:
+            raise CommandError(f"That gave no {noun} at all.")
+        raise CommandError(
+            f"That gave {len(value)} of them — {self._render(value)} — but "
+            f"one {noun} is wanted here. Narrow it, e.g. with (take 1 …)."
+        )
+
+    def _describe(self, value) -> str:
+        """A value as the user would recognise it, never a raw Python repr."""
+        if isinstance(value, (PointItem, LineItem)):
+            return self._element_name(value)
+        if isinstance(value, list):
+            return self._render(value)
+        return repr(value)
+
     def _as_point(self, argument) -> PointItem:
-        value = self._value(argument)
+        value = self._one(self._value(argument), "point")
         if isinstance(value, PointItem):
             return value
         if isinstance(value, str):
             return self.resolve_point(value)
-        raise CommandError(f"Expected a point, got {value!r}.")
+        raise CommandError(f"Expected a point, got {self._describe(value)}.")
 
     def _as_line(self, argument) -> LineItem:
-        value = self._value(argument)
+        value = self._one(self._value(argument), "line")
         if isinstance(value, LineItem):
             return value
         if isinstance(value, str):
             return self.resolve_line(value)
-        raise CommandError(f"Expected a line, got {value!r}.")
+        raise CommandError(f"Expected a line, got {self._describe(value)}.")
 
     def _as_element(self, argument):
         """Resolve an argument to a point or a line, whichever it names."""
-        value = self._value(argument)
+        value = self._one(self._value(argument), "element")
         if isinstance(value, (PointItem, LineItem)):
             return value
         if isinstance(value, str):
             return self.resolve_element(value)
-        raise CommandError(f"Expected a point or a line, got {value!r}.")
+        raise CommandError(
+            f"Expected a point or a line, got {self._describe(value)}."
+        )
 
     # -- Element access ----------------------------------------------------
 
