@@ -331,8 +331,8 @@ class CommandInterpreter:
                 "  down:   0 = top of canvas, 1 = bottom\n"
                 "  e.g. (add point 1/3 1/3)"
             )
-        across = self._as_fraction(args[0])
-        down = self._as_fraction(args[1])
+        across = self._as_canvas_fraction(args[0])
+        down = self._as_canvas_fraction(args[1])
         return self.scene.add_point_at(across, down)
 
     def _add_horizon(self, args) -> LineItem:
@@ -380,7 +380,7 @@ class CommandInterpreter:
             isinstance(second, str) and parse_fraction(second) is None
         ):
             return self._meet_of(line, self._as_line(args[1]))
-        fraction = self._as_fraction(args[1])
+        fraction = self._as_canvas_fraction(args[1])
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")

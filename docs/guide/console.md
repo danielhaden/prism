@@ -84,9 +84,7 @@ it, and a construction can run off it.
 !!! tip "The canvas runs this command too"
     **Right-click blank canvas → Add Horizon** doesn't do its own thing: it
     works out the fraction you clicked at and runs `(add horizon …)` for you.
-    The command appears in the console as though you had typed it, and is
-    **recorded into the next script you save** — so a figure built by clicking
-    replays as one built by typing.
+    See [Clicking writes the script](#clicking-writes-the-script).
 
 Otherwise it's an ordinary infinite line — style it, label it, hang pencils off
 it, drag it up and down. Dragging an endpoint handle slides the whole line
@@ -248,6 +246,40 @@ plus `locked`, `pivot`, and their label.
 ### `(help)`
 
 List the available commands.
+
+## Clicking writes the script
+
+A canvas command with a console equivalent **runs that command**. It appears in
+the console as though you had typed it, and is recorded into the next script
+you save — so a figure built by clicking replays as one built by typing. You
+can work on the canvas and come away with the script for what you did.
+
+| Canvas | runs |
+|--------|------|
+| Add Free Point | `(add point <across> <down>)` |
+| Add Horizon | `(add horizon <fraction>)` |
+| Add Point to Line | `(point <line> <fraction>)` |
+| Add Point at Intersection | `(point <line> <line>)` |
+| Add Line Through Point | `(add line 45 <point>)` |
+| Add Lines Through Point… | one `(add line <angle> <point>)` per ray |
+| Add Line Through Points | `(add line <point> <point>)` |
+| Add / Edit / Remove Label | `(label <element> "…")` |
+| Auto-label Scene / Clear All Labels | `(label -auto)` / `(label -clear)` |
+| Delete Point / Hide Point | `(rm <element>)` |
+| Show N Hidden Points | `(show -all)` |
+
+Some canvas commands have no console form yet and so write nothing: **Modify
+Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Show
+Full Line**, **Snap Point to Line**, **Remove Anchor**, **Lock to Line**, and
+**Pin Lines Through Point**. A script of a session that used those will be
+missing those steps.
+
+!!! note "Ids shift"
+    Commands are written with ids (`P1`, `L2`), and removing an element
+    renumbers the ones after it. Deleting several points at once therefore
+    writes them highest-first, so each `(rm …)` still names the point meant.
+    For a script you intend to keep and edit, label things first and the names
+    stay put.
 
 ## Scripts
 

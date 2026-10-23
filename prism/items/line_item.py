@@ -171,7 +171,7 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         chosen = menu.exec(event.screenPos())
         if add_point_action is not None and chosen is add_point_action:
             if scene is not None:
-                scene.add_point_on_line_at(self, event.scenePos())
+                scene.point_on_line_command(self, event.scenePos())
         elif meet_action is not None and chosen is meet_action:
             self._add_meet_point(selected_lines)
         elif chosen is line_props_action:

@@ -481,6 +481,24 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    def point_on_line_command(self, line: LineItem, scene_pos: QPointF) -> None:
+        """Put a point on a line at a click, as the console command for it.
+
+        Falls back to doing it directly when the console isn't available or
+        the line doesn't cross the frame, which is what the fraction in the
+        command is measured against.
+
+        Args:
+            line: The line to put the point on.
+            scene_pos: Where the user clicked.
+        """
+        fraction = self.fraction_along_line(line, scene_pos)
+        if fraction is not None and self.run_as_command(
+            f"(point {self.line_id(line)} {_number(fraction)})"
+        ):
+            return
+        self.add_point_on_line_at(line, scene_pos)
+
     def add_point_on_line_at(
         self, line: LineItem, scene_pos: QPointF
     ) -> PointItem:
@@ -1060,6 +1078,64 @@ class CanvasScene(QGraphicsScene):
                 return point
         return None
 
+    def point_id(self, point: PointItem) -> str:
+        """The console id for a point (``P1``), as ``(list)`` numbers them."""
+        ordered = self.ordered_points()
+        return f"P{ordered.index(point) + 1}" if point in ordered else "P?"
+
+    def element_id(self, item) -> str:
+        """The console id for a point or line."""
+        if isinstance(item, PointItem):
+            return self.point_id(item)
+        if isinstance(item, LineItem):
+            return self.line_id(item)
+        return "?"
+
+    def canvas_fractions(self, scene_pos: QPointF) -> tuple:
+        """A position as the across/down fractions the console uses.
+
+        The inverse of :meth:`add_point_at`, so a click can be expressed as
+        the command that would place a point there.
+
+        Args:
+            scene_pos: A position in scene coordinates.
+
+        Returns:
+            An ``(across, down)`` pair; outside 0-1 means outside the frame.
+        """
+        rect = self.reference_rect()
+        return (
+            (scene_pos.x() - rect.left()) / rect.width(),
+            (scene_pos.y() - rect.top()) / rect.height(),
+        )
+
+    def fraction_along_line(
+        self, line: LineItem, scene_pos: QPointF
+    ) -> float | None:
+        """How far along a line's visible span a position lies.
+
+        The inverse of :meth:`add_point_on_line`, so a click on a line can be
+        expressed as the command that would put a point there.
+
+        Args:
+            line: The line.
+            scene_pos: A position on (or beside) it.
+
+        Returns:
+            The fraction, or None if the line doesn't cross the frame.
+        """
+        span = line.span_in_rect(self.reference_rect())
+        if span is None:
+            return None
+        start, end = span
+        dx, dy = end.x() - start.x(), end.y() - start.y()
+        length_squared = dx * dx + dy * dy
+        if length_squared == 0:
+            return None
+        return (
+            (scene_pos.x() - start.x()) * dx + (scene_pos.y() - start.y()) * dy
+        ) / length_squared
+
     def line_id(self, line: LineItem) -> str:
         """The console id for a line (``L1``), as ``(list)`` numbers them."""
         ordered = self.ordered_lines()
@@ -1147,19 +1223,26 @@ class CanvasScene(QGraphicsScene):
         clear_action = menu.addAction("Clear All Labels")
         chosen = menu.exec(event.screenPos())
         if line_point_action is not None and chosen is line_point_action:
-            self.add_point_on_line_at(near_line, event.scenePos())
+            self.point_on_line_command(near_line, event.scenePos())
         elif chosen is free_point_action:
-            self.add_free_point(event.scenePos())
+            across, down = self.canvas_fractions(event.scenePos())
+            if not self.run_as_command(
+                f"(add point {_number(across)} {_number(down)})"
+            ):
+                self.add_free_point(event.scenePos())
         elif chosen is horizon_action:
             fraction = self.horizon_fraction_at(event.scenePos().y())
             if not self.run_as_command(f"(add horizon {_number(fraction)})"):
                 self.add_horizon_at(event.scenePos())
         elif show_action is not None and chosen is show_action:
-            self.show_all_points()
+            if not self.run_as_command("(show -all)"):
+                self.show_all_points()
         elif chosen is auto_action:
-            self.auto_label()
+            if not self.run_as_command("(label -auto)"):
+                self.auto_label()
         elif chosen is clear_action:
-            self.clear_labels()
+            if not self.run_as_command("(label -clear)"):
+                self.clear_labels()
         event.accept()
 
     def label_element(self, item: PointItem | LineItem, text: str) -> None:

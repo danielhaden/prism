@@ -170,11 +170,19 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   scene `console.run_command` via `set_command_runner()`; an action calls
   `scene.run_as_command("(…)")`, which returns False when no runner is set so
   the caller can fall back to doing the work directly (keeps the scene usable
-  headless). Add Horizon is the first: it converts the click with
-  `horizon_fraction_at()` and fires `(add horizon <fraction>)`, so the command
-  is echoed *and recorded into the next saved script* — a figure built by
-  clicking replays as one built by typing. Follow this pattern for new canvas
-  actions that have a console equivalent.
+  headless). **Every canvas action with a console equivalent now does this**
+  — a figure built by clicking replays as one built by typing. Conversions
+  live on the scene: `canvas_fractions()`, `horizon_fraction_at()`,
+  `fraction_along_line()`, `point_id()`/`line_id()`/`element_id()`. Deleting
+  several points writes `(rm …)` **highest id first**, since removing one
+  renumbers those after it. A label containing `"` is applied directly — the
+  s-expression reader has no escapes. Still with no console form, so they
+  write nothing: display/line properties, visible range, Show Full Line, Snap
+  Point to Line, Remove Anchor, Lock to Line, Pin Lines Through Point.
+- `(add point …)` and `(point <line> <fraction>)` take fractions **outside
+  0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
+  does: a click outside the frame is ordinary and the menu must be able to
+  express it.
 - `(add horizon …)` accepts fractions **outside 0-1** (above/below the frame)
   via `_as_canvas_fraction`; `_as_fraction` stays strict for the other forms.
   Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the

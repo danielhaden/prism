@@ -208,9 +208,15 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if chosen is display_action:
             self.open_display_dialog()
         elif line_action is not None and chosen is line_action:
-            scene.add_line_between(two_points[0], two_points[1])
+            first, second = (scene.point_id(p) for p in two_points)
+            if not scene.run_as_command(f"(add line {first} {second})"):
+                scene.add_line_between(two_points[0], two_points[1])
         elif one_line_action is not None and chosen is one_line_action:
-            scene.add_line_through(self, self.NEW_LINE_ANGLE)
+            angle = self.NEW_LINE_ANGLE
+            if not scene.run_as_command(
+                f"(add line {angle:g} {scene.point_id(self)})"
+            ):
+                scene.add_line_through(self, angle)
         elif pencil_action is not None and chosen is pencil_action:
             self._add_lines_through()
         elif snap_action is not None and chosen is snap_action:
@@ -243,11 +249,15 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if scene is None:
             return
         targets = selected if (len(selected) > 1 and self in selected) else [self]
-        for point in targets:
-            if point.is_meet():
-                point.set_shown(False)
-            else:
-                scene._remove_geometry(point)
+        # Highest id first: removing a point renumbers the ones after it, so
+        # commands written for the lower ids would then name the wrong points.
+        ordered = sorted(targets, key=scene.ordered_points().index, reverse=True)
+        for point in ordered:
+            if not scene.run_as_command(f"(rm {scene.point_id(point)})"):
+                if point.is_meet():
+                    point.set_shown(False)
+                else:
+                    scene._remove_geometry(point)
         scene.recompute_intersections()
         scene.settle_definitions()
         scene.commit_undo()
@@ -279,8 +289,13 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             return
         parent = scene.views()[0] if scene.views() else None
         angles = ProjectivityDialog.get_angles(parent)
-        if angles:
-            scene.add_projectivity(self, angles)
+        if not angles:
+            return
+        # One command per ray, so the pencil replays from a script.
+        name = scene.point_id(self)
+        for angle in angles:
+            if not scene.run_as_command(f"(add line {angle:g} {name})"):
+                scene.add_projectivity(self, [angle])
 
     def open_display_dialog(self) -> None:
         """Edit this point's display properties (optionally applying to all)."""

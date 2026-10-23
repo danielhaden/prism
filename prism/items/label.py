@@ -165,7 +165,7 @@ class Labelable:
         elif chosen is actions.get("props"):
             self.open_label_style_dialog()
         elif chosen is actions.get("remove"):
-            self.set_label("")
+            self._apply_label("")
         else:
             return False
         scene = self.scene()
@@ -181,7 +181,21 @@ class Labelable:
             parent, "Label", "Enter label text:", text=current
         )
         if ok:
-            self.set_label(text)
+            self._apply_label(text)
+
+    def _apply_label(self, text: str) -> None:
+        """Label this element, as the console command for it where possible.
+
+        A label containing a double quote can't be written as an s-expression
+        (the reader has no escapes), so that one is applied directly.
+        """
+        scene = self.scene()
+        runnable = scene is not None and '"' not in text
+        if runnable and scene.run_as_command(
+            f'(label {scene.element_id(self)} "{text}")'
+        ):
+            return
+        self.set_label(text)
 
     def open_label_style_dialog(self) -> None:
         if self._label is None:
