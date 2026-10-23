@@ -44,7 +44,7 @@ is imposed *projectively* using the app's own elements.
 main.py → prism/app.py → prism/main_window.py (QMainWindow)
   CanvasView (canvas/view.py)   — pan, wheel-zoom (capped), template drops
   CanvasScene (canvas/scene.py) — the hub: owns geometry, propagates deps
-  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, SelectionPanel
+  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, ElementsPanel
 ```
 
 - **`CanvasScene`** coordinates everything: snapping, endpoint bindings, pivots
@@ -282,8 +282,17 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Library** (right): built-in templates (Triangle, Quadrilateral, Complete
   Quadrangle, Projectivity) + user-saved; drag onto canvas; save selection;
   right-click rename/delete; persisted via `prism/template_store.py`.
-- **Console** (bottom), **Selection** (left; live names + positions, matches
-  console naming via `CanvasScene.element_name`).
+- **Console** (bottom).
+- **Elements** (`prism/elements_panel.py`; left): a `QTreeWidget` of the whole
+  canvas — Points, Lines, Groups, and the names bound with `(define …)` (read
+  through `ConsolePanel.variables()`). Rows carry the console's own names, and
+  selection syncs **both ways** (a `_syncing` flag breaks the feedback loop).
+  Rebuilt on a 120ms single-shot timer off `scene.changed`, since that signal
+  fires per repaint and a drag is a flood of them. A section that has not
+  been shown before opens expanded; one shown before keeps its state
+  (`_seen_sections`). Its **objectName is still `SelectionPanel`**, which is
+  what Qt saves dock layouts against — renaming it would strand saved
+  layouts, so it stays. It replaced the old selection-only panel.
 - **Scripts** (right, tabbed with Library): the folder's `.prism` files in a
   list, with an editor under it in a vertical splitter. **Run** executes the
   *editor's* text, not the file, so an edit can be tried before it's kept;

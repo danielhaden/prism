@@ -119,6 +119,10 @@ class CommandInterpreter:
                 return True
         return False
 
+    def variables(self) -> dict:
+        """The names bound with ``(define …)``, as ``{name: value}``."""
+        return dict(self._variables)
+
     def command_names(self):
         return sorted(self._forms)
 

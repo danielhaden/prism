@@ -36,13 +36,36 @@ History covers everything: drawing, dragging, deleting, grouping, styling,
 labelling, anchoring, and pencils — including the *relationships* between
 elements, not just their positions.
 
-## The Selection panel
+## The Elements panel
 
-A dock (left side; **View → Show Selection**) lists whatever is currently
-selected — each element's name (its `P1` / `L1` id, or label) and position,
-updating live as you move things. Lines also show their endpoints and any
-`locked` / `range` / `pivot` tags. The names match the ones the
-[console](console.md) uses.
+A dock (left side; **View → Show Elements**) is a tree of everything on the
+canvas, under **Points**, **Lines**, **Groups** and **Lists**:
+
+```
+Points (5)
+  P1 "apex"  (-300.0, 300.0)
+  P2  (300.0, 300.0)  [hidden]
+  P4  (-150.0, 0.0)  [meet of L3, L4]
+Lines (4)
+  L4  (-600, 0)->(600, 0)  [locked]
+Lists (1)
+  tri = (P1 P2 P3)
+```
+
+Each row carries its name — the `P1` / `L1` id, or its label — and position,
+plus what's true of it: a point says what lines it is the *meet* of, whether
+it's *on line*, *locked to line*, *hidden* or *undefined*; a line says
+*locked*, *range*, *pivot*, *hidden*. **Lists** are the names you've bound
+with [`(define …)`](console.md#define-name-value). The names match the ones
+the [console](console.md) uses, so the tree is a good way to find what to
+type.
+
+Selection works both ways: click a row and that element is selected on the
+canvas; select on the canvas and its rows highlight. In a dense figure that's
+often the easiest way to reach a particular point.
+
+The tree keeps up as the canvas changes, refreshing shortly after things
+settle rather than on every frame of a drag.
 
 ## Navigating the canvas
 
