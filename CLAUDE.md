@@ -243,7 +243,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(add-line <angle> <points>)`, `(add-line <points> <points>)`,
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
-  `(list <element> …)`, `(define <name> <value>)`,
+  `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
   `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(help)`.
 - **Lists and names** (first step of triangle support): `(list …)` gathers
   elements into a Python list and **flattens** nested lists so they compose;
@@ -302,6 +302,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `_surviving()` must return it untouched — `shiboken6.isValid` on a non-Qt
   object is meaningless — and the Elements panel lists functions under their
   own **Functions** heading.
+- `(clear)` empties the canvas but **keeps defined names and functions** — a
+  list prunes itself through `_surviving()` on next use, and a `Lambda` never
+  touched the canvas, so a script can clear and rebuild. The toolbar's Clear
+  goes through `run_as_command("(clear)")` like the canvas menus, so it is
+  written to the console; `clear_all()` already commits undo, so it is
+  reversible.
 - `(draw-triangle …)` takes three points **or a list of three** and joins
   them pairwise, returning the sides as a list. `_join()` **reuses an existing
   side** (a line bound to both points) rather than drawing a second one —

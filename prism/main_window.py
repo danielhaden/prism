@@ -122,6 +122,16 @@ class MainWindow(QMainWindow):
                 f"Couldn't reopen the last drawing: {exc}", 8000
             )
 
+    def _clear_canvas(self) -> None:
+        """Clear from the toolbar, through the console, so it joins the script.
+
+        Same bargain as the canvas menus: what you do by clicking is written
+        as the command that would have done it, and clearing still happens if
+        the console can't run it.
+        """
+        if not self.scene.run_as_command("(clear)"):
+            self.scene.clear_all()
+
     def _save_drawing(self) -> None:
         """Keep the canvas for next time."""
         try:
@@ -171,7 +181,7 @@ class MainWindow(QMainWindow):
 
         self.clear_action = QAction("Clear", self)
         self.clear_action.setToolTip("Clear the whole canvas")
-        self.clear_action.triggered.connect(self.scene.clear_all)
+        self.clear_action.triggered.connect(self._clear_canvas)
 
         self.undo_action = QAction("Undo", self)
         self.undo_action.setShortcut(QKeySequence.Undo)

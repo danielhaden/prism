@@ -91,6 +91,7 @@ class CommandInterpreter:
         self._depth = 0
         self._forms = {
             "add": self._form_add,
+            "clear": self._form_clear,
             "add-line": self._form_add_line,
             "point": self._form_point,
             "rm": self._form_rm,
@@ -444,6 +445,8 @@ class CommandInterpreter:
             "  (point <line> <line>)       the point where two lines meet\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
+            "  (clear)                     empty the canvas; defined names and\n"
+            "                              functions are kept\n"
             "  (label <element> <text>)    name a point or line; quote text\n"
             "                              with spaces, \"\" removes the label\n"
             "  (format <line> <w> <c> <s>) thickness, colour, dash style\n"
@@ -597,6 +600,31 @@ class CommandInterpreter:
     def _only(lines: list):
         """One line on its own, so a single join reads as it always did."""
         return lines[0] if len(lines) == 1 else lines
+
+    def _form_clear(self, args) -> str:
+        """``(clear)`` — empty the canvas.
+
+        The names you have defined are **left alone**: a list prunes itself
+        to what is still there when it is next used, and a function doesn't
+        depend on the canvas at all. So a script can clear and rebuild
+        without losing what it defined — which is the usual way to start one,
+        since a script otherwise draws on top of whatever is already there.
+
+        Undo brings the canvas back.
+
+        Returns:
+            What was cleared.
+        """
+        if args:
+            raise CommandError(
+                "(clear) takes nothing — it empties the whole canvas.\n"
+                "  To remove one element, use (rm <element>)."
+            )
+        points, lines = len(self._points()), len(self._lines())
+        if not points and not lines:
+            return "The canvas is already empty."
+        self.scene.clear_all()
+        return f"Cleared {_count(points, 'point')} and {_count(lines, 'line')}."
 
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:
@@ -1471,6 +1499,11 @@ def _match_by_label(items, name: str):
         if item.label_text().lower() == lowered:
             return item
     return None
+
+
+def _count(number: int, noun: str) -> str:
+    """``3 points``, but ``1 point``."""
+    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
 
 
 def _is_number(text: str) -> bool:

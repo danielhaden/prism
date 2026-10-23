@@ -364,6 +364,28 @@ cross there and would reappear immediately; remove one of those lines instead.
     everything after it, so re-run `(ls)` before leaning on an id again.
     Labels are stable, and worth using in a script that removes things.
 
+### `(clear)`
+
+Empty the whole canvas.
+
+```
+(clear)
+```
+
+The names you have [defined](#define-name-value) are **left alone**. A list
+prunes itself to what is still there when it is next used, and a
+[function](#lambda-name--body) doesn't depend on the canvas at all — so a
+script can clear and rebuild without losing what it defined. That is the usual
+way to begin a script, since one otherwise draws on top of whatever happens to
+be there already.
+
+It says what it removed, and clearing an empty canvas is not an error. **Undo**
+(++ctrl+z++) brings the canvas back.
+
+To remove a single element, use [`(rm …)`](#rm-element) instead. The toolbar's
+**Clear** runs this command, so clearing by clicking is written to the console
+like everything else.
+
 ### `(ls [-points | -lines])`
 
 List the elements on the canvas.
@@ -629,6 +651,7 @@ can work on the canvas and come away with the script for what you did.
 | Add / Edit / Remove Label | `(label <element> "…")` |
 | Auto-label Scene / Clear All Labels | `(label -auto)` / `(label -clear)` |
 | Delete Point / Hide Point | `(rm <element>)` |
+| Clear (toolbar) | `(clear)` |
 | Show N Hidden Points | `(show -all)` |
 
 Some canvas commands have no console form yet and so write nothing: **Modify
