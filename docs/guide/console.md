@@ -364,6 +364,7 @@ let you talk about the canvas instead.
 |------|-------|
 | `(points)` / `(lines)` | everything on the canvas, as a list |
 | `(meets <lines>)` | the points where those lines cross |
+| `(lines-through <point>)` | the lines that point lies on |
 | `(join <points>)` | a line between every pair of them |
 | `(without <list> <list>)` | the first list, minus the second |
 | `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
@@ -400,6 +401,25 @@ the seed you started from, which quickly does nothing at all.
     `(take …)`, `(last …)` or `(without …)` and join a part of it. A net of
     harmonicity is a *disciplined* construction, not everything joined to
     everything.
+
+`(lines-through …)` is the dual of `(meets …)`: one goes from lines to the
+points they cross at, the other from a point to the lines through it. They
+compose — `(meets (lines-through P1))` is every crossing on the pencil through
+`P1`. A list of points gives the lines through any of them, each once.
+
+!!! warning "It reports relations, not geometry"
+    A line counts as through a point when the figure **says** so: the point is
+    its crossing, or the line is bound to it, pinned to pivot on it, anchored
+    to it, or carries its visible range. Two lines that happen to cross
+    exactly at a *placed* point are **not** reported — Prism makes no crossing
+    point there (the point you placed is already the meet), so no relation was
+    ever recorded:
+
+    ```
+    (lines-through P1)   ->   ()     # even with two lines visibly crossing at P1
+    ```
+
+    Build through a point — pin or bind to it — and the relation exists.
 
 To reach exactly what a step created, keep a mark and subtract:
 

@@ -1143,6 +1143,33 @@ class CanvasScene(QGraphicsScene):
             (scene_pos.x() - start.x()) * dx + (scene_pos.y() - start.y()) * dy
         ) / length_squared
 
+    def lines_through(self, point: PointItem) -> list:
+        """Every line this point is recorded as lying on.
+
+        That is: lines whose crossing it is, lines bound to it at an endpoint,
+        lines pinned to pivot on it, lines anchoring their visible range to
+        it, and the line it slides along. A line that merely happens to pass
+        through the point, with no relation recorded, is **not** included —
+        the relations are what the figure is built from.
+
+        Args:
+            point: The point to look from.
+
+        Returns:
+            The lines, in creation order.
+        """
+        anchor = point.anchor() if point.has_anchor() else None
+        found = [
+            line
+            for line in self._lines()
+            if line.bound_point(1) is point
+            or line.bound_point(2) is point
+            or line.pivot() is point
+            or line.range_anchor() is point
+            or (anchor is not None and anchor.references_line(line))
+        ]
+        return sorted(found, key=lambda line: getattr(line, "_seq", 0))
+
     def line_id(self, line: LineItem) -> str:
         """The console id for a line (``L1``), as ``(list)`` numbers them."""
         ordered = self.ordered_lines()

@@ -470,7 +470,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    depending on a vanished crossing do?
 2. **Higher-order console forms** — **done as enumerators**: `(points)`,
    `(lines)`, `(meets <lines>)`, `(join <points>)`, `(without …)`,
-   `(take n …)`, `(last n …)`, `(repeat n <form>)`. `repeat` is a *special
+   `(take n …)`, `(last n …)`, `(repeat n <form>)`,
+   `(lines-through <point>)` (→ `CanvasScene.lines_through`, the dual of
+   `meets`). `repeat` is a *special
    form*: it keeps its argument unevaluated and re-evaluates it each round, so
    `(points)` inside sees what the last round made. `(last …)` is the one that
    grows a net — points come in creation order, so the tail is what the
@@ -478,7 +480,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    `join` reuses an existing side (shared `_join` with `draw-triangle`) and
    refuses above `JOIN_LIMIT` (300) lines, since n points pairwise is
    n(n-1)/2 and their crossings multiply again; `repeat` caps at
-   `REPEAT_LIMIT` (100). Still open: a form for the harmonic step itself
+   `REPEAT_LIMIT` (100).
+   `lines_through` reports **recorded relations** (meet, binding, pivot,
+   range anchor, line anchor), not geometry — the user's call. Consequence
+   worth knowing: two lines crossing exactly at a *placed* point report
+   nothing, because `_intersection_of` skips making a meet where a point
+   already sits, so no relation exists to find. Building *through* a point
+   (pin or bind) records one.
+   Still open: a form for the harmonic step itself
    (three collinear points → the fourth harmonic), which is what makes a net
    *disciplined* rather than merely dense.
 3. Intersection-marker **visibility control** (dense nets get busy).

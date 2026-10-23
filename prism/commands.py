@@ -73,6 +73,7 @@ class CommandInterpreter:
             "points": self._form_points,
             "lines": self._form_lines,
             "meets": self._form_meets,
+            "lines-through": self._form_lines_through,
             "join": self._form_join,
             "without": self._form_without,
             "take": self._form_take,
@@ -85,7 +86,8 @@ class CommandInterpreter:
 
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {
-        "ls", "help", "points", "lines", "meets", "without", "take", "last",
+        "ls", "help", "points", "lines", "meets", "lines-through", "without",
+        "take", "last",
     }
 
     def execute(self, text: str) -> str:
@@ -356,6 +358,7 @@ class CommandInterpreter:
             "                              points (or a list of three)\n"
             "  (points) / (lines)          everything on the canvas\n"
             "  (meets <lines>)             where those lines cross\n"
+            "  (lines-through <point>)     the lines it lies on\n"
             "  (join <points>)             a line between every pair\n"
             "  (without <list> <list>)     the first minus the second\n"
             "  (take <n> <list>)           the first n of a list\n"
@@ -589,6 +592,22 @@ class CommandInterpreter:
             if point.is_meet()
             and sum(1 for ln in point.meeting_lines() if id(ln) in wanted) >= 2
         ]
+
+    def _form_lines_through(self, args) -> list:
+        """``(lines-through P1)`` — the lines that point lies on.
+
+        A list of points may be given, in which case the lines through any of
+        them come back, each once.
+        """
+        points = self._flatten(args, PointItem, "point")
+        if not points:
+            raise CommandError("Usage: (lines-through <point>)")
+        found = []
+        for point in points:
+            for line in self.scene.lines_through(point):
+                if not any(other is line for other in found):
+                    found.append(line)
+        return found
 
     def _form_join(self, args) -> list:
         """``(join <points>)`` — a line between every pair of them.
