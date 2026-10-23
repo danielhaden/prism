@@ -230,6 +230,34 @@ In the projective sense a triangle needs three points **not on a line**, so
 collinear points are refused rather than given three copies of the same side.
 The same goes for the same point twice.
 
+### `(format <line> <thickness> [<colour>] [<style>])`
+
+Change how a line is drawn.
+
+```
+(format L14 0.5 #d3d3d3 "dashed")
+(format L2 3)                       # thickness alone
+(format L2 1 grey)                  # a colour name works too
+(format (lines) 0.25 #aabbcc "dotted")
+```
+
+Thickness is in **screen pixels** and stays that width at any zoom. Colour is
+a hex code or any name Qt knows. The styles are `solid`, `dashed`, `dotted`,
+`dash-dot` and `dash-dot-dot`.
+
+Arguments after the line may be left off, so `(format L1 0.5)` changes only
+the thickness. A **list** works in place of a single line, which is the useful
+form for a net — dropping every construction line back to a pale hairline
+leaves the figure you care about standing out:
+
+```
+(define scaffolding (lines))
+… build …
+(format scaffolding 0.5 #d3d3d3 "dashed")
+```
+
+Formatting is undoable and is kept with the drawing between sessions.
+
 ### `(rm <element>)`
 
 Remove a point or a line from the canvas.

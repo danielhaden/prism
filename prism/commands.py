@@ -15,6 +15,9 @@ nesting above.
 
 import shiboken6
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+
 from prism.items import LineItem, PointItem
 from prism.sexpr import SexprError, parse
 
@@ -62,6 +65,7 @@ class CommandInterpreter:
             "hide": self._form_hide,
             "show": self._form_show,
             "label": self._form_label,
+            "format": self._form_format,
             "list": self._form_list,
             "ls": self._form_ls,
             "define": self._form_define,
@@ -342,6 +346,7 @@ class CommandInterpreter:
             "                              behind simply come free\n"
             "  (label <element> <text>)    name a point or line; quote text\n"
             "                              with spaces, \"\" removes the label\n"
+            "  (format <line> <w> <c> <s>) thickness, colour, dash style\n"
             "  (label -auto)               label everything: points A, B, C…\n"
             "                              and lines a, b, c…\n"
             "  (label -clear)              remove every label\n"
@@ -747,6 +752,58 @@ class CommandInterpreter:
         self.scene.label_element(element, text)
         return element
 
+    #: Dash styles a line can be given, as ``(format …)`` names them.
+    LINE_STYLES = {
+        "solid": Qt.SolidLine,
+        "dashed": Qt.DashLine,
+        "dotted": Qt.DotLine,
+        "dash-dot": Qt.DashDotLine,
+        "dash-dot-dot": Qt.DashDotDotLine,
+    }
+
+    def _form_format(self, args) -> str:
+        """``(format L1 0.5 #d3d3d3 "dashed")`` — how a line is drawn.
+
+        Thickness, colour and style, in that order; any of them may be left
+        off, and a list of lines may be given instead of one.
+        """
+        if not 2 <= len(args) <= 4:
+            raise CommandError(_FORMAT_USAGE)
+        width = self._as_float(args[1], "a thickness") if len(args) > 1 else None
+        color = self._as_color(args[2]) if len(args) > 2 else None
+        style = self._as_line_style(args[3]) if len(args) > 3 else None
+
+        lines = self._flatten([args[0]], LineItem, "line")
+        if not lines:
+            raise CommandError("(format …) needs a line to work on.")
+        for line in lines:
+            line.set_style(color=color, width=width, style=style)
+        self.scene.commit_undo()
+        described = ", ".join(self._line_name(line) for line in lines)
+        return f"Formatted {described}"
+
+    def _as_color(self, argument) -> QColor:
+        """Read a colour: ``#rrggbb``, or a name Qt knows."""
+        value = str(self._value(argument))
+        color = QColor(value)
+        if not color.isValid():
+            raise CommandError(
+                f"Couldn't read {value!r} as a colour. Use a hex code like "
+                "#d3d3d3, or a name like grey."
+            )
+        return color
+
+    def _as_line_style(self, argument):
+        """Read a dash style by name."""
+        value = str(self._value(argument)).strip().lower()
+        style = self.LINE_STYLES.get(value)
+        if style is None:
+            raise CommandError(
+                f"Unknown line style {value!r}. Use one of: "
+                + ", ".join(sorted(self.LINE_STYLES))
+            )
+        return style
+
     def _form_hide(self, args) -> str:
         if len(args) != 1:
             raise CommandError("Usage: (hide <element>)  e.g. (hide P3)")
@@ -935,6 +992,15 @@ def _count(n: int, noun: str) -> str:
     if n == 0:
         return f"no {noun}s"
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+#: Shown when (format …) can't read its arguments.
+_FORMAT_USAGE = (
+    "Usage: (format <line> <thickness> [<colour>] [<style>])\n"
+    '  e.g. (format L14 0.5 #d3d3d3 "dashed")\n'
+    "  colour: a hex code or a name; style: solid, dashed, dotted,\n"
+    "  dash-dot, dash-dot-dot. A list of lines works too."
+)
 
 
 def _on_canvas(item) -> bool:

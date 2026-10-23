@@ -148,7 +148,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   + neg/pos extents; only that segment is drawn.
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
   move, can't rotate). The horizon uses this.
-- Line properties dialog: color, thickness (cosmetic), dash style.
+- Line properties dialog: color, thickness (cosmetic), dash style. The same
+  thing from the console is `(format <line> <thickness> [<colour>] [<style>])`
+  → `LineItem.set_style()`, which the dialog now shares. Trailing arguments
+  may be omitted, a **list** of lines works, colours are hex or Qt names, and
+  styles are `solid`/`dashed`/`dotted`/`dash-dot`/`dash-dot-dot`. The pen
+  stays **cosmetic**, so thickness is screen pixels at any zoom.
 - Right-click a line → **Add Point to Line** adds a line-anchored point where
   you clicked (`CanvasScene.add_point_on_line_at`, which projects the click
   with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
