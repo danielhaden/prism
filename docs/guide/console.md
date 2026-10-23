@@ -112,9 +112,27 @@ the second, which is how a net grows a round at a time:
 ```
 
 Each endpoint is **bound** to its point, so the line follows them as they move.
-A pair that is **already joined** is reused rather than drawn over, so
-overlapping rounds don't stack lines on top of each other. A point paired with
-itself is skipped.
+A point paired with itself is skipped.
+
+A pair the figure **already has a line through** is never drawn over — that
+line comes back instead. Two distinct points determine one line, so if the
+figure says both of them lie on one, that line *is* their join and there is
+nothing to add. "Says" means the same recorded relation
+[`(lines-through …)`](#lines-through-point) reads: bound, anchored, pinned, or
+a crossing.
+
+That is what makes the cross product do real work. Given a triangle and a
+horizon, the horizon's crossings are each on one side already, so joining the
+crossings to the vertices draws **only** the edges that are genuinely missing:
+
+```
+(add-line (points-on L1) (points-off L1 tri))
+```
+
+Each crossing is on the side that made it, hence already joined to that side's
+two vertices — leaving exactly the third. Those are the
+[cevians](#draw-cevians-triangle-line), and the sides come back alongside them
+rather than being drawn twice.
 
 The value is the line when only one came of it, and the list of lines
 otherwise — so it feeds straight into [`(format …)`](#format-line-thickness-colour-style)
@@ -460,8 +478,10 @@ A filter's result goes straight into another form, so these compose directly:
 (add-line P6 (points-off L2 (list P1 P2 P3)))
 ```
 
-`L2` is the side `P1P2`, so the only vertex off it is `P3` — and the line is
-drawn from `P6` to it. Where a form draws one thing *per* element,
+`L2` is the side `P1P2`, so the only vertex off it is `P3` — and `P6` is
+joined to it. If `P6` happens to be the crossing on the side through `P3`, the
+answer is that side itself rather than a second line along it. Where a form
+draws one thing *per* element,
 [`(add-line …)`](#add-line-points-points) among them, a filter giving several
 simply draws several. Where one element is wanted and a filter gives several,
 the command says how many and shows them rather than guessing; if it gives

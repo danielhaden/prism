@@ -678,9 +678,26 @@ class CommandInterpreter:
         return abs(cross) < 1e-6
 
     def _existing_side(self, a: PointItem, b: PointItem):
-        """The line already joining two points, if one is."""
+        """The line the figure already has through both points, if any.
+
+        Two distinct points determine one line, so if the figure already says
+        both of these lie on a line, that line *is* their join and there is
+        nothing to draw. The test is the dual of
+        :meth:`_form_lines_through`, and asks the same recorded-relation
+        question: a crossing on a side is on that side, so joining it to
+        either end of that side asks for the side itself.
+
+        A line bound to both points is preferred, so a side drawn as a side
+        comes back ahead of one the two merely happen to share.
+        """
+        through = self.scene.lines_through
+        shared = [
+            line
+            for line in through(a)
+            if any(other is line for other in through(b))
+        ]
         pair = {id(a), id(b)}
-        for line in self._lines():
+        for line in shared:
             ends = {
                 id(line.bound_point(end))
                 for end in (1, 2)
@@ -688,7 +705,7 @@ class CommandInterpreter:
             }
             if ends == pair:
                 return line
-        return None
+        return shared[0] if shared else None
 
     def _join(self, a: PointItem, b: PointItem) -> LineItem:
         """The line joining two points, drawn only if it isn't there already."""
@@ -783,8 +800,10 @@ class CommandInterpreter:
     def _form_join(self, args) -> list:
         """``(join <points>)`` — a line between every pair of them.
 
-        The sides a net is made of. A pair already joined is left alone rather
-        than drawn over, so joining overlapping sets doesn't stack lines.
+        The sides a net is made of. A pair the figure already has a line
+        through is left alone rather than drawn over, so joining overlapping
+        sets doesn't stack lines, and each line comes back once however many
+        pairs it answered for.
         """
         points = self._flatten(args, PointItem, "point")
         if len(points) < 2:
@@ -802,7 +821,9 @@ class CommandInterpreter:
                 a, b = points[first], points[second]
                 if a is b or a.center() == b.center():
                     continue
-                drawn.append(self._join(a, b))
+                line = self._join(a, b)
+                if not any(other is line for other in drawn):
+                    drawn.append(line)
         return drawn
 
     def _form_without(self, args) -> list:

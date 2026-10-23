@@ -266,7 +266,16 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   a round at a time. Bare points still work (`_flatten` treats one as a list of
   one), and the canvas menus emit the explicit list form so a recorded script
   teaches the shape. It reuses an existing side via `_join()`, skips a point
-  paired with itself, and refuses above `JOIN_LIMIT` pairs. `_only()` returns
+  paired with itself, and refuses above `JOIN_LIMIT` pairs.
+  **`_existing_side()` is the dual of `lines-through`**: any line both points
+  are *recorded* as lying on is their join, not just one bound to both (a line
+  bound to both still wins). Two distinct points determine one line, so this is
+  geometry, not a heuristic — and it needs no tolerance, since the relation is
+  recorded rather than measured. The payoff is that the cross product needs no
+  iteration form: `(add-line (points-on L1) (points-off L1 tri))` draws exactly
+  the cevians, because each crossing is already joined to the two vertices of
+  the side that made it. `add-line` and `(join …)` both **dedupe** their
+  result, since one line can now answer for several pairs. `_only()` returns
   the bare line when just one came of it, so a single join prints and composes
   as it always did. `(add line …)` is kept **only** as an error that says where
   it went.
