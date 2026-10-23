@@ -248,6 +248,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   would otherwise all print as `P1`.
   Variables are **in-memory only** — they don't survive a restart, while the
   canvas does. A script that defines what it needs is the durable form.
+  A name outlives the elements it holds (clear the canvas, or `rm` a point),
+  so `_surviving()` drops anything no longer on the canvas when the name is
+  used, and says so plainly if nothing is left — otherwise the user sees
+  `Internal C++ object (PointItem) already deleted`. `_on_canvas()` checks
+  `shiboken6.isValid` **before** touching the wrapper at all.
 - `(draw-triangle …)` takes three points **or a list of three** and joins
   them pairwise, returning the sides as a list. `_join()` **reuses an existing
   side** (a line bound to both points) rather than drawing a second one —
@@ -288,7 +293,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   through `ConsolePanel.variables()`). Rows carry the console's own names, and
   selection syncs **both ways** (a `_syncing` flag breaks the feedback loop).
   Rebuilt on a 120ms single-shot timer off `scene.changed`, since that signal
-  fires per repaint and a drag is a flood of them. A section that has not
+  fires per repaint and a drag is a flood of them.
+  **A row stores a *key*, never the item.** Qt keeps item data as a raw
+  pointer, so a row holding a scene item outlives it when the canvas is
+  cleared — and merely reading that data back reconstructs a wrapper around
+  freed memory, which **segfaults**, before any `shiboken6.isValid` check can
+  run. The key is `f"{kind}{_seq}"` (the creation number, stamped once and
+  stable, unlike positional ids), resolved against the live scene when
+  needed. Clearing with something selected used to kill the app this way. A section that has not
   been shown before opens expanded; one shown before keeps its state
   (`_seen_sections`). Its **objectName is still `SelectionPanel`**, which is
   what Qt saves dock layouts against — renaming it would strand saved

@@ -13,6 +13,8 @@ real elements. Forms return the element they create, which is what allows the
 nesting above.
 """
 
+import shiboken6
+
 from prism.items import LineItem, PointItem
 from prism.sexpr import SexprError, parse
 
@@ -153,8 +155,31 @@ class CommandInterpreter:
         if isinstance(argument, list):
             return self._eval(argument)
         if isinstance(argument, str) and argument in self._variables:
-            return self._variables[argument]
+            return self._surviving(argument)
         return argument
+
+    def _surviving(self, name: str):
+        """A name's value, minus anything no longer on the canvas.
+
+        A name outlives the elements it was bound to — clearing the canvas,
+        or removing a point, leaves it holding something that is gone. Those
+        are dropped on use, so a stale name shrinks rather than blowing up
+        with an error from deep inside Qt.
+        """
+        value = self._variables[name]
+        if isinstance(value, list):
+            kept = [item for item in value if _on_canvas(item)]
+            if len(kept) != len(value):
+                self._variables[name] = kept
+            if not kept:
+                raise CommandError(
+                    f"Nothing named {name!r} is on the canvas any more."
+                )
+            return kept
+        if not _on_canvas(value):
+            del self._variables[name]
+            raise CommandError(f"{name!r} is no longer on the canvas.")
+        return value
 
     # -- Argument coercion -------------------------------------------------
 
@@ -767,6 +792,19 @@ def _count(n: int, noun: str) -> str:
     if n == 0:
         return f"no {noun}s"
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _on_canvas(item) -> bool:
+    """Whether an element is still a live item in a scene.
+
+    ``isValid`` first: once Qt has destroyed the C++ object, touching the
+    wrapper at all is an error (or worse).
+    """
+    return (
+        item is not None
+        and shiboken6.isValid(item)
+        and item.scene() is not None
+    )
 
 
 def _match_by_label(items, name: str):

@@ -6,13 +6,18 @@ on the canvas highlights the row, so the tree is a way to find and reach
 geometry as well as to see what is there.
 """
 
+import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QDockWidget, QTreeWidget, QTreeWidgetItem
 
 from prism.items import GroupItem, LineItem, PointItem
 
-#: Where an element is stashed on its row.
+#: Where a row's **key** is stashed — never the item itself. Qt keeps item
+#: data as a raw pointer, so a row holding a scene item outlives it when the
+#: canvas is cleared, and merely reading that data back dereferences freed
+#: memory: a segfault, not an exception. A key is plain data, and the item it
+#: names is looked up in the scene when it is actually needed.
 ITEM_ROLE = Qt.UserRole
 
 #: How long to wait after a change before rebuilding, in milliseconds. The
@@ -85,7 +90,7 @@ class ElementsPanel(QDockWidget):
             for group in groups:
                 children = group.childItems()
                 row = QTreeWidgetItem(parent, [f"{len(children)} items"])
-                row.setData(0, ITEM_ROLE, group)
+                row.setData(0, ITEM_ROLE, self._key(group))
                 for child in children:
                     label = (
                         self._describe_point(child)
@@ -95,7 +100,9 @@ class ElementsPanel(QDockWidget):
                         else None
                     )
                     if label:
-                        QTreeWidgetItem(row, [label]).setData(0, ITEM_ROLE, child)
+                        QTreeWidgetItem(row, [label]).setData(
+                            0, ITEM_ROLE, self._key(child)
+                        )
 
         names = self._variables_source() if self._variables_source else {}
         if names:
@@ -110,7 +117,7 @@ class ElementsPanel(QDockWidget):
         parent = self._heading(f"{title} ({len(items)})", expanded)
         for item in items:
             row = QTreeWidgetItem(parent, [describe(item)])
-            row.setData(0, ITEM_ROLE, item)
+            row.setData(0, ITEM_ROLE, self._key(item))
 
     def _heading(self, text: str, expanded: set) -> QTreeWidgetItem:
         head = QTreeWidgetItem(self._tree, [text])
@@ -171,11 +178,43 @@ class ElementsPanel(QDockWidget):
         return text + (f"  [{', '.join(tags)}]" if tags else "")
 
     def _describe_value(self, value) -> str:
+        # A name can outlive what it holds, and a destroyed item must not be
+        # touched at all, so anything gone is shown as a gap rather than read.
+        def name(item) -> str:
+            if not shiboken6.isValid(item):
+                return "·"
+            return self._scene.element_id(item)
+
         if isinstance(value, list):
-            return "(" + " ".join(self._scene.element_id(it) for it in value) + ")"
+            return "(" + " ".join(name(item) for item in value) + ")"
         if isinstance(value, (PointItem, LineItem)):
-            return self._scene.element_id(value)
+            return name(value)
         return str(value)
+
+    # -- Keys: plain data standing in for an item ---------------------------
+
+    @staticmethod
+    def _key(item):
+        """A row's stand-in for an item: its kind and creation number.
+
+        Plain data, so a row can outlive what it names without danger. The
+        sequence number is stamped once when an element is made and never
+        changes, unlike the positional `P1`/`L1` ids.
+        """
+        kind = (
+            "p" if isinstance(item, PointItem)
+            else "l" if isinstance(item, LineItem)
+            else "g"
+        )
+        return f"{kind}{getattr(item, '_seq', id(item))}"
+
+    def _live_items(self) -> dict:
+        """The scene's items, by key, looked up fresh each time."""
+        found = {}
+        for item in self._scene.items():
+            if isinstance(item, (PointItem, LineItem, GroupItem)):
+                found[self._key(item)] = item
+        return found
 
     # -- Selection, both ways ----------------------------------------------
 
@@ -184,11 +223,14 @@ class ElementsPanel(QDockWidget):
             return
         self._syncing = True
         try:
+            live = self._live_items()
             self._scene.clearSelection()
             for row in self._tree.selectedItems():
-                item = row.data(0, ITEM_ROLE)
-                if item is not None and item.scene() is self._scene:
+                item = live.get(row.data(0, ITEM_ROLE))
+                if item is not None:
                     item.setSelected(True)
+        except RuntimeError:
+            pass  # scene torn down during shutdown
         finally:
             self._syncing = False
 
@@ -197,10 +239,9 @@ class ElementsPanel(QDockWidget):
             return
         self._syncing = True
         try:
-            selected = set(self._scene.selectedItems())
+            chosen = {self._key(item) for item in self._scene.selectedItems()}
             for row in self._rows():
-                item = row.data(0, ITEM_ROLE)
-                row.setSelected(item is not None and item in selected)
+                row.setSelected(row.data(0, ITEM_ROLE) in chosen)
         except RuntimeError:
             pass  # scene torn down during shutdown
         finally:

@@ -313,6 +313,10 @@ Several commands take a list and act on each element:
 `(label …)` numbers the elements, since one name across three points would be
 ambiguous.
 
+A name can outlive what it holds — clear the canvas, or remove one of the
+points, and the list quietly shrinks to what is still there. If nothing is
+left, using the name says so.
+
 !!! warning "Names don't outlive the session"
     A definition lives as long as the app is open. The canvas persists between
     sessions but the names you gave it don't, so a script that defines what it
