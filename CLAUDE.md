@@ -463,8 +463,19 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    display segments meet (`_intersection_of` uses `BoundedIntersection`), so
    near-parallel lines meeting off-canvas have no marker — what should a line
    depending on a vanished crossing do?
-2. **Higher-order console forms** — `fold`/map to build pencils/projectivities
-   programmatically.
+2. **Higher-order console forms** — **done as enumerators**: `(points)`,
+   `(lines)`, `(meets <lines>)`, `(join <points>)`, `(without …)`,
+   `(take n …)`, `(last n …)`, `(repeat n <form>)`. `repeat` is a *special
+   form*: it keeps its argument unevaluated and re-evaluates it each round, so
+   `(points)` inside sees what the last round made. `(last …)` is the one that
+   grows a net — points come in creation order, so the tail is what the
+   previous step produced, while `(take …)` re-joins the seed and stalls.
+   `join` reuses an existing side (shared `_join` with `draw-triangle`) and
+   refuses above `JOIN_LIMIT` (300) lines, since n points pairwise is
+   n(n-1)/2 and their crossings multiply again; `repeat` caps at
+   `REPEAT_LIMIT` (100). Still open: a form for the harmonic step itself
+   (three collinear points → the fourth harmonic), which is what makes a net
+   *disciplined* rather than merely dense.
 3. Intersection-marker **visibility control** (dense nets get busy).
 4. Save/load a drawing to a file (scene_state is most of the way there).
 5. Possibly: promote/detach UX, snapping toggles, coordinate readout.

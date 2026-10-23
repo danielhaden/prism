@@ -326,6 +326,61 @@ left, using the name says so.
 
 List the available commands.
 
+## Enumerators: building without naming every step
+
+Writing a net out by hand means chasing ids that Prism assigned — join two
+points, see what the new crossing is called, join that, and so on. These forms
+let you talk about the canvas instead.
+
+| Form | Gives |
+|------|-------|
+| `(points)` / `(lines)` | everything on the canvas, as a list |
+| `(meets <lines>)` | the points where those lines cross |
+| `(join <points>)` | a line between every pair of them |
+| `(without <list> <list>)` | the first list, minus the second |
+| `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
+| `(repeat <n> <form>)` | run a form n times |
+
+`(repeat …)` re-evaluates its form each round, so anything reading the canvas
+sees what the round before it made. **You never add the points** — Prism
+already keeps one wherever lines cross, so growing a figure is only ever a
+matter of joining points and letting the crossings appear.
+
+```
+(repeat 4 (join (last 4 (points))))
+```
+
+Each round joins the four newest points; their crossings become the newest
+points for the round after. Starting from a triangle on a horizon:
+
+| round | points | lines |
+|-------|--------|-------|
+| start | 6 | 4 |
+| 1 | 10 | 10 |
+| 2 | 10 | 16 |
+| 3 | 14 | 19 |
+| 4 | 15 | 25 |
+
+`(last …)` is usually what you want: points come in creation order, so the
+last of them are what the previous step produced. `(take …)` keeps re-joining
+the seed you started from, which quickly does nothing at all.
+
+!!! warning "Joining everything runs away"
+    `n` points joined pairwise is `n(n-1)/2` lines — 20 points is 190, 30 is
+    435 — and those lines cross in far more places again. `(join …)` refuses
+    above 300 lines and tells you the count; narrow the list with
+    `(take …)`, `(last …)` or `(without …)` and join a part of it. A net of
+    harmonicity is a *disciplined* construction, not everything joined to
+    everything.
+
+To reach exactly what a step created, keep a mark and subtract:
+
+```
+(define before (points))
+(join (last 4 (points)))
+(without (points) before)      # just the new crossings
+```
+
 ## Clicking writes the script
 
 A canvas command with a console equivalent **runs that command**. It appears in

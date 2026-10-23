@@ -66,13 +66,23 @@ class CommandInterpreter:
             "ls": self._form_ls,
             "define": self._form_define,
             "draw-triangle": self._form_draw_triangle,
+            "points": self._form_points,
+            "lines": self._form_lines,
+            "meets": self._form_meets,
+            "join": self._form_join,
+            "without": self._form_without,
+            "take": self._form_take,
+            "last": self._form_last,
+            "repeat": self._form_repeat,
             "help": self._form_help,
         }
 
     # -- Entry point -------------------------------------------------------
 
     #: Forms that only inspect; they aren't worth recording into a script.
-    NON_RECORDING = {"ls", "help"}
+    NON_RECORDING = {
+        "ls", "help", "points", "lines", "meets", "without", "take", "last",
+    }
 
     def execute(self, text: str) -> str:
         """Run one or more forms and return the output text."""
@@ -339,6 +349,13 @@ class CommandInterpreter:
             "  (show <element> | -all)     draw it again\n"
             "  (draw-triangle <p> <p> <p>) the three sides joining three\n"
             "                              points (or a list of three)\n"
+            "  (points) / (lines)          everything on the canvas\n"
+            "  (meets <lines>)             where those lines cross\n"
+            "  (join <points>)             a line between every pair\n"
+            "  (without <list> <list>)     the first minus the second\n"
+            "  (take <n> <list>)           the first n of a list\n"
+            "  (last <n> <list>)           the last n — what was just made\n"
+            "  (repeat <n> <form>)         run a form n times\n"
             "  (list <element> …)          gather elements into a list\n"
             "  (define <name> <value>)     give a value a name\n"
             "  (ls [-points | -lines])     list canvas elements\n"
@@ -535,6 +552,132 @@ class CommandInterpreter:
                 "Can't draw a side: two of those points are in the same place."
             )
         return line
+
+    # -- Enumerators -------------------------------------------------------
+
+    #: Most sides one (join …) will draw before refusing. Joining n points
+    #: pairwise is n(n-1)/2 lines, which runs away fast: 20 points is 190.
+    JOIN_LIMIT = 300
+
+    #: Most times (repeat …) will run a form.
+    REPEAT_LIMIT = 100
+
+    def _form_points(self, args) -> list:
+        """``(points)`` — every point on the canvas, as a list."""
+        if args:
+            raise CommandError("(points) takes nothing.")
+        return list(self._points())
+
+    def _form_lines(self, args) -> list:
+        """``(lines)`` — every line on the canvas, as a list."""
+        if args:
+            raise CommandError("(lines) takes nothing.")
+        return list(self._lines())
+
+    def _form_meets(self, args) -> list:
+        """``(meets <lines>)`` — the points where those lines cross."""
+        lines = self._flatten(args, LineItem, "line")
+        wanted = {id(line) for line in lines}
+        return [
+            point
+            for point in self._points()
+            if point.is_meet()
+            and sum(1 for ln in point.meeting_lines() if id(ln) in wanted) >= 2
+        ]
+
+    def _form_join(self, args) -> list:
+        """``(join <points>)`` — a line between every pair of them.
+
+        The sides a net is made of. A pair already joined is left alone rather
+        than drawn over, so joining overlapping sets doesn't stack lines.
+        """
+        points = self._flatten(args, PointItem, "point")
+        if len(points) < 2:
+            raise CommandError("(join …) needs at least two points.")
+        pairs = len(points) * (len(points) - 1) // 2
+        if pairs > self.JOIN_LIMIT:
+            raise CommandError(
+                f"That would draw {pairs} lines from {len(points)} points "
+                f"(the limit is {self.JOIN_LIMIT}). Narrow the list — (take …) "
+                "or (without …) — and join a part of it."
+            )
+        drawn = []
+        for first in range(len(points)):
+            for second in range(first + 1, len(points)):
+                a, b = points[first], points[second]
+                if a is b or a.center() == b.center():
+                    continue
+                drawn.append(self._join(a, b))
+        return drawn
+
+    def _form_without(self, args) -> list:
+        """``(without <list> <list>)`` — the first list, minus the second."""
+        if len(args) != 2:
+            raise CommandError("Usage: (without <list> <list>)")
+        keep = self._as_list(args[0])
+        drop = {id(item) for item in self._as_list(args[1])}
+        return [item for item in keep if id(item) not in drop]
+
+    def _form_take(self, args) -> list:
+        """``(take <n> <list>)`` — the first n of a list."""
+        if len(args) != 2:
+            raise CommandError("Usage: (take <count> <list>)")
+        count = int(self._as_float(args[0], "a count"))
+        return self._as_list(args[1])[:max(0, count)]
+
+    def _form_last(self, args) -> list:
+        """``(last <n> <list>)`` — the last n of a list.
+
+        Points come in creation order, so the last of them are the ones the
+        step before just made. That is how a net reaches forward instead of
+        re-joining the seed it started from.
+        """
+        if len(args) != 2:
+            raise CommandError("Usage: (last <count> <list>)")
+        count = int(self._as_float(args[0], "a count"))
+        items = self._as_list(args[1])
+        return items[-count:] if count > 0 else []
+
+    def _form_repeat(self, args):
+        """``(repeat <n> <form>)`` — run a form n times.
+
+        The form is re-evaluated each round, so anything reading the canvas —
+        ``(points)``, ``(lines)`` — sees what the round before it made. That
+        is how a net grows without naming each generation.
+        """
+        if len(args) != 2:
+            raise CommandError("Usage: (repeat <count> <form>)")
+        count = int(self._as_float(args[0], "a count"))
+        if count < 0 or count > self.REPEAT_LIMIT:
+            raise CommandError(
+                f"Repeat between 0 and {self.REPEAT_LIMIT} times."
+            )
+        result = None
+        for _ in range(count):
+            result = self._value(args[1])
+        return result
+
+    def _as_list(self, argument) -> list:
+        """An argument as a list, whether it is one or a single element."""
+        value = self._value(argument)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            value = self._as_element(argument)
+        return [value]
+
+    def _flatten(self, args, kind, noun: str) -> list:
+        """Every element across the arguments, checked to be of one kind."""
+        found = []
+        for argument in args:
+            for item in self._as_list(argument):
+                if not isinstance(item, kind):
+                    raise CommandError(
+                        f"Expected a {noun}, got {self._element_name(item)}."
+                    )
+                if not any(other is item for other in found):
+                    found.append(item)
+        return found
 
     def _form_rm(self, args) -> str:
         if len(args) != 1:
