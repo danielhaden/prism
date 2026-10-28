@@ -3,11 +3,14 @@
 Commands are written as parenthesised forms, e.g.::
 
     (add horizon 1/3)
-    (add line 260 (point L1 2/3))
+    (add-line 260 (point L1 2/3))
 
 Parsing yields nested lists of string atoms; the interpreter gives them
 meaning. Several forms may appear in one line, which is what makes scripting
 possible.
+
+``;`` begins a remark that runs to the end of the line, as in lisp — inside a
+form as well as around one. A ``;`` inside "quoted text" is ordinary text.
 """
 
 
@@ -26,7 +29,7 @@ def tokenize(text: str) -> list:
             i += 1
         elif char.isspace():
             i += 1
-        elif char == ";":  # comment to end of line
+        elif char == ";":  # a remark, to the end of the line
             newline = text.find("\n", i)
             i = len(text) if newline == -1 else newline + 1
         elif char == '"':
@@ -37,7 +40,13 @@ def tokenize(text: str) -> list:
             i = end + 1
         else:
             start = i
-            while i < len(text) and not text[i].isspace() and text[i] not in "()":
+            # ";" ends an atom as well as starting a remark, as in lisp, so
+            # (rm P1;why) reads as (rm P1) rather than an atom "P1;why".
+            while (
+                i < len(text)
+                and not text[i].isspace()
+                and text[i] not in "();"
+            ):
                 i += 1
             tokens.append(text[start:i])
     return tokens

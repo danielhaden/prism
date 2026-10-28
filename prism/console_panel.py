@@ -109,6 +109,10 @@ class ConsolePanel(QDockWidget):
         if ok and self._recording and self._interpreter.is_recordable(line):
             self._recorded.append(line.strip())
 
+    def variables(self) -> dict:
+        """The names bound with ``(define …)``, for panels that show them."""
+        return self._interpreter.variables()
+
     def run_script(self, name: str, text: str) -> None:
         """Execute a script's commands, echoing them to the console.
 

@@ -21,7 +21,7 @@ creates, so forms nest. Instead of placing a point and then referring to it,
 you can describe it inline:
 
 ```
-(add line 260 (point L1 2/3))
+(add-line 260 (point L1 2/3))
 ```
 
 That reads: *add a line at 260°, through the point two-thirds of the way along
@@ -30,8 +30,26 @@ line L1.* The inner form makes the point; the outer form uses it.
 You can also put several forms on one line, which is the seed of scripting:
 
 ```
-(add horizon 1/3) (add line 250 (point L1 1/3))
+(add horizon 1/3) (add-line 250 (point L1 1/3))
 ```
+
+## Remarks
+
+A **`;`** begins a remark that runs to the end of the line, as in lisp — in
+the console as well as in a [script](#scripts):
+
+```
+; a horizon, and a point two-thirds along it
+(add horizon 1/3)         ; locked to the horizontal
+(add-line
+  250                     ; degrees clockwise from horizontal
+  (point L1 1/3))
+```
+
+A remark may sit inside a form, as above, and it ends an element's name as
+well: `(rm P1;why)` reads as `(rm P1` — and so reports a missing `)`, since
+the bracket was inside the remark. A `;` in `"quoted text"` is ordinary text,
+so labels can contain one.
 
 ## Naming elements
 
@@ -62,7 +80,7 @@ bottom-right.
 The point it returns can be fed straight to other forms:
 
 ```
-(add line 45 (add point 1/2 1/2))
+(add-line 45 (add point 1/2 1/2))
 ```
 
 ### `(add horizon <fraction>)`
@@ -90,36 +108,75 @@ Otherwise it's an ordinary infinite line — style it, label it, hang pencils of
 it, drag it up and down. Dragging an endpoint handle slides the whole line
 rather than tilting it.
 
-### `(add line <angle> <point>)`
+### `(add-line <points> <points>)`
 
-Add an infinite line, in one of two forms.
+Add infinite lines, in one of two forms. Both take **lists**, and a one-element
+list is the plain case — one line.
 
-**Through a point, at an angle:**
+**Joining points to points:**
 
 ```
-(add line 30 A)                  # 30° through the point labelled A
-(add line -45 P2)                # -45° through the point listed as P2
-(add line 260 (point L1 2/3))    # through a point defined inline
+(add-line (list A) (list B))             # the single line A-B
+(add-line (list P1) (list P2 P3))        # P1-P2 and P1-P3
+(add-line (list P1 P2) (list P3 P4))     # all four joins
+(add-line P1 P2)                         # a bare point counts as a list of one
+```
+
+A line is drawn from **every** point of the first list to **every** point of
+the second, which is how a net grows a round at a time:
+
+```
+(add-line (points-off L1 tri) (points-on L1 (points)))
+```
+
+Each endpoint is **bound** to its point, so the line follows them as they move.
+A point paired with itself is skipped.
+
+A pair the figure **already has a line through** is never drawn over — that
+line comes back instead. Two distinct points determine one line, so if the
+figure says both of them lie on one, that line *is* their join and there is
+nothing to add. "Says" means the same recorded relation
+[`(lines-through …)`](#lines-through-point) reads: bound, anchored, pinned, or
+a crossing.
+
+That is what makes the cross product do real work. Given a triangle and a
+horizon, the horizon's crossings are each on one side already, so joining the
+crossings to the vertices draws **only** the edges that are genuinely missing:
+
+```
+(add-line (points-on L1) (points-off L1 tri))
+```
+
+Each crossing is on the side that made it, hence already joined to that side's
+two vertices — leaving exactly the third. Those are the
+[cevians](#draw-cevians-triangle-line), and the sides come back alongside them
+rather than being drawn twice.
+
+The value is the line when only one came of it, and the list of lines
+otherwise — so it feeds straight into [`(format …)`](#format-line-thickness-colour-style)
+or [`(define …)`](#define-name-value).
+
+**Through points, at an angle** (the first argument is a number):
+
+```
+(add-line 30 (list A))               # 30° through the point labelled A
+(add-line -45 (list P1 P2))          # -45° through each of two points
+(add-line 260 (point L1 2/3))        # through a point defined inline
 ```
 
 - **angle** — degrees **clockwise from the horizontal** (the same convention as
   [projectivities](projectivities.md)). `0` is horizontal, `90` vertical.
-- **point** — a label, an id, or a nested form that yields a point.
+- **points** — a label, an id, a nested form that yields a point, or a list of
+  any of those.
 
-The line is **pinned** to the point, so it stays through it and rotates about
+Each line is **pinned** to its point, so it stays through it and rotates about
 it. Repeating the command on one point builds a [pencil](projectivities.md)
 line by line.
 
-**Through two points** (the first argument isn't a number):
-
-```
-(add line A B)                              # through points A and B
-(add line P1 P2)                            # through the listed points
-(add line (point L1 1/4) (point L1 3/4))    # through two inline points
-```
-
-Each endpoint is **bound** to its point, so the line follows them as they move.
-(This is also available by selecting two points and right-clicking.)
+!!! note "It used to be `(add line …)`"
+    Two words, and one point on each side. The form now always takes lists, so
+    it is hyphenated — `(add-line …)`, a form in its own right rather than a
+    kind of `add`. The old spelling says so if you type it.
 
 ### `(point <line> <fraction>)`
 
@@ -201,15 +258,93 @@ forms are a single undo step, and both are the console equivalent of
     ```
     (add point 1/4 1/2)
     (label P1 A)
-    (add line 30 A)       ; still works however the ids shift
+    (add-line 30 A)       ; still works however the ids shift
     ```
+
+### `(draw-triangle <point> <point> <point>)`
+
+Draw the three sides joining three points.
+
+```
+(draw-triangle P1 P2 P3)
+(draw-triangle tri)            # or a list of three
+```
+
+Each side is a line **bound to its two vertices**, so the figure stays a
+triangle as you drag them — move a vertex and the two sides through it follow.
+The command returns the three sides as a list, so you can name them:
+
+```
+(define sides (draw-triangle tri))
+(label sides s)                # s1, s2, s3
+```
+
+A side that is **already drawn is reused**, not drawn again. Triangles sharing
+an edge — which is most of what a net is made of — therefore don't stack lines
+on top of each other.
+
+In the projective sense a triangle needs three points **not on a line**, so
+collinear points are refused rather than given three copies of the same side.
+The same goes for the same point twice.
+
+### `(format <line> <thickness> [<colour>] [<style>])`
+
+Change how a line is drawn.
+
+```
+(format L14 0.5 #d3d3d3 "dashed")
+(format L2 3)                       # thickness alone
+(format L2 1 grey)                  # a colour name works too
+(format (lines) 0.25 #aabbcc "dotted")
+```
+
+Thickness is in **screen pixels** and stays that width at any zoom. Colour is
+a hex code or any name Qt knows. The styles are `solid`, `dashed`, `dotted`,
+`dash-dot` and `dash-dot-dot`.
+
+Arguments after the line may be left off, so `(format L1 0.5)` changes only
+the thickness. A **list** works in place of a single line, which is the useful
+form for a net — dropping every construction line back to a pale hairline
+leaves the figure you care about standing out:
+
+```
+(define scaffolding (lines))
+… build …
+(format scaffolding 0.5 #d3d3d3 "dashed")
+```
+
+Formatting is undoable and is kept with the drawing between sessions.
+
+### `(draw-cevians <triangle> <line>)`
+
+From each point where the line crosses the triangle, draw the edge that is
+missing.
+
+```
+(draw-triangle P1 P2 P3)
+(draw-cevians P1 P2 P3 L1)
+(draw-cevians tri L1)          # a named list works too
+```
+
+Each side meets the line somewhere, and that crossing already lies on a side —
+so it is already joined to *two* vertices. The third vertex is the one with no
+edge to it, and that edge is what gets drawn: three in all, one per crossing.
+They are the triangle's **cevians** through those points.
+
+The three cevians do **not** meet in a point. They cross one another in three
+places, forming a second triangle inside the first — which is what makes this
+the start of a harmonic construction rather than a dead end.
+
+A side parallel to the line never meets it, so there is no point to draw to;
+the command says which side and stops rather than drawing something arbitrary.
+Running it twice draws nothing new.
 
 ### `(rm <element>)`
 
 Remove a point or a line from the canvas.
 
 ```
-(rm P1)             # by id, as (list) shows it
+(rm P1)             # by id, as (ls) shows it
 (rm A)              # by label
 (rm L2)             # a line
 ```
@@ -226,26 +361,294 @@ cross there and would reappear immediately; remove one of those lines instead.
 
 !!! warning "Ids shift"
     Ids are positional — `P1` is simply the first point. Removing `P1` renumbers
-    everything after it, so re-run `(list)` before leaning on an id again.
+    everything after it, so re-run `(ls)` before leaning on an id again.
     Labels are stable, and worth using in a script that removes things.
 
-### `(list [-points | -lines])`
+### `(clear)`
+
+Empty the whole canvas.
+
+```
+(clear)
+```
+
+The names you have [defined](#define-name-value) are **left alone**. A list
+prunes itself to what is still there when it is next used, and a
+[function](#lambda-name--body) doesn't depend on the canvas at all — so a
+script can clear and rebuild without losing what it defined. That is the usual
+way to begin a script, since one otherwise draws on top of whatever happens to
+be there already.
+
+It says what it removed, and clearing an empty canvas is not an error. **Undo**
+(++ctrl+z++) brings the canvas back.
+
+To remove a single element, use [`(rm …)`](#rm-element) instead. The toolbar's
+**Clear** runs this command, so clearing by clicking is written to the console
+like everything else.
+
+### `(ls [-points | -lines])`
 
 List the elements on the canvas.
 
 ```
-(list)            # everything
-(list -points)    # points only
-(list -lines)     # lines only
+(ls)            # everything
+(ls -points)    # points only
+(ls -lines)     # lines only
 ```
 
-Points show coordinates, label, `on-line` if anchored, and `[intersection]` for
-derived points. Lines show their defining endpoints, `infinite` or `range[…]`,
-plus `locked`, `pivot`, and their label.
+Points show coordinates, label, `on-line` if anchored, `[meet of …]` for a
+point where lines cross, and `[hidden]`. Lines show their defining endpoints,
+`infinite` or `range[…]`, plus `locked`, `pivot`, and their label.
+
+!!! note "This used to be `(list)`"
+    `(list …)` now gathers elements into a list value, so listing the canvas
+    moved to `(ls)`. Typing the old spelling says so rather than doing
+    something surprising. No saved script is affected — inspection commands
+    were never recorded.
+
+### `(list <element> …)`
+
+Gather elements into a **list value**.
+
+```
+(list P1 P2 P3)       # a list of three points
+(list L1 L2)          # lines work too
+```
+
+On its own a list isn't much use — name it with
+[`(define …)`](#define-name-value) and then act on all of it at once. Lists
+**flatten**, so they compose: `(list tri P4)` is a list of four points, not a
+list containing a list.
+
+### `(define <name> <value>)`
+
+Give a value a name.
+
+```
+(define tri (list P1 P2 P3))
+(define apex P4)
+```
+
+The name can then be used wherever the value could be, and a name you define
+takes precedence over a label of the same text — you chose it deliberately.
+
+Several commands take a list and act on each element:
+
+```
+(label tri V)     # labels them V1, V2, V3
+(hide tri)
+(show tri)
+(rm tri)
+```
+
+`(label …)` numbers the elements, since one name across three points would be
+ambiguous.
+
+A name can outlive what it holds — clear the canvas, or remove one of the
+points, and the list quietly shrinks to what is still there. If nothing is
+left, using the name says so.
+
+!!! warning "Names don't outlive the session"
+    A definition lives as long as the app is open. The canvas persists between
+    sessions but the names you gave it don't, so a script that defines what it
+    needs is the durable form.
+
+### `(lambda (<name> …) <body>)`
+
+A **function**, as a value. The parameters are bare words in their own
+parentheses; the body is one or more forms, run when the function is *called*
+with the parameters bound to the arguments. Nothing in the body is evaluated
+before then.
+
+```
+(lambda (q) (add-line (list q) (points-off L1 tri)))
+```
+
+Give it a name and it reads as a command of its own:
+
+```
+(define cevian (lambda (q) (add-line (list q) (points-off L1 tri))))
+(cevian P4)
+```
+
+or write the two together, which means the same thing:
+
+```
+(define (cevian q) (add-line (list q) (points-off L1 tri)))
+```
+
+This is how the language grows **in itself**: a construction you work out at
+the console becomes a form you can call, without anything being added to
+Prism. The body's last value is the function's value, so a function that draws
+gives back what it drew.
+
+A function may also be called where it stands, with no name at all:
+
+```
+((lambda (q) (points-off q tri)) L1)
+```
+
+- Parameters **shadow** a `(define …)` name, which shadows a label — innermost
+  wins, as in any lisp.
+- A function made inside another call keeps that call's parameters, so
+  `(define (maker a) (lambda (b) (list a b)))` gives functions that remember
+  their `a`.
+- A **built-in form always wins** over a name, so `(points)` can't be
+  redefined out from under you.
+- Unlike a list of elements, a function doesn't depend on the canvas, so
+  clearing it leaves your functions intact.
+
+!!! note "A function that calls itself"
+    Allowed, but calls may not nest more than 50 deep; past that Prism says a
+    function is probably calling itself without end, rather than falling over.
+
+### `(map <function> <list>)`
+
+Call a function on **each element** of a list, in turn:
+
+```
+(map cevian (points-on L1))
+(map (lambda (q) (add-line (list q) (points-off L1 tri))) (points-on L1))
+```
+
+This is the form to reach for when the thing to draw **depends on** the
+element. Where it doesn't — where you simply want every one of these joined to
+every one of those — [`(add-line …)`](#add-line-points-points) already does
+that in one go, and is the shorter way to say it.
+
+The results are gathered into one **flat** list, as lists are everywhere else
+here, so a function drawing several lines per element still gives back a list
+of lines. The name of a built-in form works too, where it takes a single
+argument:
+
+```
+(map hide (points-on L1))
+```
 
 ### `(help)`
 
 List the available commands.
+
+## Enumerators: building without naming every step
+
+Writing a net out by hand means chasing ids that Prism assigned — join two
+points, see what the new crossing is called, join that, and so on. These forms
+let you talk about the canvas instead.
+
+| Form | Gives |
+|------|-------|
+| `(points)` / `(lines)` | everything on the canvas, as a list |
+| `(meets <lines>)` | the points where those lines cross |
+| `(lines-through <point>)` | the lines that point lies on |
+| `(points-on <line> [<points>])` | of those, the ones on the line |
+| `(points-off <line> [<points>])` | of those, the ones that aren't |
+| `(join <points>)` | a line between every pair of them |
+| `(diff <list> <list>)` | what is in the first but not the second |
+| `(intersect <list> <list>)` | what is in both |
+| `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
+| `(repeat <n> <form>)` | run a form n times |
+
+`(diff …)` and `(intersect …)` are exact counterparts — one keeps what the
+second list has, the other drops it — so between them they divide the first
+list in two, in its own order:
+
+```
+(intersect (points-on L1) (points-on L2))   # the point both lines carry
+(intersect (lines-through P1) (lines-through P2))   # the line joining them
+```
+
+Elements match by **identity**, not by looking alike: two points in the same
+place are two points. Note that `(join …)` is *not* a set operation — it draws
+a line between every pair of points.
+
+!!! note "`(diff …)` used to be `(without …)`"
+    Renamed so the set operations read as a family alongside
+    `(intersect …)`. The old spelling says so if you type it.
+
+`(repeat …)` re-evaluates its form each round, so anything reading the canvas
+sees what the round before it made. **You never add the points** — Prism
+already keeps one wherever lines cross, so growing a figure is only ever a
+matter of joining points and letting the crossings appear.
+
+```
+(repeat 4 (join (last 4 (points))))
+```
+
+Each round joins the four newest points; their crossings become the newest
+points for the round after. Starting from a triangle on a horizon:
+
+| round | points | lines |
+|-------|--------|-------|
+| start | 6 | 4 |
+| 1 | 10 | 10 |
+| 2 | 10 | 16 |
+| 3 | 14 | 19 |
+| 4 | 15 | 25 |
+
+`(last …)` is usually what you want: points come in creation order, so the
+last of them are what the previous step produced. `(take …)` keeps re-joining
+the seed you started from, which quickly does nothing at all.
+
+!!! warning "Joining everything runs away"
+    `n` points joined pairwise is `n(n-1)/2` lines — 20 points is 190, 30 is
+    435 — and those lines cross in far more places again. `(join …)` refuses
+    above 300 lines and tells you the count; narrow the list with
+    `(take …)`, `(last …)` or `(diff …)` and join a part of it. A net of
+    harmonicity is a *disciplined* construction, not everything joined to
+    everything.
+
+`(lines-through …)` is the dual of `(meets …)`: one goes from lines to the
+points they cross at, the other from a point to the lines through it. They
+compose — `(meets (lines-through P1))` is every crossing on the pencil through
+`P1`. A list of points gives the lines through any of them, each once.
+
+A filter's result goes straight into another form, so these compose directly:
+
+```
+(add-line P6 (points-off L2 (list P1 P2 P3)))
+```
+
+`L2` is the side `P1P2`, so the only vertex off it is `P3` — and `P6` is
+joined to it. If `P6` happens to be the crossing on the side through `P3`, the
+answer is that side itself rather than a second line along it. Where a form
+draws one thing *per* element,
+[`(add-line …)`](#add-line-points-points) among them, a filter giving several
+simply draws several. Where one element is wanted and a filter gives several,
+the command says how many and shows them rather than guessing; if it gives
+none, it says that too.
+
+`(points-on …)` and `(points-off …)` are exact complements, and each is the
+dual of `(lines-through …)` — one asks a point which lines it lies on, the
+other asks a line which points lie on it. Given a list they filter it; given
+none they take the whole canvas:
+
+```
+(points-off L1 (points))     # the triangle — none of it on the horizon
+(points-on L1)               # every point on the horizon
+(join (points-off L1 (points)))
+```
+
+!!! warning "They report relations, not geometry"
+    A line counts as through a point when the figure **says** so: the point is
+    its crossing, or the line is bound to it, pinned to pivot on it, anchored
+    to it, or carries its visible range. Two lines that happen to cross
+    exactly at a *placed* point are **not** reported — Prism makes no crossing
+    point there (the point you placed is already the meet), so no relation was
+    ever recorded:
+
+    ```
+    (lines-through P1)   ->   ()     # even with two lines visibly crossing at P1
+    ```
+
+    Build through a point — pin or bind to it — and the relation exists.
+
+To reach exactly what a step created, keep a mark and subtract:
+
+```
+(define before (points))
+(join (last 4 (points)))
+(diff (points) before)         # just the new crossings
+```
 
 ## Clicking writes the script
 
@@ -260,12 +663,13 @@ can work on the canvas and come away with the script for what you did.
 | Add Horizon | `(add horizon <fraction>)` |
 | Add Point to Line | `(point <line> <fraction>)` |
 | Add Point at Intersection | `(point <line> <line>)` |
-| Add Line Through Point | `(add line 45 <point>)` |
-| Add Lines Through Point… | one `(add line <angle> <point>)` per ray |
-| Add Line Through Points | `(add line <point> <point>)` |
+| Add Line Through Point | `(add-line 45 (list <point>))` |
+| Add Lines Through Point… | one `(add-line <angle> (list <point>))` per ray |
+| Add Line Through Points | `(add-line (list <point>) (list <point>))` |
 | Add / Edit / Remove Label | `(label <element> "…")` |
 | Auto-label Scene / Clear All Labels | `(label -auto)` / `(label -clear)` |
 | Delete Point / Hide Point | `(rm <element>)` |
+| Clear (toolbar) | `(clear)` |
 | Show N Hidden Points | `(show -all)` |
 
 Some canvas commands have no console form yet and so write nothing: **Modify
@@ -289,7 +693,7 @@ Anything you build from the console can be saved and replayed.
 
 Click **Save Script…** next to the input and give it a name. The session's
 **building** commands are written out in order — inspection commands
-(`(list)`, `(help)`) are left out, so the script is just the construction.
+(`(ls)`, `(help)`) are left out, so the script is just the construction.
 
 ### The Scripts panel
 
@@ -297,6 +701,14 @@ Click **Save Script…** next to the input and give it a name. The session's
 script in your scripts folder, with an **editor** below the list. Select a
 script and its text appears there; drag the divider to give the list or the
 editor more room.
+
+The editor **numbers its lines** in a small grey gutter on the left. A script
+is read as much as it is written — to find the step that drew a line, or the
+round a net went wrong in — and an error that mentions a line is only useful
+when you can see which one it is. The gutter widens to fit the longest number,
+and the numbers are drawn smaller than the text so they stay out of the way.
+The number of the line the cursor is on is **bold and darker**, so you can see
+where you are without hunting for the caret.
 
 | Button | What it does |
 |--------|--------------|
@@ -321,12 +733,12 @@ edit them in any editor as well as in the panel. Choose the folder from **Settin
 it defaults to a per-user application-data directory, and the panel shows the
 current path at the bottom.
 
-Scripts may contain blank lines and `;` comments:
+Scripts may contain blank lines and [remarks](#remarks):
 
 ```
 ; a horizon with a vanishing point
 (add horizon 1/3)
-(add line 250 (point L1 1/3))   ; the pencil's first ray
+(add-line 250 (point L1 1/3))   ; the pencil's first ray
 ```
 
 ## Worked example
@@ -336,8 +748,8 @@ and no hand-placed points:
 
 ```
 (add horizon 1/3)
-(add line 250 (point L1 1/3))
-(add line 265 P1) (add line 280 P1) (add line 295 P1)
-(add line 230 (point L1 2/3))
-(add line 245 P2) (add line 260 P2) (add line 275 P2)
+(add-line 250 (point L1 1/3))
+(add-line 265 P1) (add-line 280 P1) (add-line 295 P1)
+(add-line 230 (point L1 2/3))
+(add-line 245 P2) (add-line 260 P2) (add-line 275 P2)
 ```

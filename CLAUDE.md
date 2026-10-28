@@ -44,7 +44,7 @@ is imposed *projectively* using the app's own elements.
 main.py → prism/app.py → prism/main_window.py (QMainWindow)
   CanvasView (canvas/view.py)   — pan, wheel-zoom (capped), template drops
   CanvasScene (canvas/scene.py) — the hub: owns geometry, propagates deps
-  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, SelectionPanel
+  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, ElementsPanel
 ```
 
 - **`CanvasScene`** coordinates everything: snapping, endpoint bindings, pivots
@@ -126,7 +126,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   was silently dropped — `"pivot": None` — so a net built on crossings lost
   its pinning on every undo.
 - **Geometry can now be built on a computed point** — endpoint binding, pin,
-  add-line-through, joining two crossings, console `(add line … X)`. Updates
+  add-line-through, joining two crossings, console `(add-line … (list X))`. Updates
   run in dependency order (see **Propagation**), so what you build follows.
   Still excluded, deliberately: anchoring a meet to a line (its position is
   already determined — `is_determined()`), `rm` of a meet (it hides instead,
@@ -148,7 +148,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   + neg/pos extents; only that segment is drawn.
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
   move, can't rotate). The horizon uses this.
-- Line properties dialog: color, thickness (cosmetic), dash style.
+- Line properties dialog: color, thickness (cosmetic), dash style. The same
+  thing from the console is `(format <line> <thickness> [<colour>] [<style>])`
+  → `LineItem.set_style()`, which the dialog now shares. Trailing arguments
+  may be omitted, a **list** of lines works, colours are hex or Qt names, and
+  styles are `solid`/`dashed`/`dotted`/`dash-dot`/`dash-dot-dot`. The pen
+  stays **cosmetic**, so thickness is screen pixels at any zoom.
 - Right-click a line → **Add Point to Line** adds a line-anchored point where
   you clicked (`CanvasScene.add_point_on_line_at`, which projects the click
   with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
@@ -228,13 +233,91 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 ## The console (S-expression CLI)
 
 - Commands are **S-expressions**; forms **return the element they create**, so
-  they compose: `(add line 260 (point L1 2/3))`.
-- Reader: `prism/sexpr.py` (supports `;` comments). Interpreter:
+  they compose: `(add-line 260 (point L1 2/3))`.
+- Reader: `prism/sexpr.py`. `;` starts a remark to end of line, **and ends an
+  atom**, as in lisp — so `(rm P1;why)` loses its `)` to the remark and reports
+  a missing bracket, which is what lisp does too. A `;` inside `"quoted text"`
+  is ordinary text, since the quote branch is tried first. Interpreter:
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
-  `(add line <angle> <point>)`, `(add line <point> <point>)`,
-  `(point <line> <fraction>)`, `(rm <element>)`, `(label <element> <text>)`,
-  `(label -auto|-clear)`, `(list [-points|-lines])`, `(help)`.
+  `(add-line <angle> <points>)`, `(add-line <points> <points>)`,
+  `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
+  `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
+  `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
+  `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(help)`.
+- **Lists and names** (first step of triangle support): `(list …)` gathers
+  elements into a Python list and **flattens** nested lists so they compose;
+  `(define <name> <value>)` binds it in `CommandInterpreter._variables`.
+  `_value()` resolves a bare word to a variable **before** falling through to
+  labels/ids, so a defined name shadows a label of the same text. `_each()`
+  applies a form to one element or to every element of a list — `rm`, `hide`,
+  `show` and `label` use it (`label` numbers them: `V1 V2 V3`). `(rm <list>)`
+  reads every name **before** removing anything, since ids are positional and
+  would otherwise all print as `P1`.
+  Variables are **in-memory only** — they don't survive a restart, while the
+  canvas does. A script that defines what it needs is the durable form.
+  A name outlives the elements it holds (clear the canvas, or `rm` a point),
+  so `_surviving()` drops anything no longer on the canvas when the name is
+  used, and says so plainly if nothing is left — otherwise the user sees
+  `Internal C++ object (PointItem) already deleted`. `_on_canvas()` checks
+  `shiboken6.isValid` **before** touching the wrapper at all.
+- **`(add-line …)` always takes lists.** It replaced `(add line …)` outright
+  — hyphenated, a form of its own rather than a kind of `add`, since `add`'s
+  other subforms take numbers and this one takes elements. One-element lists
+  are the plain case; longer ones draw the **cross product**, every point of
+  the first list joined to every point of the second, which is how a net grows
+  a round at a time. Bare points still work (`_flatten` treats one as a list of
+  one), and the canvas menus emit the explicit list form so a recorded script
+  teaches the shape. It reuses an existing side via `_join()`, skips a point
+  paired with itself, and refuses above `JOIN_LIMIT` pairs.
+  **`_existing_side()` is the dual of `lines-through`**: any line both points
+  are *recorded* as lying on is their join, not just one bound to both (a line
+  bound to both still wins). Two distinct points determine one line, so this is
+  geometry, not a heuristic — and it needs no tolerance, since the relation is
+  recorded rather than measured. The payoff is that the cross product needs no
+  iteration form: `(add-line (points-on L1) (points-off L1 tri))` draws exactly
+  the cevians, because each crossing is already joined to the two vertices of
+  the side that made it. `add-line` and `(join …)` both **dedupe** their
+  result, since one line can now answer for several pairs. `_only()` returns
+  the bare line when just one came of it, so a single join prints and composes
+  as it always did. `(add line …)` is kept **only** as an error that says where
+  it went.
+- **Functions** (`Lambda`, `(lambda …)`, `(map …)`): the language grows in
+  itself rather than in Python. `_eval` evaluates a **list head** (inline
+  application) and falls back to a *named* `Lambda` when the head isn't a
+  built-in form — built-ins win, so the language can't be shadowed. Nothing
+  needed adding to the reader: `_eval` never pre-evaluated arguments, so every
+  form was already a special form and a lambda body is just the raw
+  s-expressions kept for later.
+  `_scope` is a stack of parameter frames; `_lookup()` walks it innermost-first
+  then `_variables`, so parameters shadow defines which shadow labels. A
+  `Lambda` captures `list(self._scope)` at creation and `_apply` **replaces**
+  the stack with `callee.scope + [frame]` — lexical, not dynamic. That is why
+  depth needs its own counter (`_depth` / `CALL_LIMIT`): the scope stack never
+  grows for a function that calls itself, so counting frames would never catch
+  runaway recursion (it dies inside Python instead).
+  `_apply` also accepts a **built-in form's name**, so `(map hide …)` works;
+  `map` flattens results and, when they are all strings, joins them as a
+  message the way `_each` does. A `Lambda` is not a canvas item, so
+  `_surviving()` must return it untouched — `shiboken6.isValid` on a non-Qt
+  object is meaningless — and the Elements panel lists functions under their
+  own **Functions** heading.
+- `(clear)` empties the canvas but **keeps defined names and functions** — a
+  list prunes itself through `_surviving()` on next use, and a `Lambda` never
+  touched the canvas, so a script can clear and rebuild. The toolbar's Clear
+  goes through `run_as_command("(clear)")` like the canvas menus, so it is
+  written to the console; `clear_all()` already commits undo, so it is
+  reversible.
+- `(draw-triangle …)` takes three points **or a list of three** and joins
+  them pairwise, returning the sides as a list. `_join()` **reuses an existing
+  side** (a line bound to both points) rather than drawing a second one —
+  triangles in a net share edges constantly. Collinear points and a repeated
+  point are refused: in the projective sense three points on a line bound no
+  triangle.
+- The canvas inspector moved from `(list)` to **`(ls)`** so `(list …)` could
+  be the constructor. `(list)` and `(list -points)` now explain the move
+  rather than failing oddly. Nothing in saved scripts breaks: inspection
+  commands were always in `NON_RECORDING`.
 - `(label …)` delegates to `CanvasScene.label_element` / `auto_label` /
   `clear_labels`; the scene owns the convention (points upright, lines italic).
   `auto_label` and `clear_labels` now `commit_undo()` themselves — they didn't,
@@ -259,10 +342,38 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Library** (right): built-in templates (Triangle, Quadrilateral, Complete
   Quadrangle, Projectivity) + user-saved; drag onto canvas; save selection;
   right-click rename/delete; persisted via `prism/template_store.py`.
-- **Console** (bottom), **Selection** (left; live names + positions, matches
-  console naming via `CanvasScene.element_name`).
+- **Console** (bottom).
+- **Elements** (`prism/elements_panel.py`; left): a `QTreeWidget` of the whole
+  canvas — Points, Lines, Groups, and the names bound with `(define …)` (read
+  through `ConsolePanel.variables()`). Rows carry the console's own names, and
+  selection syncs **both ways** (a `_syncing` flag breaks the feedback loop).
+  Rebuilt on a 120ms single-shot timer off `scene.changed`, since that signal
+  fires per repaint and a drag is a flood of them.
+  **A row stores a *key*, never the item.** Qt keeps item data as a raw
+  pointer, so a row holding a scene item outlives it when the canvas is
+  cleared — and merely reading that data back reconstructs a wrapper around
+  freed memory, which **segfaults**, before any `shiboken6.isValid` check can
+  run. The key is `f"{kind}{_seq}"` (the creation number, stamped once and
+  stable, unlike positional ids), resolved against the live scene when
+  needed. Clearing with something selected used to kill the app this way. A section that has not
+  been shown before opens expanded; one shown before keeps its state
+  (`_seen_sections`). Its **objectName is still `SelectionPanel`**, which is
+  what Qt saves dock layouts against — renaming it would strand saved
+  layouts, so it stays. It replaced the old selection-only panel.
 - **Scripts** (right, tabbed with Library): the folder's `.prism` files in a
-  list, with an editor under it in a vertical splitter. **Run** executes the
+  list, with an editor under it in a vertical splitter. The editor is
+  `prism/script_editor.py`'s **`ScriptEditor`** — a `QPlainTextEdit` with a
+  line-number gutter (`_LineNumbers`, a plain child widget so it doesn't
+  scroll horizontally with the text). Numbers are drawn at `NUMBER_SCALE`
+  (0.75) of the text's size with a `NUMBER_MIN_PT` floor, which at the default
+  9pt means 7pt. Width is remeasured on `blockCountChanged` and whenever the
+  font changes — `setFont` is overridden for it, guarded with `getattr` since
+  Qt may call it before `_numbers` exists. The **current line's number is
+  bold and darker** (`CURRENT_NUMBER_COLOR`; bold alone is too quiet at 7pt),
+  repainted off `cursorPositionChanged` (the line losing currency
+  needs redrawing as much as the one gaining it, so the whole strip is
+  repainted). Width is measured with the **bold** font, the wider of the two,
+  so the gutter doesn't jostle as the cursor moves. **Run** executes the
   *editor's* text, not the file, so an edit can be tried before it's kept;
   Save / Revert / Refresh alongside. Unsaved edits mark the script *modified*
   and prompt (Save / Discard / Cancel) when you select another — Cancel puts
@@ -352,6 +463,33 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   handler directly will not catch this: they set `pos()` themselves. Drive a
   real `QContextMenuEvent` at `view.viewport()` instead
   (`scratchpad/real_path_check.py` pattern).
+- **Off-screen points are marked at the edge** (`CanvasView.drawForeground`
+  → `_draw_offscreen_points`): an arrow plus the point's name, drawn in
+  *device* coordinates (`setWorldMatrixEnabled(False)`) so it keeps its size.
+  Placed where the point's defining line leaves the view
+  (`_edge_towards` → `_rect_crossings`), falling back to straight out from the
+  middle for a point on no line; `_defining_lines()[:1]` picks **one** line
+  arbitrarily for a meet — refining that is open. Everything is drawn inside
+  the viewport (a tip past the edge is just clipped) and nudged aside from the
+  line so it doesn't sit on top of it. Hidden and undefined points get
+  nothing.
+- **A marker is clickable, and selects its point.** It is painted chrome, not
+  a scene item, so Qt's hit-testing knows nothing about it: `drawForeground`
+  records `(viewport rect, point)` per marker in `_offscreen_hits` (cleared at
+  the top of every `_draw_offscreen_points`, including the early return), and
+  `CanvasView.mousePressEvent` tests the click against that list before
+  handing on. The press is **accepted** and its release swallowed
+  (`_marker_press`), so no rubber band starts under the click and Qt doesn't
+  warn about an unpaired release. Only with the Select tool — the view now
+  tracks the tool in `_tool` — and Ctrl/Shift toggles rather than replaces. A
+  selected marker is drawn in the items' own selection orange
+  (`OFFSCREEN_SELECTED_COLOR`), and the cursor becomes a pointing hand over
+  one. The hit list is only as fresh as the last repaint, so a point may be
+  gone by the time it is clicked: `point_at_marker()` checks
+  `shiboken6.isValid` before returning one, since reading a dead wrapper
+  segfaults.
+- The view uses `FullViewportUpdate`, because an edge marker can change from
+  a scene change anywhere; the default partial updates left stale chrome.
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).
 - Delete/Backspace deletes; Ctrl+G/Ctrl+Shift+G group/ungroup; Ctrl+Z /
   Ctrl+Shift+Z undo/redo.
@@ -407,8 +545,49 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    display segments meet (`_intersection_of` uses `BoundedIntersection`), so
    near-parallel lines meeting off-canvas have no marker — what should a line
    depending on a vanished crossing do?
-2. **Higher-order console forms** — `fold`/map to build pencils/projectivities
-   programmatically.
+2. **Higher-order console forms** — **done as enumerators**: `(points)`,
+   `(lines)`, `(meets <lines>)`, `(join <points>)`, `(diff …)`,
+   `(take n …)`, `(last n …)`, `(repeat n <form>)`, `(intersect …)`,
+   `(lines-through <point>)` (→ `CanvasScene.lines_through`, the dual of
+   `meets`), and its own dual pair `(points-on <line> [<points>])` /
+   `(points-off …)`, which filter a list (or the whole canvas) by the same
+   recorded-relation rule, so the three forms always agree.
+   `_as_point`/`_as_line`/`_as_element` **unwrap a one-element list**
+   (`_one()`), so a filter returning a single element composes where that
+   element is wanted — `(point (take 1 (lines)) 1/2)`. Several or none
+   is reported with the elements named; `_describe()` keeps a raw Python
+   repr out of every message. `repeat` is a *special
+   form*: it keeps its argument unevaluated and re-evaluates it each round, so
+   `(points)` inside sees what the last round made. `(last …)` is the one that
+   grows a net — points come in creation order, so the tail is what the
+   previous step produced, while `(take …)` re-joins the seed and stalls.
+   `(intersect a b)` is the exact dual of `(diff …)` — same shape, matching on
+   `id()` — so the two **partition** the first list and
+   `(list (intersect a b) (diff a b))` rebuilds it. Neither dedupes, since
+   both filter the first list; `(list …)` concatenating without deduping is a
+   separate open question. There is still no `union`, and `join` is geometric,
+   not set-theoretic. **`(without …)` was renamed `(diff …)`** so the set
+   forms read as a family; the old name is kept only as an error saying where
+   it went, as `(add line …)` is.
+   `join` reuses an existing side (shared `_join` with `draw-triangle`) and
+   refuses above `JOIN_LIMIT` (300) lines, since n points pairwise is
+   n(n-1)/2 and their crossings multiply again; `repeat` caps at
+   `REPEAT_LIMIT` (100).
+   `lines_through` reports **recorded relations** (meet, binding, pivot,
+   range anchor, line anchor), not geometry — the user's call. Consequence
+   worth knowing: two lines crossing exactly at a *placed* point report
+   nothing, because `_intersection_of` skips making a meet where a point
+   already sits, so no relation exists to find. Building *through* a point
+   (pin or bind) records one.
+   `(draw-cevians <triangle> <line>)` is the first net step: for each
+   crossing of the line with a side, join it to the vertex *not* on that side
+   (the one with no edge to it). Reuses existing edges via `_existing_side`,
+   and refuses clearly when a side is parallel to the line or the triangle
+   isn't drawn. The three cevians are **not** concurrent — they form a second
+   triangle, which is the point of the construction.
+   Still open: a form for the harmonic step itself
+   (three collinear points → the fourth harmonic), which is what makes a net
+   *disciplined* rather than merely dense.
 3. Intersection-marker **visibility control** (dense nets get busy).
 4. Save/load a drawing to a file (scene_state is most of the way there).
 5. Possibly: promote/detach UX, snapping toggles, coordinate readout.

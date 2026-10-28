@@ -111,7 +111,7 @@ still meet there, so the point can't honestly be removed — but it can be got
 out of the way. Right-click blank canvas for **Show N Hidden Point(s)** when
 you want them back.
 
-`(list)` marks hidden points `[hidden]`, so nothing disappears without trace.
+`(ls)` marks hidden points `[hidden]`, so nothing disappears without trace.
 
 ### Point context menu (right-click)
 

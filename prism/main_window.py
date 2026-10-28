@@ -9,7 +9,7 @@ from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
 from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
-from prism.selection_panel import SelectionPanel
+from prism.elements_panel import ElementsPanel
 from prism.scene_state import capture, restore
 from prism.settings import (
     clear_window_layout,
@@ -52,8 +52,10 @@ class MainWindow(QMainWindow):
         # two ways of working produce the same echo and the same script.
         self.scene.set_command_runner(self.console.run_command)
 
-        self.selection = SelectionPanel(self.scene, self)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.selection)
+        self.elements = ElementsPanel(self.scene, self)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.elements)
+        # The console owns the interpreter, so the names come from there.
+        self.elements.set_variables_source(self.console.variables)
 
         self.scripts = ScriptsPanel(self.console.run_script, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.scripts)
@@ -120,6 +122,16 @@ class MainWindow(QMainWindow):
                 f"Couldn't reopen the last drawing: {exc}", 8000
             )
 
+    def _clear_canvas(self) -> None:
+        """Clear from the toolbar, through the console, so it joins the script.
+
+        Same bargain as the canvas menus: what you do by clicking is written
+        as the command that would have done it, and clearing still happens if
+        the console can't run it.
+        """
+        if not self.scene.run_as_command("(clear)"):
+            self.scene.clear_all()
+
     def _save_drawing(self) -> None:
         """Keep the canvas for next time."""
         try:
@@ -169,7 +181,7 @@ class MainWindow(QMainWindow):
 
         self.clear_action = QAction("Clear", self)
         self.clear_action.setToolTip("Clear the whole canvas")
-        self.clear_action.triggered.connect(self.scene.clear_all)
+        self.clear_action.triggered.connect(self._clear_canvas)
 
         self.undo_action = QAction("Undo", self)
         self.undo_action.setShortcut(QKeySequence.Undo)
@@ -253,9 +265,9 @@ class MainWindow(QMainWindow):
         toggle_scripts = self.scripts.toggleViewAction()
         toggle_scripts.setText("Show Scripts")
         view_menu.addAction(toggle_scripts)
-        toggle_selection = self.selection.toggleViewAction()
-        toggle_selection.setText("Show Selection")
-        view_menu.addAction(toggle_selection)
+        toggle_elements = self.elements.toggleViewAction()
+        toggle_elements.setText("Show Elements")
+        view_menu.addAction(toggle_elements)
         toggle_book = self.book.toggleViewAction()
         toggle_book.setText("Show Book")
         view_menu.addAction(toggle_book)

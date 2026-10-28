@@ -248,6 +248,30 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
             scene.recompute_intersections()
             scene.commit_undo()
 
+    def set_style(
+        self,
+        color: QColor | None = None,
+        width: float | None = None,
+        style: Qt.PenStyle | None = None,
+    ) -> None:
+        """Change how this line is drawn, leaving out what isn't given.
+
+        Args:
+            color: A QColor, or None to keep the current one.
+            width: Thickness in screen pixels (the pen is cosmetic), or None.
+            style: A Qt pen style, or None.
+        """
+        pen = QPen(self.pen())
+        if color is not None:
+            pen.setColor(color)
+        if width is not None:
+            pen.setWidthF(width)
+        if style is not None:
+            pen.setStyle(style)
+        pen.setCosmetic(True)  # keep thickness constant on screen
+        self.setPen(pen)
+        self.update()
+
     def open_line_style_dialog(self) -> None:
         from prism.line_dialog import LineStyleDialog
 

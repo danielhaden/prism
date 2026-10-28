@@ -15,13 +15,13 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
+from prism.script_editor import ScriptEditor
 from prism.settings import list_scripts, load_script, scripts_dir, write_script
 
 PATH_ROLE = Qt.UserRole
@@ -47,7 +47,7 @@ class ScriptsPanel(QDockWidget):
 
         mono = QFont("Menlo")
         mono.setStyleHint(QFont.Monospace)
-        self._editor = QPlainTextEdit()
+        self._editor = ScriptEditor()
         self._editor.setFont(mono)
         self._editor.setPlaceholderText("Select a script to edit it here.")
         self._editor.setEnabled(False)
