@@ -703,6 +703,8 @@ is read as much as it is written — to find the step that drew a line, or the
 round a net went wrong in — and an error that mentions a line is only useful
 when you can see which one it is. The gutter widens to fit the longest number,
 and the numbers are drawn smaller than the text so they stay out of the way.
+The number of the line the cursor is on is **bold**, so you can see where you
+are without hunting for the caret.
 
 | Button | What it does |
 |--------|--------------|

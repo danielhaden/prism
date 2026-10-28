@@ -368,7 +368,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (0.75) of the text's size with a `NUMBER_MIN_PT` floor, which at the default
   9pt means 7pt. Width is remeasured on `blockCountChanged` and whenever the
   font changes — `setFont` is overridden for it, guarded with `getattr` since
-  Qt may call it before `_numbers` exists. **Run** executes the
+  Qt may call it before `_numbers` exists. The **current line's number is
+  bold**, repainted off `cursorPositionChanged` (the line losing currency
+  needs redrawing as much as the one gaining it, so the whole strip is
+  repainted). Width is measured with the **bold** font, the wider of the two,
+  so the gutter doesn't jostle as the cursor moves. **Run** executes the
   *editor's* text, not the file, so an edit can be tried before it's kept;
   Save / Revert / Refresh alongside. Unsaved edits mark the script *modified*
   and prompt (Save / Discard / Cancel) when you select another — Cancel puts

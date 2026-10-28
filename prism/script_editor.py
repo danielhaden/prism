@@ -46,6 +46,9 @@ class ScriptEditor(QPlainTextEdit):
         self._numbers = _LineNumbers(self)
         self.blockCountChanged.connect(self._fit_gutter)
         self.updateRequest.connect(self._gutter_follows)
+        # The line that stops being current needs repainting as much as the
+        # one that becomes it, so repaint the lot — it is a narrow strip.
+        self.cursorPositionChanged.connect(self._numbers.update)
         self._fit_gutter()
 
     # -- Geometry ----------------------------------------------------------
@@ -63,10 +66,20 @@ class ScriptEditor(QPlainTextEdit):
             )
         return font
 
+    def current_number_font(self) -> QFont:
+        """The font for the line the cursor is on: the same, in bold."""
+        font = self.number_font()
+        font.setBold(True)
+        return font
+
     def line_number_width(self) -> int:
-        """How wide the gutter must be for the longest number in the script."""
+        """How wide the gutter must be for the longest number in the script.
+
+        Measured with the **bold** font, since that is the wider of the two:
+        the gutter must not jostle as the cursor moves from line to line.
+        """
         digits = max(2, len(str(max(1, self.blockCount()))))
-        advance = QFontMetrics(self.number_font()).horizontalAdvance("9")
+        advance = QFontMetrics(self.current_number_font()).horizontalAdvance("9")
         return advance * digits + 2 * self.GUTTER_PAD_PX
 
     def _fit_gutter(self, *_) -> None:
@@ -109,8 +122,10 @@ class ScriptEditor(QPlainTextEdit):
         """
         painter = QPainter(gutter)
         painter.fillRect(event.rect(), QColor(self.GUTTER_COLOR))
-        painter.setFont(self.number_font())
         painter.setPen(QColor(self.NUMBER_COLOR))
+        plain = self.number_font()
+        emphasised = self.current_number_font()
+        current = self.textCursor().blockNumber()
 
         block = self.firstVisibleBlock()
         number = block.blockNumber()
@@ -120,6 +135,7 @@ class ScriptEditor(QPlainTextEdit):
         while block.isValid() and top <= event.rect().bottom():
             height = self.blockBoundingRect(block).height()
             if block.isVisible() and top + height >= event.rect().top():
+                painter.setFont(emphasised if number == current else plain)
                 painter.drawText(
                     0,
                     int(top),
