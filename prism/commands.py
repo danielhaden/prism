@@ -112,6 +112,7 @@ class CommandInterpreter:
             "lines-through": self._form_lines_through,
             "points-on": self._form_points_on,
             "points-off": self._form_points_off,
+            "joined-to": self._form_joined_to,
             "join": self._form_join,
             "diff": self._form_diff,
             "intersect": self._form_intersect,
@@ -127,7 +128,8 @@ class CommandInterpreter:
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {
         "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
-        "points-off", "diff", "without", "intersect", "take", "last", "lambda",
+        "points-off", "joined-to", "diff", "without", "intersect", "take",
+        "last", "lambda",
     }
 
     def execute(self, text: str) -> str:
@@ -466,6 +468,7 @@ class CommandInterpreter:
             "  (lines-through <point>)     the lines it lies on\n"
             "  (points-on <line> [<pts>])  those that lie on it\n"
             "  (points-off <line> [<pts>]) those that do not\n"
+            "  (joined-to <point> [<pts>]) those sharing a line with it\n"
             "  (join <points>)             a line between every pair\n"
             "  (diff <list> <list>)        what is in the first but not the\n"
             "                              second\n"
@@ -881,6 +884,39 @@ class CommandInterpreter:
     def _form_points_off(self, args) -> list:
         """``(points-off L1 <points>)`` — those of them that do not."""
         return self._by_incidence(args, "points-off", on=False)
+
+    def _form_joined_to(self, args) -> list:
+        """``(joined-to P1 <points>)`` — those of them already sharing a line.
+
+        Asks of each candidate what :meth:`_existing_side` asks: does the
+        figure record a line that **both** points lie on? So it names the
+        points ``P1`` is already joined to, which is what
+        :meth:`_form_join` would decline to draw again.
+
+        With no list it considers the whole canvas. The point itself is never
+        in the answer — every line through it would qualify, which says
+        nothing. For the complement, take the difference:
+        ``(diff tri (joined-to P1 tri))``.
+
+        Returns:
+            The points sharing a line with it, in the order they were given.
+        """
+        if not args:
+            raise CommandError(
+                "Usage: (joined-to <point> [<points>])\n"
+                "  e.g. (joined-to P1 tri)   which vertices P1 has an edge to"
+            )
+        point = self._as_point(args[0])
+        candidates = (
+            self._flatten(args[1:], PointItem, "point")
+            if len(args) > 1
+            else list(self._points())
+        )
+        return [
+            other
+            for other in candidates
+            if other is not point and self._existing_side(point, other) is not None
+        ]
 
     def _by_incidence(self, args, form: str, on: bool) -> list:
         if not args:

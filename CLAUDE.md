@@ -573,6 +573,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    refuses above `JOIN_LIMIT` (300) lines, since n points pairwise is
    n(n-1)/2 and their crossings multiply again; `repeat` caps at
    `REPEAT_LIMIT` (100).
+   `(joined-to <point> [<points>])` names the points already sharing a line
+   with it, asking `_existing_side()` of each candidate — so it agrees by
+   construction with what `(join …)` and `(add-line …)` decline to redraw.
+   It never includes the point itself (every line through it would qualify),
+   and needs no complement form since `(diff …)` supplies one.
    `lines_through` reports **recorded relations** (meet, binding, pivot,
    range anchor, line anchor), not geometry — the user's call. Consequence
    worth knowing: two lines crossing exactly at a *placed* point report

@@ -542,11 +542,27 @@ let you talk about the canvas instead.
 | `(lines-through <point>)` | the lines that point lies on |
 | `(points-on <line> [<points>])` | of those, the ones on the line |
 | `(points-off <line> [<points>])` | of those, the ones that aren't |
+| `(joined-to <point> [<points>])` | of those, the ones sharing a line with it |
 | `(join <points>)` | a line between every pair of them |
 | `(diff <list> <list>)` | what is in the first but not the second |
 | `(intersect <list> <list>)` | what is in both |
 | `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
 | `(repeat <n> <form>)` | run a form n times |
+
+`(joined-to P1 …)` names the points `P1` **already has a line to** — the ones
+[`(join …)`](#join-points) would decline to draw again. It asks the figure the
+same question `(add-line …)` asks before drawing: is there a line both points
+are recorded as lying on?
+
+```
+(joined-to P1 tri)              # the vertices P1 has an edge to
+(joined-to P1)                  # across the whole canvas
+(diff tri (joined-to P1 tri))   # and the complement — who it is NOT joined to
+```
+
+The point itself is never in the answer: every line through it would qualify,
+which tells you nothing. There is no separate "not joined to" form because
+[`(diff …)`](#enumerators) already gives it.
 
 `(diff …)` and `(intersect …)` are exact counterparts — one keeps what the
 second list has, the other drops it — so between them they divide the first
