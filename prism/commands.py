@@ -114,6 +114,7 @@ class CommandInterpreter:
             "points-off": self._form_points_off,
             "join": self._form_join,
             "without": self._form_without,
+            "intersect": self._form_intersect,
             "take": self._form_take,
             "last": self._form_last,
             "repeat": self._form_repeat,
@@ -125,7 +126,7 @@ class CommandInterpreter:
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {
         "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
-        "points-off", "without", "take", "last", "lambda",
+        "points-off", "without", "intersect", "take", "last", "lambda",
     }
 
     def execute(self, text: str) -> str:
@@ -466,6 +467,7 @@ class CommandInterpreter:
             "  (points-off <line> [<pts>]) those that do not\n"
             "  (join <points>)             a line between every pair\n"
             "  (without <list> <list>)     the first minus the second\n"
+            "  (intersect <list> <list>)   what is in both\n"
             "  (take <n> <list>)           the first n of a list\n"
             "  (last <n> <list>)           the last n — what was just made\n"
             "  (repeat <n> <form>)         run a form n times\n"
@@ -930,6 +932,29 @@ class CommandInterpreter:
         keep = self._as_list(args[0])
         drop = {id(item) for item in self._as_list(args[1])}
         return [item for item in keep if id(item) not in drop]
+
+    def _form_intersect(self, args) -> list:
+        """``(intersect <list> <list>)`` — what is in both.
+
+        The exact counterpart of :meth:`_form_without`: it keeps the elements
+        of the first list that appear in the second, where that one drops
+        them. Between them they divide the first list in two, in its own
+        order, so ``(list (intersect a b) (without a b))`` is ``a`` again.
+
+        Elements are matched by **identity**, not by looking alike — two
+        points in the same place are two points.
+
+        Returns:
+            The shared elements, in the order the first list had them.
+        """
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (intersect <list> <list>)\n"
+                "  e.g. (intersect (points-on L1) (points-on L2))"
+            )
+        keep = self._as_list(args[0])
+        shared = {id(item) for item in self._as_list(args[1])}
+        return [item for item in keep if id(item) in shared]
 
     def _form_take(self, args) -> list:
         """``(take <n> <list>)`` — the first n of a list."""

@@ -544,8 +544,22 @@ let you talk about the canvas instead.
 | `(points-off <line> [<points>])` | of those, the ones that aren't |
 | `(join <points>)` | a line between every pair of them |
 | `(without <list> <list>)` | the first list, minus the second |
+| `(intersect <list> <list>)` | what is in both |
 | `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
 | `(repeat <n> <form>)` | run a form n times |
+
+`(without …)` and `(intersect …)` are exact counterparts — one keeps what the
+second list has, the other drops it — so between them they divide the first
+list in two, in its own order:
+
+```
+(intersect (points-on L1) (points-on L2))   # the point both lines carry
+(intersect (lines-through P1) (lines-through P2))   # the line joining them
+```
+
+Elements match by **identity**, not by looking alike: two points in the same
+place are two points. Note that `(join …)` is *not* a set operation — it draws
+a line between every pair of points.
 
 `(repeat …)` re-evaluates its form each round, so anything reading the canvas
 sees what the round before it made. **You never add the points** — Prism

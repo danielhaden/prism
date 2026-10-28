@@ -535,7 +535,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    depending on a vanished crossing do?
 2. **Higher-order console forms** — **done as enumerators**: `(points)`,
    `(lines)`, `(meets <lines>)`, `(join <points>)`, `(without …)`,
-   `(take n …)`, `(last n …)`, `(repeat n <form>)`,
+   `(take n …)`, `(last n …)`, `(repeat n <form>)`, `(intersect …)`,
    `(lines-through <point>)` (→ `CanvasScene.lines_through`, the dual of
    `meets`), and its own dual pair `(points-on <line> [<points>])` /
    `(points-off …)`, which filter a list (or the whole canvas) by the same
@@ -549,6 +549,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    `(points)` inside sees what the last round made. `(last …)` is the one that
    grows a net — points come in creation order, so the tail is what the
    previous step produced, while `(take …)` re-joins the seed and stalls.
+   `(intersect a b)` is the exact dual of `without` — same shape, matching on
+   `id()` — so the two **partition** the first list and
+   `(list (intersect a b) (without a b))` rebuilds it. Neither dedupes, since
+   both filter the first list; `(list …)` concatenating without deduping is a
+   separate open question. There is still no `union`, and `join` is geometric,
+   not set-theoretic.
    `join` reuses an existing side (shared `_join` with `draw-triangle`) and
    refuses above `JOIN_LIMIT` (300) lines, since n points pairwise is
    n(n-1)/2 and their crossings multiply again; `repeat` caps at
