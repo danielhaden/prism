@@ -543,12 +543,12 @@ let you talk about the canvas instead.
 | `(points-on <line> [<points>])` | of those, the ones on the line |
 | `(points-off <line> [<points>])` | of those, the ones that aren't |
 | `(join <points>)` | a line between every pair of them |
-| `(without <list> <list>)` | the first list, minus the second |
+| `(diff <list> <list>)` | what is in the first but not the second |
 | `(intersect <list> <list>)` | what is in both |
 | `(take <n> <list>)` / `(last <n> <list>)` | the first or last n |
 | `(repeat <n> <form>)` | run a form n times |
 
-`(without …)` and `(intersect …)` are exact counterparts — one keeps what the
+`(diff …)` and `(intersect …)` are exact counterparts — one keeps what the
 second list has, the other drops it — so between them they divide the first
 list in two, in its own order:
 
@@ -560,6 +560,10 @@ list in two, in its own order:
 Elements match by **identity**, not by looking alike: two points in the same
 place are two points. Note that `(join …)` is *not* a set operation — it draws
 a line between every pair of points.
+
+!!! note "`(diff …)` used to be `(without …)`"
+    Renamed so the set operations read as a family alongside
+    `(intersect …)`. The old spelling says so if you type it.
 
 `(repeat …)` re-evaluates its form each round, so anything reading the canvas
 sees what the round before it made. **You never add the points** — Prism
@@ -589,7 +593,7 @@ the seed you started from, which quickly does nothing at all.
     `n` points joined pairwise is `n(n-1)/2` lines — 20 points is 190, 30 is
     435 — and those lines cross in far more places again. `(join …)` refuses
     above 300 lines and tells you the count; narrow the list with
-    `(take …)`, `(last …)` or `(without …)` and join a part of it. A net of
+    `(take …)`, `(last …)` or `(diff …)` and join a part of it. A net of
     harmonicity is a *disciplined* construction, not everything joined to
     everything.
 
@@ -643,7 +647,7 @@ To reach exactly what a step created, keep a mark and subtract:
 ```
 (define before (points))
 (join (last 4 (points)))
-(without (points) before)      # just the new crossings
+(diff (points) before)         # just the new crossings
 ```
 
 ## Clicking writes the script

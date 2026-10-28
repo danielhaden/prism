@@ -113,8 +113,9 @@ class CommandInterpreter:
             "points-on": self._form_points_on,
             "points-off": self._form_points_off,
             "join": self._form_join,
-            "without": self._form_without,
+            "diff": self._form_diff,
             "intersect": self._form_intersect,
+            "without": self._form_without_moved,
             "take": self._form_take,
             "last": self._form_last,
             "repeat": self._form_repeat,
@@ -126,7 +127,7 @@ class CommandInterpreter:
     #: Forms that only inspect; they aren't worth recording into a script.
     NON_RECORDING = {
         "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
-        "points-off", "without", "intersect", "take", "last", "lambda",
+        "points-off", "diff", "without", "intersect", "take", "last", "lambda",
     }
 
     def execute(self, text: str) -> str:
@@ -466,7 +467,8 @@ class CommandInterpreter:
             "  (points-on <line> [<pts>])  those that lie on it\n"
             "  (points-off <line> [<pts>]) those that do not\n"
             "  (join <points>)             a line between every pair\n"
-            "  (without <list> <list>)     the first minus the second\n"
+            "  (diff <list> <list>)        what is in the first but not the\n"
+            "                              second\n"
             "  (intersect <list> <list>)   what is in both\n"
             "  (take <n> <list>)           the first n of a list\n"
             "  (last <n> <list>)           the last n — what was just made\n"
@@ -580,7 +582,7 @@ class CommandInterpreter:
             raise CommandError(
                 f"That would draw up to {pairs} lines, from {len(starts)} "
                 f"points to {len(ends)} (the limit is {self.JOIN_LIMIT}). "
-                "Narrow the lists — (take …) or (without …) — and draw a part "
+                "Narrow the lists — (take …) or (diff …) — and draw a part "
                 "of them."
             )
         drawn = []
@@ -912,7 +914,7 @@ class CommandInterpreter:
             raise CommandError(
                 f"That would draw {pairs} lines from {len(points)} points "
                 f"(the limit is {self.JOIN_LIMIT}). Narrow the list — (take …) "
-                "or (without …) — and join a part of it."
+                "or (diff …) — and join a part of it."
             )
         drawn = []
         for first in range(len(points)):
@@ -925,21 +927,43 @@ class CommandInterpreter:
                     drawn.append(line)
         return drawn
 
-    def _form_without(self, args) -> list:
-        """``(without <list> <list>)`` — the first list, minus the second."""
+    def _form_diff(self, args) -> list:
+        """``(diff <list> <list>)`` — what is in the first but not the second.
+
+        Set difference, and the exact counterpart of
+        :meth:`_form_intersect`: this drops the elements the second list has,
+        where that one keeps them. Between them they divide the first list in
+        two, in its own order.
+
+        Elements are matched by **identity**, not by looking alike — two
+        points in the same place are two points.
+
+        Returns:
+            What is left, in the order the first list had it.
+        """
         if len(args) != 2:
-            raise CommandError("Usage: (without <list> <list>)")
+            raise CommandError(
+                "Usage: (diff <list> <list>)\n"
+                "  e.g. (diff (points) (points-on L1))"
+            )
         keep = self._as_list(args[0])
         drop = {id(item) for item in self._as_list(args[1])}
         return [item for item in keep if id(item) not in drop]
 
+    def _form_without_moved(self, args):
+        """``(without …)`` was renamed, to sit with the other set forms."""
+        raise CommandError(
+            "(without …) is now (diff …), to go with (intersect …):\n"
+            "  (diff a b)   what is in a but not in b"
+        )
+
     def _form_intersect(self, args) -> list:
         """``(intersect <list> <list>)`` — what is in both.
 
-        The exact counterpart of :meth:`_form_without`: it keeps the elements
+        The exact counterpart of :meth:`_form_diff`: it keeps the elements
         of the first list that appear in the second, where that one drops
         them. Between them they divide the first list in two, in its own
-        order, so ``(list (intersect a b) (without a b))`` is ``a`` again.
+        order, so ``(list (intersect a b) (diff a b))`` is ``a`` again.
 
         Elements are matched by **identity**, not by looking alike — two
         points in the same place are two points.

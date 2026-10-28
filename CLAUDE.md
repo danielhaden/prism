@@ -546,7 +546,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    near-parallel lines meeting off-canvas have no marker — what should a line
    depending on a vanished crossing do?
 2. **Higher-order console forms** — **done as enumerators**: `(points)`,
-   `(lines)`, `(meets <lines>)`, `(join <points>)`, `(without …)`,
+   `(lines)`, `(meets <lines>)`, `(join <points>)`, `(diff …)`,
    `(take n …)`, `(last n …)`, `(repeat n <form>)`, `(intersect …)`,
    `(lines-through <point>)` (→ `CanvasScene.lines_through`, the dual of
    `meets`), and its own dual pair `(points-on <line> [<points>])` /
@@ -561,12 +561,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    `(points)` inside sees what the last round made. `(last …)` is the one that
    grows a net — points come in creation order, so the tail is what the
    previous step produced, while `(take …)` re-joins the seed and stalls.
-   `(intersect a b)` is the exact dual of `without` — same shape, matching on
+   `(intersect a b)` is the exact dual of `(diff …)` — same shape, matching on
    `id()` — so the two **partition** the first list and
-   `(list (intersect a b) (without a b))` rebuilds it. Neither dedupes, since
+   `(list (intersect a b) (diff a b))` rebuilds it. Neither dedupes, since
    both filter the first list; `(list …)` concatenating without deduping is a
    separate open question. There is still no `union`, and `join` is geometric,
-   not set-theoretic.
+   not set-theoretic. **`(without …)` was renamed `(diff …)`** so the set
+   forms read as a family; the old name is kept only as an error saying where
+   it went, as `(add line …)` is.
    `join` reuses an existing side (shared `_join` with `draw-triangle`) and
    refuses above `JOIN_LIMIT` (300) lines, since n points pairwise is
    n(n-1)/2 and their crossings multiply again; `repeat` caps at
