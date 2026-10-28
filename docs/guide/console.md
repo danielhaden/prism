@@ -698,6 +698,12 @@ script in your scripts folder, with an **editor** below the list. Select a
 script and its text appears there; drag the divider to give the list or the
 editor more room.
 
+The editor **numbers its lines** in a small grey gutter on the left. A script
+is read as much as it is written — to find the step that drew a line, or the
+round a net went wrong in — and an error that mentions a line is only useful
+when you can see which one it is. The gutter widens to fit the longest number,
+and the numbers are drawn smaller than the text so they stay out of the way.
+
 | Button | What it does |
 |--------|--------------|
 | **Run** | Execute what's in the editor; commands and output are echoed to the console |

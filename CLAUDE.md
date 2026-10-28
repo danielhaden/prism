@@ -361,7 +361,14 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   what Qt saves dock layouts against — renaming it would strand saved
   layouts, so it stays. It replaced the old selection-only panel.
 - **Scripts** (right, tabbed with Library): the folder's `.prism` files in a
-  list, with an editor under it in a vertical splitter. **Run** executes the
+  list, with an editor under it in a vertical splitter. The editor is
+  `prism/script_editor.py`'s **`ScriptEditor`** — a `QPlainTextEdit` with a
+  line-number gutter (`_LineNumbers`, a plain child widget so it doesn't
+  scroll horizontally with the text). Numbers are drawn at `NUMBER_SCALE`
+  (0.75) of the text's size with a `NUMBER_MIN_PT` floor, which at the default
+  9pt means 7pt. Width is remeasured on `blockCountChanged` and whenever the
+  font changes — `setFont` is overridden for it, guarded with `getattr` since
+  Qt may call it before `_numbers` exists. **Run** executes the
   *editor's* text, not the file, so an edit can be tried before it's kept;
   Save / Revert / Refresh alongside. Unsaved edits mark the script *modified*
   and prompt (Save / Discard / Cancel) when you select another — Cancel puts
