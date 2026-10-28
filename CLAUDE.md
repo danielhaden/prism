@@ -461,6 +461,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   the viewport (a tip past the edge is just clipped) and nudged aside from the
   line so it doesn't sit on top of it. Hidden and undefined points get
   nothing.
+- **A marker is clickable, and selects its point.** It is painted chrome, not
+  a scene item, so Qt's hit-testing knows nothing about it: `drawForeground`
+  records `(viewport rect, point)` per marker in `_offscreen_hits` (cleared at
+  the top of every `_draw_offscreen_points`, including the early return), and
+  `CanvasView.mousePressEvent` tests the click against that list before
+  handing on. The press is **accepted** and its release swallowed
+  (`_marker_press`), so no rubber band starts under the click and Qt doesn't
+  warn about an unpaired release. Only with the Select tool — the view now
+  tracks the tool in `_tool` — and Ctrl/Shift toggles rather than replaces. A
+  selected marker is drawn in the items' own selection orange
+  (`OFFSCREEN_SELECTED_COLOR`), and the cursor becomes a pointing hand over
+  one. The hit list is only as fresh as the last repaint, so a point may be
+  gone by the time it is clicked: `point_at_marker()` checks
+  `shiboken6.isValid` before returning one, since reading a dead wrapper
+  segfaults.
 - The view uses `FullViewportUpdate`, because an edge marker can change from
   a scene change anywhere; the default partial updates left stale chrome.
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).

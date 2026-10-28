@@ -82,6 +82,21 @@ instead.
 A point that is [hidden](points-and-lines.md#hiding-a-point) gets no marker —
 hidden means hidden.
 
+### Selecting one
+
+**Click a marker** — the name or its arrow — and the point it names is
+selected, exactly as if you had clicked the point itself. The marker turns the
+selection orange, the row highlights in the **Elements** panel, and everything
+that works on a selection now reaches a point you cannot see: delete it, label
+it, draw a line through it, or pick two and join them.
+
+The cursor becomes a pointing hand over a marker, so you can tell which bits of
+the edge are live.
+
+++ctrl++-click adds a marker's point to the selection or takes it back out, the
+same as ++ctrl++-clicking on the canvas. Markers are only clickable with the
+**Select** tool — in Point or Line mode a click is for drawing.
+
 !!! note "One line is picked for you"
     A point where several lines cross could be marked against any of them.
     Prism picks one for now.

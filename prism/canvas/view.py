@@ -2,10 +2,12 @@
 
 import math
 
+import shiboken6
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPolygonF
 from PySide6.QtWidgets import QGraphicsView
 
+from prism.items import PointItem
 from prism.templates import TEMPLATE_MIME, deserialize, instantiate
 from prism.tools import Tool
 
@@ -23,9 +25,14 @@ class CanvasView(QGraphicsView):
     #: Chrome for a point that is defined but off-screen: an arrow at the edge
     #: pointing the way, with the point's name.
     OFFSCREEN_COLOR = "#5f5f5f"
+    #: The selection orange the items themselves use, so a selected marker
+    #: reads the same as a selected point.
+    OFFSCREEN_SELECTED_COLOR = "#ff7f0e"
     OFFSCREEN_ARROW_PX = 9.0
     OFFSCREEN_MARGIN_PX = 3.0
     OFFSCREEN_ASIDE_PX = 9.0
+    #: Slack around a marker's drawn shape, so it can be aimed at comfortably.
+    OFFSCREEN_HIT_PAD_PX = 4.0
 
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
@@ -41,6 +48,14 @@ class CanvasView(QGraphicsView):
         # anywhere can alter them; repaint the lot rather than track it.
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self._fitted = False
+        #: Where each off-screen marker was last drawn, as
+        #: ``[(viewport rect, point), …]``. A marker is painted chrome rather
+        #: than a scene item, so Qt's hit-testing knows nothing about it and
+        #: the view has to answer clicks on one itself.
+        self._offscreen_hits: list = []
+        self._tool = Tool.SELECT
+        self._marker_cursor = False
+        self._marker_press = False
 
     # -- Zoom limits -------------------------------------------------------
 
@@ -122,6 +137,7 @@ class CanvasView(QGraphicsView):
         arrow at the edge pointing its way, with its name, placed where the
         line it sits on leaves the view so you can follow that line to it.
         """
+        self._offscreen_hits = []
         scene = self.scene()
         if scene is None or not hasattr(scene, "ordered_points"):
             return
@@ -136,9 +152,13 @@ class CanvasView(QGraphicsView):
 
         painter.save()
         painter.setWorldMatrixEnabled(False)  # from here on, viewport pixels
-        colour = QColor(self.OFFSCREEN_COLOR)
         metrics = QFontMetrics(painter.font())
         for point in away:
+            colour = QColor(
+                self.OFFSCREEN_SELECTED_COLOR
+                if point.isSelected()
+                else self.OFFSCREEN_COLOR
+            )
             self._draw_offscreen_marker(painter, point, visible, colour, metrics)
         painter.restore()
 
@@ -162,11 +182,10 @@ class CanvasView(QGraphicsView):
         base = tip - direction * self.OFFSCREEN_ARROW_PX
         painter.setPen(Qt.NoPen)
         painter.setBrush(colour)
-        painter.drawPolygon(
-            QPolygonF(
-                [tip, base + perpendicular * 4.0, base - perpendicular * 4.0]
-            )
+        arrow = QPolygonF(
+            [tip, base + perpendicular * 4.0, base - perpendicular * 4.0]
         )
+        painter.drawPolygon(arrow)
 
         name = self.scene().element_name(point)
         width = metrics.horizontalAdvance(name)
@@ -181,6 +200,13 @@ class CanvasView(QGraphicsView):
         box.moveTop(min(max(box.top(), bounds.top()), bounds.bottom() - height))
         painter.setPen(colour)
         painter.drawText(box, Qt.AlignCenter, name)
+
+        # Remember where this landed, so a click on it can find the point.
+        pad = self.OFFSCREEN_HIT_PAD_PX
+        self._offscreen_hits.append(
+            (box.united(arrow.boundingRect()).adjusted(-pad, -pad, pad, pad),
+             point)
+        )
 
     def _edge_towards(self, point, visible: QRectF):
         """Where to put the marker, in scene coordinates.
@@ -207,8 +233,66 @@ class CanvasView(QGraphicsView):
             return [anchor.line]
         return []
 
+    def point_at_marker(self, position: QPointF) -> PointItem | None:
+        """The off-screen point whose edge marker lies under a viewport point.
+
+        Args:
+            position: Where the mouse is, in viewport coordinates.
+
+        Returns:
+            The point that marker names, or None if no marker is there.
+        """
+        for rect, point in reversed(self._offscreen_hits):
+            # The list is only as fresh as the last repaint, so a point may
+            # have gone since; reading a dead wrapper is a segfault.
+            if rect.contains(position) and shiboken6.isValid(point):
+                return point
+        return None
+
+    def _select_offscreen(self, event) -> bool:
+        """Select the point an edge marker names, if a marker was clicked.
+
+        Chrome at the edge is the only sign of a point that has scrolled off
+        the canvas, so it is the natural thing to click at: without this the
+        point can only be reached from the Elements panel.
+
+        Args:
+            event: The mouse press.
+
+        Returns:
+            Whether a marker took the click.
+        """
+        if self._tool != Tool.SELECT:
+            return False  # in a drawing tool a click is for drawing
+        point = self.point_at_marker(event.position())
+        if point is None:
+            return False
+        if event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):
+            point.setSelected(not point.isSelected())
+        else:
+            scene = self.scene()
+            if scene is not None:
+                scene.clearSelection()
+            point.setSelected(True)
+        self.viewport().update()
+        return True
+
+    def _track_marker_cursor(self, event) -> None:
+        """Point the cursor at a marker, so it reads as something to click."""
+        over = self._tool == Tool.SELECT and (
+            self.point_at_marker(event.position()) is not None
+        )
+        if over == self._marker_cursor:
+            return
+        self._marker_cursor = over
+        if over:
+            self.viewport().setCursor(Qt.PointingHandCursor)
+        else:
+            self.viewport().unsetCursor()
+
     def apply_tool(self, tool: Tool) -> None:
         """Sync the view's drag mode with the active tool."""
+        self._tool = tool
         if tool == Tool.SELECT:
             self.setDragMode(QGraphicsView.RubberBandDrag)
         else:
@@ -275,17 +359,29 @@ class CanvasView(QGraphicsView):
         if event.button() == Qt.MiddleButton:
             self._start_pan(event)
             return
+        if event.button() == Qt.LeftButton and self._select_offscreen(event):
+            # Swallow the press so no rubber band starts on top of it, and
+            # remember to swallow the release too — an unpaired release is
+            # both a Qt warning and a half-finished gesture.
+            self._marker_press = True
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if getattr(self, "_panning", False):
             self._pan_to(event)
             return
+        self._track_marker_cursor(event)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MiddleButton and getattr(self, "_panning", False):
             self._end_pan()
+            return
+        if event.button() == Qt.LeftButton and self._marker_press:
+            self._marker_press = False
+            event.accept()
             return
         super().mouseReleaseEvent(event)
 
