@@ -369,7 +369,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   9pt means 7pt. Width is remeasured on `blockCountChanged` and whenever the
   font changes — `setFont` is overridden for it, guarded with `getattr` since
   Qt may call it before `_numbers` exists. The **current line's number is
-  bold**, repainted off `cursorPositionChanged` (the line losing currency
+  bold and darker** (`CURRENT_NUMBER_COLOR`; bold alone is too quiet at 7pt),
+  repainted off `cursorPositionChanged` (the line losing currency
   needs redrawing as much as the one gaining it, so the whole strip is
   repainted). Width is measured with the **bold** font, the wider of the two,
   so the gutter doesn't jostle as the cursor moves. **Run** executes the

@@ -37,6 +37,9 @@ class ScriptEditor(QPlainTextEdit):
     #: Never shrink past this, or they stop being legible at all.
     NUMBER_MIN_PT = 7.0
     NUMBER_COLOR = "#a0a0a0"
+    #: The line the cursor is on, which is also drawn bold. Bold alone is
+    #: too quiet a signal at this size.
+    CURRENT_NUMBER_COLOR = "#555555"
     GUTTER_COLOR = "#f4f4f4"
     #: Space either side of the digits.
     GUTTER_PAD_PX = 6
@@ -122,9 +125,10 @@ class ScriptEditor(QPlainTextEdit):
         """
         painter = QPainter(gutter)
         painter.fillRect(event.rect(), QColor(self.GUTTER_COLOR))
-        painter.setPen(QColor(self.NUMBER_COLOR))
         plain = self.number_font()
         emphasised = self.current_number_font()
+        quiet = QColor(self.NUMBER_COLOR)
+        loud = QColor(self.CURRENT_NUMBER_COLOR)
         current = self.textCursor().blockNumber()
 
         block = self.firstVisibleBlock()
@@ -135,7 +139,9 @@ class ScriptEditor(QPlainTextEdit):
         while block.isValid() and top <= event.rect().bottom():
             height = self.blockBoundingRect(block).height()
             if block.isVisible() and top + height >= event.rect().top():
-                painter.setFont(emphasised if number == current else plain)
+                here = number == current
+                painter.setFont(emphasised if here else plain)
+                painter.setPen(loud if here else quiet)
                 painter.drawText(
                     0,
                     int(top),
