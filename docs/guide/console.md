@@ -208,6 +208,12 @@ Nothing is created: Prism already keeps a point wherever lines cross, so this
 *finds* it — and shows it if you had [hidden](points-and-lines.md#hiding-a-point)
 it. Making a second point there would be the same point twice.
 
+A point you **placed** first and then drew both lines through counts too: it
+is no less the meeting of those lines for having been there first, and no
+crossing is recorded on top of it. What is asked either way is what the figure
+*records* — a line merely passing through a point, with no relation to it, is
+not an answer.
+
 If the two don't cross on the canvas — parallel, or meeting off it — the
 command says so rather than inventing a point.
 
@@ -309,24 +315,55 @@ produces points wherever lines happen to cross, and multiplies out of hand;
 the harmonic step yields **one** new point from three you chose, so a figure
 grows by construction rather than by accident.
 
-It is built by the **complete quadrangle**, not from coordinates — with an
-apex `P` off the line and `Q` on `PC`:
+It is built from **incidence**, not from coordinates — no lengths anywhere,
+which is why it is projective — and `D` comes out a genuine **crossing**, so
+it joins the dependency graph and follows `A`, `B` and `C` when they move.
+
+#### The triangle you already drew
+
+Three points land on one line most often because a **triangle** cuts it, each
+of `A`, `B` and `C` being where one side crosses. That triangle is already
+three quarters of the quadrangle a fourth harmonic needs, so Prism finishes it
+rather than building a scaffold beside it. Name each vertex for the two points
+whose sides meet there:
+
+```
+S = (Vbc A) ∩ (Vca B)        D = (Vab S) ∩ base
+```
+
+`Vab`, `Vbc`, `Vca` and `S` are a complete quadrangle with `A` and `B` as two
+of its diagonal points, so its last pair of opposite sides — `Vbc Vca`, which
+is `C`'s own side, and `Vab S` — cut the base in two points separated
+harmonically by `A` and `B`. One of them is `C`; the other is `D`.
+
+That costs **one** new point and three lines. Building a quadrangle from
+scratch instead costs four points and six, and every one of them crosses the
+triangle again on the way, which is how a single step used to leave a dozen
+markers behind.
+
+#### When there is no triangle
+
+Failing a triangle — three points placed along a line, say — a quadrangle is
+built on an apex `P` off the line, with `Q` on `PC`:
 
 - `S = AP ∩ BQ` and `R = AQ ∩ BP`
 - `D = RS ∩ AB`
 
-so the scaffolding is drawn, and `D` is a genuine **crossing**: it joins the
-dependency graph and follows `A`, `B` and `C` when they move. The construction
-needs no lengths, only incidence — which is why it is projective.
+`P` is arbitrary. Give one as a fourth argument, which always takes this
+route, or let Prism place one; the same `D` comes out either way, and that is
+exactly what makes the fourth harmonic well-defined.
 
-`P` is arbitrary. Give one as a fourth argument or let Prism place one; the
-same `D` comes out either way, and that is exactly what makes the fourth
-harmonic well-defined.
+!!! note "The midpoint's conjugate is at infinity"
+    When `C` is the **midpoint** of `AB`, the last side comes out parallel to
+    the base and `D` is the base line's point at infinity —
+    `(ideal-point <base>)`. Prism says so rather than guessing.
 
-!!! warning "The midpoint has no conjugate here"
-    When `C` is the **midpoint** of `AB`, `RS` comes out parallel to the base
-    line and `D` is the point at infinity. Prism has no way to represent that
-    yet, so it says so rather than guessing.
+!!! warning "Two reasons it will refuse"
+    `D` may fall **outside the working area**, which happens as `C` nears the
+    midpoint and `D` runs off along the line; or it may land **within
+    snapping distance** of `A`, `B` or `C`, where the canvas would record one
+    point in place of two — zoom in, since snapping is a fixed distance on
+    screen, or spread the figure out. Either way nothing is drawn.
 
 ### `(ideal-point <line>)`
 

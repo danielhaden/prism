@@ -59,6 +59,35 @@ def dependencies_of(item: Geometry) -> list:
     return found
 
 
+def computed_from(item: Geometry, source: Geometry) -> bool:
+    """Whether ``item``'s position is worked out, in the end, from ``source``.
+
+    Walks the same relationships :func:`dependencies_of` reads, as far as it
+    has to. A graph is not built: the question comes up while the scene is
+    being brought up to date, where it is asked of one pair at a time and the
+    chains are short.
+
+    Args:
+        item: The item whose dependencies to follow.
+        source: The item to look for among them.
+
+    Returns:
+        Whether ``source`` is one of them, at any remove.
+    """
+    seen: set[int] = set()
+    queue = [item]
+    while queue:
+        current = queue.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        for dependency in dependencies_of(current):
+            if dependency is source:
+                return True
+            queue.append(dependency)
+    return False
+
+
 class DependencyGraph:
     """Which pieces of geometry are computed from which others.
 

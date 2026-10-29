@@ -580,7 +580,18 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    never stored.
    (3) `CanvasScene.would_cycle()` guards the three places an existing item
    gains a dependency: `pin_lines_through`, `anchor_points_to_line` and
-   endpoint-drag binding in `LineItem`. Making *new* geometry never needs the
+   endpoint-drag binding in `LineItem`.
+   (3b) One cycle got past all three, because nothing *asked* for it: draw a
+   line **from** a crossing and it passes through that place, so
+   `recompute_intersections` added it to the crossing's own `MeetAnchor` —
+   each then computed from the other. A cycle is left out of `update_order`,
+   so the line went stale and the crossing drifted off the lines it was the
+   crossing of (0.1–5 units, growing with the drag). Every `(harmonic …)`,
+   every `(draw-cevians …)`, any join to a crossing. `_defining_lines()`
+   filters the lines at a place down to those not computed from the point —
+   `dependencies.computed_from()`, a short DFS, no graph build — and keeps at
+   least the two it was made from. A crossing is defined by what was already
+   there; a line hung from it is downstream. Making *new* geometry never needs the
    check — nothing can depend on it yet. (4) Guards lifted in `resolve_point`,
    `_as_point`, `selected_points`, `snap_target` and the point context menu.
    **This item is done.** What is left is polish, not plumbing: marker
@@ -628,10 +639,12 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    and needs no complement form since `(diff …)` supplies one.
    `lines_through` reports **recorded relations** (meet, binding, pivot,
    range anchor, line anchor), not geometry — the user's call. Consequence
-   worth knowing: two lines crossing exactly at a *placed* point report
-   nothing, because `_intersection_of` skips making a meet where a point
-   already sits, so no relation exists to find. Building *through* a point
-   (pin or bind) records one.
+   worth knowing: `_intersection_of` skips making a meet where a point
+   already sits, so two lines crossing exactly at a *placed* point record no
+   crossing of their own. `CommandInterpreter._shared_point()` is the dual of
+   `_existing_side()` and asks the wider question — *which point does the
+   figure record on both lines?* — so it finds the placed vertex as well as
+   the crossing. `(point L1 L2)` and `(draw-cevians …)` go through it.
    `(draw-cevians <triangle> <line>)` is the first net step: for each
    crossing of the line with a side, join it to the vertex *not* on that side
    (the one with no edge to it). Reuses existing edges via `_existing_side`,
@@ -640,14 +653,29 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    triangle, which is the point of the construction.
    **`(harmonic A B C [P])` is that harmonic step — done.** `D` is the point
    with cross-ratio `(A,B;C,D) = -1`; closed form
-   `d = (c(a+b) - 2ab) / (2c - a - b)`, undefined exactly when `C` is the
-   midpoint (the conjugate is then at infinity, which Prism still cannot
-   represent — it says so). It is built by the **complete quadrangle**
-   (`S = AP x BQ`, `R = AQ x BP`, `D = RS x AB`) rather than from that
-   formula, deliberately: `D` is then a real crossing, so it is in the
-   dependency graph and follows A, B, C as they move. The apex is arbitrary
-   — `_harmonic_apex()` places one perpendicular to the base from the
-   midpoint of AB, and a given apex gives the same `D` to 6dp (tested).
+   `d = (c(a+b) - 2ab) / (2c - a - b)`, which goes to infinity exactly when
+   `C` is the midpoint — the conjugate is then the base line's ideal point,
+   and `harmonic` names `(ideal-point <base>)` rather than guessing. It is
+   built by **incidence** rather than from that formula, deliberately: `D` is
+   then a real crossing, so it is in the dependency graph and follows A, B, C
+   as they move (tested across four drags).
+   A fourth harmonic needs a complete quadrangle with `A` and `B` among its
+   diagonal points, and the commonest way three points land on one line — a
+   **triangle cut by a transversal** — supplies three of its four vertices
+   already. `_harmonic_from_figure()` takes that route: with `Vab`, `Vbc`,
+   `Vca` the triangle's vertices, named for the two points whose sides meet
+   there, `S = (Vbc A) x (Vca B)` and `D = (Vab S) x base`. **One** new point
+   and three lines; the from-scratch quadrangle costs four and six, and each
+   of those re-crosses the triangle, which is why a single step used to leave
+   a dozen markers behind. `_quadrangle()` is the fallback (and what a given
+   apex always uses): `S = AP x BQ`, `R = AQ x BP`, `D = RS x AB`. Both
+   routes agree to 1e-6, and `(harmonic B A C)` matches `(harmonic A B C)`.
+   Where `S` and `D` will fall is worked out with `_crossing_of()` *before*
+   anything is drawn, so a refusal leaves the canvas untouched. Two refusals
+   are real and worth knowing: `D` outside `sceneRect()`, and `D` within
+   `snap_radius()` of A, B or C — the canvas would record one point where
+   there are two, and zooming in genuinely fixes it, since snapping is a
+   fixed distance *on screen*.
    `_shared_line()` requires the three to be *recorded* as collinear, the
    same rule as everywhere else.
 3. Intersection-marker **visibility control** (dense nets get busy).

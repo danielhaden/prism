@@ -24,6 +24,7 @@ from prism.dependencies import (
     Changed,
     DependencyGraph,
     Geometry,
+    computed_from,
     dependencies_of,
 )
 from prism.items import GroupItem, LineItem, PointItem
@@ -1014,7 +1015,7 @@ class CanvasScene(QGraphicsScene):
                 self._meets.append(point)
             else:
                 spare.remove(point)
-                point.anchor().set_lines(lines)
+                point.anchor().set_lines(self._defining_lines(point, lines))
                 point.set_position_undefined(False)
                 point.sync_to_anchor()
         for point in spare:
@@ -1031,6 +1032,30 @@ class CanvasScene(QGraphicsScene):
             else:
                 self._meets.remove(point)
                 self.removeItem(point)
+
+    @staticmethod
+    def _defining_lines(point: PointItem, lines: list) -> list:
+        """Those of ``lines`` that are not themselves computed from ``point``.
+
+        A crossing is defined by the lines that were already there. Draw a
+        line *from* that crossing — a side of a quadrangle, a cevian — and it
+        passes through the place as surely as the others do, but it is
+        downstream: its position is read off the point, not the other way
+        round. Counting it among the point's own lines would make each the
+        other's dependency, and a cycle is left out of every update, so the
+        line goes stale and the crossing drifts off the lines it is the
+        crossing of.
+
+        Args:
+            point: The crossing.
+            lines: Every line passing through that place.
+
+        Returns:
+            The lines that define it, which is always at least the two it was
+                made from.
+        """
+        kept = [line for line in lines if not computed_from(line, point)]
+        return kept if len(kept) >= 2 else list(lines)
 
     @staticmethod
     def _claim_meet(candidates: list, lines: list):

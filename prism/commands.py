@@ -13,6 +13,8 @@ real elements. Forms return the element they create, which is what allows the
 nesting above.
 """
 
+from itertools import product
+
 import shiboken6
 
 from PySide6.QtCore import QLineF, QPointF, Qt
@@ -470,7 +472,9 @@ class CommandInterpreter:
             "  (draw-cevians <tri> <line>) from each crossing on the line,\n"
             "                              an edge to the vertex lacking one\n"
             "  (harmonic <A> <B> <C> [<P>]) the fourth harmonic of C with\n"
-            "                              respect to A and B, by quadrangle\n"
+            "                              respect to A and B, on the\n"
+            "                              figure's own triangle if it has\n"
+            "                              one, else a quadrangle from P\n"
             "  (ideal-point <line>)        its point at infinity; join to it\n"
             "                              to draw a parallel\n"
             "  (points) / (lines)          everything on the canvas\n"
@@ -744,7 +748,7 @@ class CommandInterpreter:
         """
         if a is b:
             raise CommandError("A line meets itself everywhere.")
-        point = self.scene.meet_of(a, b)
+        point = self._shared_point(a, b)
         if point is None:
             raise CommandError(
                 f"{self._line_name(a)} and {self._line_name(b)} don't meet on "
@@ -846,7 +850,7 @@ class CommandInterpreter:
                     f"{self._point_name(first)} and {self._point_name(second)} "
                     "aren't joined — draw the triangle first."
                 )
-            crossing = self.scene.meet_of(side, across)
+            crossing = self._shared_point(side, across)
             if crossing is None:
                 raise CommandError(
                     f"{self._line_name(side)} doesn't meet "
@@ -895,6 +899,27 @@ class CommandInterpreter:
                 return line
         return shared[0] if shared else None
 
+    def _shared_point(self, first, second):
+        """The point the figure records on both lines, if any.
+
+        The dual of :meth:`_existing_side`, and wider than
+        :meth:`CanvasScene.meet_of`: a vertex you placed and then drew two
+        lines through is no less the meeting of those lines for having been
+        put there first, and no crossing is recorded on top of it.
+        """
+        found = self.scene.meet_of(first, second)
+        if found is not None:
+            return found
+        for point in self._points():
+            if point.is_ideal() or point.position_undefined():
+                continue
+            through = self.scene.lines_through(point)
+            if any(line is first for line in through) and any(
+                line is second for line in through
+            ):
+                return point
+        return None
+
     def _join(self, a: PointItem, b: PointItem) -> LineItem:
         """The line joining two points, drawn only if it isn't there already."""
         existing = self._existing_side(a, b)
@@ -917,8 +942,14 @@ class CommandInterpreter:
     REPEAT_LIMIT = 100
 
     #: Where the quadrangle's apex is put when one isn't given: this far off
-    #: the base line, as a fraction of the distance from A to B.
+    #: the base line, as a fraction of the spread of A, B and C. Measured
+    #: across all three and not just A and B, since a C well outside AB with
+    #: an apex scaled to a short AB leaves the quadrangle a sliver lying
+    #: along the base, where every corner rounds onto the line.
     HARMONIC_APEX_FRACTION = 0.5
+
+    #: Most triangles tried when more than one line runs through A, B or C.
+    HARMONIC_TRIANGLES = 64
 
     def _form_harmonic(self, args) -> PointItem:
         """``(harmonic A B C)`` — the fourth harmonic of C through A and B.
@@ -929,15 +960,19 @@ class CommandInterpreter:
         point from three you chose, rather than wherever lines happen to
         cross.
 
-        Built by the **complete quadrangle**, not from coordinates: with an
-        apex ``P`` off the line and ``Q`` on ``PC``, ``D`` is where ``RS``
-        meets the base line, for ``S = AP x BQ`` and ``R = AQ x BP``. So the
-        scaffolding is drawn and ``D`` is a *crossing* — it joins the
-        dependency graph and follows ``A``, ``B`` and ``C`` as they move.
+        A fourth harmonic comes from a **complete quadrangle** having ``A``
+        and ``B`` among its diagonal points. The commonest way three points
+        land on one line is a triangle cut by a transversal, and that
+        triangle is already three quarters of such a quadrangle: see
+        :meth:`_harmonic_from_figure`, which finishes it with a single new
+        point. Only when the figure holds no such triangle is a quadrangle
+        built from scratch, on an apex off the line.
 
-        ``P`` may be given as a fourth argument; otherwise one is placed off
-        the line. The result does not depend on that choice, which is what
-        makes the fourth harmonic well-defined.
+        ``P`` may be given as a fourth argument, which builds from scratch on
+        that apex. The answer does not depend on the route, which is what
+        makes the fourth harmonic well-defined; and either way ``D`` is a
+        *crossing*, so it joins the dependency graph and follows ``A``, ``B``
+        and ``C`` as they move.
 
         Returns:
             The fourth harmonic point.
@@ -946,8 +981,8 @@ class CommandInterpreter:
             raise CommandError(
                 "Usage: (harmonic <A> <B> <C> [<apex>])\n"
                 "  A, B, C: three distinct points on one line\n"
-                "  apex:    a point off that line to build from; one is\n"
-                "           chosen if you don't give it"
+                "  apex:    a point off that line to build from; the figure's\n"
+                "           own triangle is used if you don't give one"
             )
         a, b, c = (self._as_point(argument) for argument in args[:3])
         for first, second, names in ((a, b, "A and B"), (a, c, "A and C"),
@@ -964,16 +999,18 @@ class CommandInterpreter:
                 "is only defined along one — draw it first, or use points the "
                 "figure already records as collinear."
             )
-        apex = (
-            self._as_point(args[3]) if len(args) == 4
-            else self._harmonic_apex(a, b, base)
-        )
-        if any(other is base for other in self.scene.lines_through(apex)):
-            raise CommandError(
-                f"{self._element_name(apex)} is on the same line, so it can't "
-                "be the apex — the quadrangle would be flat."
-            )
-        return self._quadrangle(a, b, c, apex, base)
+        if len(args) == 4:
+            apex = self._as_point(args[3])
+            if any(other is base for other in self.scene.lines_through(apex)):
+                raise CommandError(
+                    f"{self._element_name(apex)} is on the same line, so it "
+                    "can't be the apex — the quadrangle would be flat."
+                )
+            return self._quadrangle(a, b, c, apex, base)
+        found = self._harmonic_from_figure(a, b, c, base)
+        if found is not None:
+            return found
+        return self._quadrangle(a, b, c, self._harmonic_apex(a, b, c, base), base)
 
     def _shared_line(self, *points):
         """The line the figure records all of these as lying on, if any."""
@@ -991,17 +1028,166 @@ class CommandInterpreter:
                 return None
         return shared[0] if shared else None
 
-    def _harmonic_apex(self, a: PointItem, b: PointItem, base) -> PointItem:
+    def _harmonic_from_figure(self, a, b, c, base):
+        """The fourth harmonic built on a triangle the figure already has.
+
+        Each of ``A``, ``B`` and ``C`` usually lies on one other line besides
+        the base, and three such lines are a triangle. Name each vertex for
+        the pair of points whose lines meet there — ``Vab`` is where A's line
+        crosses B's — and the fourth harmonic is::
+
+            S = (Vbc-A) x (Vca-B)        D = (Vab-S) x base
+
+        ``Vab``, ``Vbc``, ``Vca`` and ``S`` are a complete quadrangle with
+        ``A`` and ``B`` as two of its diagonal points: ``A`` is where sides
+        ``Vab-Vca`` and ``Vbc-S`` cross, ``B`` where ``Vab-Vbc`` and
+        ``Vca-S`` cross. Its remaining pair of opposite sides, ``Vbc-Vca``
+        and ``Vab-S``, therefore cut the base in two points separated
+        harmonically by ``A`` and ``B`` — and the first of those is ``C``.
+        So the triangle does the work a built scaffold would, and only one
+        point has to be added.
+
+        Returns:
+            The fourth harmonic, or None when the figure holds no such
+            triangle and a quadrangle has to be built from scratch.
+        """
+        choices = []
+        combinations = 1
+        for point in (a, b, c):
+            others = [
+                line for line in self.scene.lines_through(point)
+                if line is not base
+            ]
+            if not others:
+                return None
+            combinations *= len(others)
+            if combinations > self.HARMONIC_TRIANGLES:
+                return None
+            choices.append(others)
+        for side_a, side_b, side_c in product(*choices):
+            if side_a is side_b or side_b is side_c or side_c is side_a:
+                continue
+            corners = (
+                self._shared_point(side_a, side_b),
+                self._shared_point(side_b, side_c),
+                self._shared_point(side_c, side_a),
+            )
+            if any(corner is None for corner in corners):
+                continue
+            v_ab, v_bc, v_ca = corners
+            if v_ab is v_bc or v_bc is v_ca or v_ca is v_ab:
+                continue  # the three lines are concurrent: no triangle
+            if any(
+                any(line is base for line in self.scene.lines_through(corner))
+                for corner in corners
+            ):
+                continue  # a vertex sitting on the base: the triangle is flat
+            return self._harmonic_on_triangle(a, b, c, v_ab, v_bc, v_ca, base)
+        return None
+
+    def _harmonic_on_triangle(self, a, b, c, v_ab, v_bc, v_ca,
+                              base) -> PointItem:
+        """Finish the triangle into a quadrangle and read D off the base.
+
+        Where ``S`` and ``D`` will fall is worked out before anything is
+        drawn, so a construction that would run off the working area says so
+        instead of leaving half a scaffold behind.
+        """
+        corner = self._crossing_of(
+            v_bc.center(), a.center(), v_ca.center(), b.center()
+        )
+        if corner is None or not self.scene.sceneRect().contains(corner):
+            raise CommandError(
+                "The quadrangle completing that triangle falls outside the "
+                "working area, so Prism can't record its corner. Bring the "
+                "figure in, or give an apex as (harmonic A B C <point>)."
+            )
+        along = base.scene_line()
+        where = self._crossing_of(v_ab.center(), corner, along.p1(), along.p2())
+        if where is None:
+            # C is the midpoint of A and B: its conjugate is the base line's
+            # own point at infinity, and nothing needs drawing to say so.
+            return self.scene.ideal_point_of(base)
+        if not self.scene.sceneRect().contains(where):
+            raise CommandError(
+                "The fourth harmonic falls outside the working area. It is "
+                "far out along the base line, which happens as C nears the "
+                "midpoint of A and B — at the midpoint exactly it is the "
+                f"point at infinity, (ideal-point {self._element_name(base)})."
+            )
+        crowded = self._too_close(where, (a, b, c))
+        if crowded is not None:
+            raise CommandError(
+                f"The fourth harmonic lands within snapping distance of "
+                f"{self._element_name(crowded)}, so the canvas would record "
+                "one point where there are two. Zoom in — snapping is a fixed "
+                "distance on screen, so a closer view separates them — or "
+                "spread the figure out."
+            )
+        found = self.scene.meet_of(
+            self._join(v_bc, a), self._join(v_ca, b)
+        )
+        if found is None:
+            raise CommandError(
+                "The quadrangle's corner isn't recorded as a crossing — the "
+                "two lines don't meet where they are drawn."
+            )
+        through = self._join(v_ab, found)
+        if through is base:
+            raise CommandError(
+                "The quadrangle collapsed onto the base line, so it says "
+                "nothing about where D is."
+            )
+        fourth = self.scene.meet_of(through, base)
+        if fourth is None or fourth is a or fourth is b:
+            raise CommandError(
+                "The construction collapsed onto a point it started from. "
+                "Try giving an apex, as (harmonic A B C <point>)."
+            )
+        fourth.set_shown(True)
+        self.scene.commit_undo()
+        return fourth
+
+    def _too_close(self, where: QPointF, points):
+        """The first of ``points`` that ``where`` would snap onto, if any."""
+        radius = self.scene.snap_radius()
+        for point in points:
+            if point.is_ideal() or point.position_undefined():
+                continue
+            if QLineF(where, point.center()).length() <= radius:
+                return point
+        return None
+
+    @staticmethod
+    def _crossing_of(first, second, third, fourth):
+        """Where line ``first-second`` meets line ``third-fourth``.
+
+        Worked out from the four positions, without drawing anything: a way
+        to ask where a construction will land before committing to it.
+
+        Returns:
+            The crossing, or None when the two directions are parallel.
+        """
+        kind, where = QLineF(first, second).intersects(QLineF(third, fourth))
+        return None if kind == QLineF.IntersectionType.NoIntersection else where
+
+    def _harmonic_apex(self, a: PointItem, b: PointItem, c: PointItem,
+                       base) -> PointItem:
         """A point off the base line, to hang the quadrangle from."""
-        first, second = a.center(), b.center()
-        span = QLineF(first, second).length() or self.scene.reference_rect().width() / 4
-        direction = base.scene_line()
-        along = QLineF(direction.p1(), direction.p2())
-        if along.length() < 1e-9:
+        centres = [a.center(), b.center(), c.center()]
+        span = max(
+            QLineF(first, second).length()
+            for first in centres for second in centres
+        ) or self.scene.reference_rect().width() / 4
+        along = base.scene_line()
+        if QLineF(along.p1(), along.p2()).length() < 1e-9:
             raise CommandError("That line has no direction to work from.")
-        unit = along.unitVector()
+        unit = QLineF(along.p1(), along.p2()).unitVector()
         across = QPointF(-(unit.dy()), unit.dx())
-        middle = QPointF((first.x() + second.x()) / 2, (first.y() + second.y()) / 2)
+        middle = QPointF(
+            sum(point.x() for point in centres) / 3,
+            sum(point.y() for point in centres) / 3,
+        )
         offset = span * self.HARMONIC_APEX_FRACTION
         return self.scene.add_free_point(
             QPointF(middle.x() + across.x() * offset, middle.y() + across.y() * offset)
@@ -1022,13 +1208,32 @@ class CommandInterpreter:
                 "The quadrangle's sides don't meet on the canvas — try giving "
                 "an apex nearer the figure, as (harmonic A B C <point>)."
             )
-        fourth = self.scene.meet_of(self._join(r, s), base)
+        if r is s:
+            raise CommandError(
+                "The quadrangle collapsed to a point. Give an apex further "
+                "off the line, as (harmonic A B C <point>)."
+            )
+        side = self._join(r, s)
+        if side is base:
+            raise CommandError(
+                "The quadrangle collapsed onto the base line, so it says "
+                "nothing about where D is. Give an apex further off the "
+                "line, as (harmonic A B C <point>)."
+            )
+        fourth = self.scene.meet_of(side, base)
         if fourth is None:
             raise CommandError(
                 f"{self._element_name(c)} is the midpoint of "
                 f"{self._element_name(a)} and {self._element_name(b)}, so its "
-                "harmonic conjugate is the point at infinity — which Prism "
-                "has no way to draw yet."
+                f"harmonic conjugate is the point at infinity: "
+                f"(ideal-point {self._element_name(base)}) is that point."
+            )
+        if fourth is a or fourth is b or fourth is c:
+            raise CommandError(
+                "The construction collapsed onto a point it started from — "
+                "either the quadrangle is too flat, so give an apex further "
+                "off the line as (harmonic A B C <point>), or the figure is "
+                "small enough that the two points snap together, so zoom in."
             )
         fourth.set_shown(True)
         self.scene.commit_undo()
