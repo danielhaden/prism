@@ -4,10 +4,10 @@ import math
 
 import shiboken6
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPolygonF
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsView
 
-from prism.items import PointItem
+from prism.items import LineItem, PointItem
 from prism.templates import TEMPLATE_MIME, deserialize, instantiate
 from prism.tools import Tool
 
@@ -34,6 +34,16 @@ class CanvasView(QGraphicsView):
     #: Slack around a marker's drawn shape, so it can be aimed at comfortably.
     OFFSCREEN_HIT_PAD_PX = 4.0
 
+    #: Chrome for where a line leaves the view — the handle for that line's
+    #: point at infinity, which lies out that way.
+    BORDER_HANDLE_COLOR = "#ff7f0e"
+    BORDER_HANDLE_PX = 5.0
+    #: How near the crossing the pointer must come for the handle to appear.
+    BORDER_NEAR_PX = 14.0
+    #: Drawn this far inside the edge, along the line. Centred exactly on the
+    #: border, half the circle falls outside the viewport and is clipped away.
+    BORDER_INSET_PX = 8.0
+
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
 
@@ -56,6 +66,9 @@ class CanvasView(QGraphicsView):
         self._tool = Tool.SELECT
         self._marker_cursor = False
         self._marker_press = False
+        #: ``(viewport point, line)`` where a line leaves the view and the
+        #: pointer is near enough to offer it, or None.
+        self._border_handle = None
 
     # -- Zoom limits -------------------------------------------------------
 
@@ -128,6 +141,88 @@ class CanvasView(QGraphicsView):
     def drawForeground(self, painter, rect) -> None:
         super().drawForeground(painter, rect)
         self._draw_offscreen_points(painter)
+        self._draw_border_handle(painter)
+
+    # -- Where a line leaves the view -------------------------------------
+
+    def border_handle_at(self, position: QPointF) -> tuple | None:
+        """Where a line crosses the view's edge, near a viewport position.
+
+        A line runs off the edge towards its point at infinity, so the
+        crossing is the one place on screen that stands for that point. The
+        nearest crossing wins when several are close.
+
+        Args:
+            position: Where the pointer is, in viewport coordinates.
+
+        Returns:
+            ``(viewport point, line)``, or None if none is near enough.
+        """
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "ordered_lines"):
+            return None
+        edge = QRectF(self.viewport().rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        best = None
+        for line in scene.ordered_lines():
+            if not line.isVisible():
+                continue
+            segment = line.display_line()
+            on_screen = QLineF(
+                QPointF(self.mapFromScene(segment.p1())),
+                QPointF(self.mapFromScene(segment.p2())),
+            )
+            for crossing in _rect_crossings(on_screen, edge):
+                at = self._inset_along(on_screen, crossing, edge.center())
+                away = QLineF(at, position).length()
+                if away <= self.BORDER_NEAR_PX and (best is None or away < best[0]):
+                    best = (away, at, line)
+        return (best[1], best[2]) if best is not None else None
+
+    def _inset_along(self, segment: QLineF, crossing: QPointF,
+                     middle: QPointF) -> QPointF:
+        """Pull a crossing just inside the view, staying on its line.
+
+        Args:
+            segment: The line as it runs across the viewport.
+            crossing: Where it meets the edge.
+            middle: The viewport's centre, to tell inwards from outwards.
+
+        Returns:
+            The point to draw at and to measure the pointer against.
+        """
+        unit = segment.unitVector()
+        along = QPointF(unit.dx(), unit.dy())
+        inwards = QPointF(middle.x() - crossing.x(), middle.y() - crossing.y())
+        if along.x() * inwards.x() + along.y() * inwards.y() < 0:
+            along = QPointF(-along.x(), -along.y())
+        return QPointF(
+            crossing.x() + along.x() * self.BORDER_INSET_PX,
+            crossing.y() + along.y() * self.BORDER_INSET_PX,
+        )
+
+    def _track_border_handle(self, position: QPointF) -> None:
+        """Offer, or stop offering, the handle under the pointer."""
+        found = self.border_handle_at(position)
+        was = self._border_handle
+        if (found is None) != (was is None) or (
+            found is not None and was is not None
+            and (found[1] is not was[1] or QLineF(found[0], was[0]).length() > 0.5)
+        ):
+            self._border_handle = found
+            self.viewport().update()
+
+    def _draw_border_handle(self, painter) -> None:
+        if self._border_handle is None:
+            return
+        at, _line = self._border_handle
+        painter.save()
+        painter.setWorldMatrixEnabled(False)  # viewport pixels
+        pen = QPen(QColor(self.BORDER_HANDLE_COLOR), 2)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(at, self.BORDER_HANDLE_PX, self.BORDER_HANDLE_PX)
+        painter.restore()
 
     def _draw_offscreen_points(self, painter) -> None:
         """Mark each defined point that lies outside the view.
@@ -373,6 +468,7 @@ class CanvasView(QGraphicsView):
             self._pan_to(event)
             return
         self._track_marker_cursor(event)
+        self._track_border_handle(event.position())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):

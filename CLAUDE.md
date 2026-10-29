@@ -488,6 +488,16 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   gone by the time it is clicked: `point_at_marker()` checks
   `shiboken6.isValid` before returning one, since reading a dead wrapper
   segfaults.
+- **Where a line leaves the view is a handle** (`border_handle_at`,
+  `_draw_border_handle`): hovering within `BORDER_NEAR_PX` of a line's
+  crossing with the viewport edge draws a small orange circle there — the one
+  place on screen standing for that line's **point at infinity**, which lies
+  out that way. Drawn `BORDER_INSET_PX` *inside* the edge, along the line:
+  centred exactly on the border, half the circle is clipped away and nearly
+  invisible. The pointer is measured against the **drawn** position, not the
+  raw crossing, so you aim at what you see. Hidden lines offer none.
+  **The right-click action on it is not built yet** — it needs a
+  representation for ideal points, which Prism still lacks.
 - The view uses `FullViewportUpdate`, because an edge marker can change from
   a scene change anywhere; the default partial updates left stale chrome.
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).
