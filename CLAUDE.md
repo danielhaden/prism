@@ -74,9 +74,17 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
     absent from the picture and from hit-testing. Persisted as
     `{"kind": "ideal", "lines": [...]}`; a point anchor dict with no `"kind"`
     is a line anchor, which is what older drawings hold.
-    Joining to one draws the **parallel** (`_join_or_parallel`), reusing a
-    parallel already through that point; two of them would give the line at
-    infinity, which is refused with that reason.
+    Joining to one draws the **parallel**, and that is handled in
+    `add_line_between()` — *not* only in the console — so every route agrees:
+    the canvas menu's fallback, `_join()`, `(join …)`, `(draw-triangle …)`.
+    Putting it only in `_join_or_parallel` left `add_line_between` binding to
+    the ideal point's **stored coordinate**, which is arbitrary, so the line
+    came out visibly off-parallel (18° in the case that found it) by any path
+    that did not go through the console. `_join_or_parallel` still adds the
+    command-level courtesy of reusing a parallel already drawn through that
+    point. Two ideal points give None (the line at infinity).
+    Snapping is already safe: `snap_target` skips `position_undefined()`
+    points, and an ideal point is always undefined even though it is visible.
   - `LineAnchor(line, t, locked)` — keeps a point on a line; **dragging
     slides** it, unless `locked`, when it is held at `t`. A locked anchor's
     `constrain_drag` returns its current position: returning `None` means

@@ -528,8 +528,22 @@ class CanvasScene(QGraphicsScene):
 
         Each endpoint is bound to a point, so the line stays through them as
         they move. Returns None if the two points coincide.
+
+        A **point at infinity** is handled here rather than by the caller, so
+        every route to joining two points agrees: it has no coordinate to
+        bind to, and joining to it means drawing the line through the other
+        point in that direction — the parallel. Two of them would give the
+        line at infinity, which cannot be drawn.
         """
-        if a is b or a.center() == b.center():
+        if a is b:
+            return None
+        if a.is_ideal() or b.is_ideal():
+            if a.is_ideal() and b.is_ideal():
+                return None
+            through, infinite = (b, a) if a.is_ideal() else (a, b)
+            angle = infinite.anchor().angle()
+            return None if angle is None else self.add_line_through(through, angle)
+        if a.center() == b.center():
             return None
         line = self.add_line(a.center(), b.center())
         line.bind_endpoint(1, a)
