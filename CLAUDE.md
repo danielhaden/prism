@@ -590,9 +590,18 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    and refuses clearly when a side is parallel to the line or the triangle
    isn't drawn. The three cevians are **not** concurrent — they form a second
    triangle, which is the point of the construction.
-   Still open: a form for the harmonic step itself
-   (three collinear points → the fourth harmonic), which is what makes a net
-   *disciplined* rather than merely dense.
+   **`(harmonic A B C [P])` is that harmonic step — done.** `D` is the point
+   with cross-ratio `(A,B;C,D) = -1`; closed form
+   `d = (c(a+b) - 2ab) / (2c - a - b)`, undefined exactly when `C` is the
+   midpoint (the conjugate is then at infinity, which Prism still cannot
+   represent — it says so). It is built by the **complete quadrangle**
+   (`S = AP x BQ`, `R = AQ x BP`, `D = RS x AB`) rather than from that
+   formula, deliberately: `D` is then a real crossing, so it is in the
+   dependency graph and follows A, B, C as they move. The apex is arbitrary
+   — `_harmonic_apex()` places one perpendicular to the base from the
+   midpoint of AB, and a given apex gives the same `D` to 6dp (tested).
+   `_shared_line()` requires the three to be *recorded* as collinear, the
+   same rule as everywhere else.
 3. Intersection-marker **visibility control** (dense nets get busy).
 4. Save/load a drawing to a file (scene_state is most of the way there).
 5. Possibly: promote/detach UX, snapping toggles, coordinate readout.

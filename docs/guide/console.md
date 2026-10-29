@@ -287,6 +287,47 @@ In the projective sense a triangle needs three points **not on a line**, so
 collinear points are refused rather than given three copies of the same side.
 The same goes for the same point twice.
 
+### `(harmonic <A> <B> <C>)`
+
+The **fourth harmonic** of `C` with respect to `A` and `B`: the point `D` for
+which the cross-ratio is −1,
+
+```
+(A,B;C,D) = (AC/CB) / (AD/DB) = -1
+```
+
+so `C` and `D` divide `AB` internally and externally in the same ratio. The
+three points must lie on one line.
+
+```
+(harmonic A B C)          # D, the harmonic conjugate of C
+(harmonic A B C P)        # built from an apex you choose
+```
+
+This is the step a **net** is made of. Joining every point to every other
+produces points wherever lines happen to cross, and multiplies out of hand;
+the harmonic step yields **one** new point from three you chose, so a figure
+grows by construction rather than by accident.
+
+It is built by the **complete quadrangle**, not from coordinates — with an
+apex `P` off the line and `Q` on `PC`:
+
+- `S = AP ∩ BQ` and `R = AQ ∩ BP`
+- `D = RS ∩ AB`
+
+so the scaffolding is drawn, and `D` is a genuine **crossing**: it joins the
+dependency graph and follows `A`, `B` and `C` when they move. The construction
+needs no lengths, only incidence — which is why it is projective.
+
+`P` is arbitrary. Give one as a fourth argument or let Prism place one; the
+same `D` comes out either way, and that is exactly what makes the fourth
+harmonic well-defined.
+
+!!! warning "The midpoint has no conjugate here"
+    When `C` is the **midpoint** of `AB`, `RS` comes out parallel to the base
+    line and `D` is the point at infinity. Prism has no way to represent that
+    yet, so it says so rather than guessing.
+
 ### `(format <line> <thickness> [<colour>] [<style>])`
 
 Change how a line is drawn.

@@ -15,7 +15,7 @@ nesting above.
 
 import shiboken6
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QLineF, QPointF, Qt
 from PySide6.QtGui import QColor
 
 from prism.items import LineItem, PointItem
@@ -106,6 +106,7 @@ class CommandInterpreter:
             "map": self._form_map,
             "draw-triangle": self._form_draw_triangle,
             "draw-cevians": self._form_draw_cevians,
+            "harmonic": self._form_harmonic,
             "points": self._form_points,
             "lines": self._form_lines,
             "meets": self._form_meets,
@@ -463,6 +464,8 @@ class CommandInterpreter:
             "                              points (or a list of three)\n"
             "  (draw-cevians <tri> <line>) from each crossing on the line,\n"
             "                              an edge to the vertex lacking one\n"
+            "  (harmonic <A> <B> <C> [<P>]) the fourth harmonic of C with\n"
+            "                              respect to A and B, by quadrangle\n"
             "  (points) / (lines)          everything on the canvas\n"
             "  (meets <lines>)             where those lines cross\n"
             "  (lines-through <point>)     the lines it lies on\n"
@@ -831,6 +834,124 @@ class CommandInterpreter:
 
     #: Most times (repeat …) will run a form.
     REPEAT_LIMIT = 100
+
+    #: Where the quadrangle's apex is put when one isn't given: this far off
+    #: the base line, as a fraction of the distance from A to B.
+    HARMONIC_APEX_FRACTION = 0.5
+
+    def _form_harmonic(self, args) -> PointItem:
+        """``(harmonic A B C)`` — the fourth harmonic of C through A and B.
+
+        The point ``D`` for which the cross-ratio ``(A,B;C,D)`` is ``-1``:
+        ``C`` and ``D`` divide ``AB`` internally and externally in the same
+        ratio. It is the step a *net* is made of, since it yields **one** new
+        point from three you chose, rather than wherever lines happen to
+        cross.
+
+        Built by the **complete quadrangle**, not from coordinates: with an
+        apex ``P`` off the line and ``Q`` on ``PC``, ``D`` is where ``RS``
+        meets the base line, for ``S = AP x BQ`` and ``R = AQ x BP``. So the
+        scaffolding is drawn and ``D`` is a *crossing* — it joins the
+        dependency graph and follows ``A``, ``B`` and ``C`` as they move.
+
+        ``P`` may be given as a fourth argument; otherwise one is placed off
+        the line. The result does not depend on that choice, which is what
+        makes the fourth harmonic well-defined.
+
+        Returns:
+            The fourth harmonic point.
+        """
+        if len(args) not in (3, 4):
+            raise CommandError(
+                "Usage: (harmonic <A> <B> <C> [<apex>])\n"
+                "  A, B, C: three distinct points on one line\n"
+                "  apex:    a point off that line to build from; one is\n"
+                "           chosen if you don't give it"
+            )
+        a, b, c = (self._as_point(argument) for argument in args[:3])
+        for first, second, names in ((a, b, "A and B"), (a, c, "A and C"),
+                                     (b, c, "B and C")):
+            if first is second:
+                raise CommandError(
+                    f"{names} are the same point; the fourth harmonic needs "
+                    "three distinct points."
+                )
+        base = self._shared_line(a, b, c)
+        if base is None:
+            raise CommandError(
+                "Those three points don't share a line. The fourth harmonic "
+                "is only defined along one — draw it first, or use points the "
+                "figure already records as collinear."
+            )
+        apex = (
+            self._as_point(args[3]) if len(args) == 4
+            else self._harmonic_apex(a, b, base)
+        )
+        if any(other is base for other in self.scene.lines_through(apex)):
+            raise CommandError(
+                f"{self._element_name(apex)} is on the same line, so it can't "
+                "be the apex — the quadrangle would be flat."
+            )
+        return self._quadrangle(a, b, c, apex, base)
+
+    def _shared_line(self, *points):
+        """The line the figure records all of these as lying on, if any."""
+        shared = None
+        for point in points:
+            through = self.scene.lines_through(point)
+            if shared is None:
+                shared = list(through)
+            else:
+                shared = [
+                    line for line in shared
+                    if any(other is line for other in through)
+                ]
+            if not shared:
+                return None
+        return shared[0] if shared else None
+
+    def _harmonic_apex(self, a: PointItem, b: PointItem, base) -> PointItem:
+        """A point off the base line, to hang the quadrangle from."""
+        first, second = a.center(), b.center()
+        span = QLineF(first, second).length() or self.scene.reference_rect().width() / 4
+        direction = base.scene_line()
+        along = QLineF(direction.p1(), direction.p2())
+        if along.length() < 1e-9:
+            raise CommandError("That line has no direction to work from.")
+        unit = along.unitVector()
+        across = QPointF(-(unit.dy()), unit.dx())
+        middle = QPointF((first.x() + second.x()) / 2, (first.y() + second.y()) / 2)
+        offset = span * self.HARMONIC_APEX_FRACTION
+        return self.scene.add_free_point(
+            QPointF(middle.x() + across.x() * offset, middle.y() + across.y() * offset)
+        )
+
+    def _quadrangle(self, a, b, c, apex, base) -> PointItem:
+        """Draw the quadrangle on A, B, C and return where RS meets the base."""
+        through_c = self._join(apex, c)
+        middle = QPointF(
+            (apex.center().x() + c.center().x()) / 2,
+            (apex.center().y() + c.center().y()) / 2,
+        )
+        q = self.scene.add_point_on_line_at(through_c, middle)
+        s = self.scene.meet_of(self._join(a, apex), self._join(b, q))
+        r = self.scene.meet_of(self._join(a, q), self._join(b, apex))
+        if s is None or r is None:
+            raise CommandError(
+                "The quadrangle's sides don't meet on the canvas — try giving "
+                "an apex nearer the figure, as (harmonic A B C <point>)."
+            )
+        fourth = self.scene.meet_of(self._join(r, s), base)
+        if fourth is None:
+            raise CommandError(
+                f"{self._element_name(c)} is the midpoint of "
+                f"{self._element_name(a)} and {self._element_name(b)}, so its "
+                "harmonic conjugate is the point at infinity — which Prism "
+                "has no way to draw yet."
+            )
+        fourth.set_shown(True)
+        self.scene.commit_undo()
+        return fourth
 
     def _form_points(self, args) -> list:
         """``(points)`` — every point on the canvas, as a list."""
