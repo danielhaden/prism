@@ -129,10 +129,8 @@ def capture(scene) -> dict:
                 "locked": getattr(pt_anchor, "locked", False),
             }
         elif pt_anchor is not None and pt_anchor.kind == "ideal":
-            indices = [l_index.get(id(line)) for line in pt_anchor.lines]
-            indices = [index for index in indices if index is not None]
-            if indices:
-                anchor = {"kind": "ideal", "lines": sorted(indices)}
+            # The direction is the point; no line needs to exist for it.
+            anchor = {"kind": "ideal", "angle": pt_anchor.angle()}
         point_data.append(
             {
                 "xy": [point.center().x(), point.center().y()],
@@ -262,7 +260,7 @@ def restore(scene, state: dict) -> None:
             continue
         # Older drawings have no "kind": they are all line anchors.
         if spec.get("kind", "line") == "ideal":
-            point.set_anchor(IdealAnchor([lines[i] for i in spec["lines"]]))
+            point.set_anchor(IdealAnchor(spec["angle"]))
             point.set_position_undefined(True)
             continue
         point.set_anchor(

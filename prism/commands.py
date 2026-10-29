@@ -705,11 +705,6 @@ class CommandInterpreter:
         if ideal_a or ideal_b:
             through, infinite = (b, a) if ideal_a else (a, b)
             angle = infinite.anchor().angle()
-            if angle is None:
-                raise CommandError(
-                    "That point at infinity has no line left to take a "
-                    "direction from."
-                )
             # The parallel through this point may already be drawn — if the
             # point is on a line of that direction, that line *is* the join,
             # exactly as a shared side is for two ordinary points.
@@ -1695,11 +1690,11 @@ class CommandInterpreter:
     def _describe_point(self, point) -> str:
         if self._is_ideal(point):
             names = ", ".join(
-                sorted(self._line_name(ln) for ln in point.anchor().live_lines())
+                self._line_name(ln) for ln in self.scene.lines_to_infinity(point)
             )
             label = f'  "{point.label_text()}"' if point.label_text() else ""
-            where = f" of {names}" if names else ""
-            return f"at infinity{where}{label}"
+            along = f"  [along {names}]" if names else ""
+            return f"at infinity, {point.anchor().angle():g}\u00b0{label}{along}"
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
         if point.is_meet():

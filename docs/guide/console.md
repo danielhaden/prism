@@ -338,14 +338,29 @@ directions.
 (add-line P2 (ideal-point L1))    →  the line through P2 parallel to L1
 ```
 
-**Parallel lines share it.** Asking a second line of the same direction gives
-the same point back, not another one — which is exactly what "parallels meet
-at infinity" means, and it is the same identity rule crossings follow.
+The plane has one **line at infinity**, carrying one point for every
+direction — so an ideal point *is* an angle, taken modulo 180° since a line
+has no sense of direction. That angle is what Prism stores:
+
+```
+(ideal-point L1)   →  P4  at infinity, 30°  [along L1, L7]
+```
+
+A line merely **passes through** that point, the way it passes through an
+ordinary one. Lines may be drawn, deleted, or rotated away, and none of it
+changes which point this is — the point outlives its line, and a new line in
+that direction runs to the same point again. The `[along …]` part is read
+from the canvas each time, so it is always what is actually there.
+
+**Parallel lines share it**, which is exactly what "parallels meet at
+infinity" means. Directions count as the same only within a *very* tight
+tolerance — enough to absorb floating-point drift between directions equal by
+construction, not enough to call two hand-drawn lines parallel. Two lines a
+twentieth of a degree apart get **different** points at infinity, as they
+should, so a parallel to either is exact.
 
 It has **no position**, because there is no coordinate at infinity. So it is
 never drawn on the canvas, never clicked, and never caught by a rubber band.
-It appears in [`(ls)`](#ls-points-lines) and the Elements panel as
-`at infinity of L1`, with no coordinates.
 
 What it is *for* is **joining**: a line through a point and a point at
 infinity is the parallel through that point. If that parallel is already

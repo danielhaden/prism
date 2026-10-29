@@ -205,8 +205,12 @@ class CanvasView(QGraphicsView):
         scene = self.scene()
         if scene is None or not hasattr(scene, "ideal_points"):
             return False
+        angle = scene._line_angle(line)
+        if angle is None:
+            return False
         return any(
-            point.isSelected() and point.anchor().references_line(line)
+            point.isSelected()
+            and point.anchor().matches(angle, scene.PARALLEL_TOLERANCE_DEG)
             for point in scene.ideal_points()
         )
 

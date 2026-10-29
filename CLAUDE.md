@@ -62,12 +62,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
     determine it; further concurrent lines **join the same anchor**, so three
     concurrent lines give one point, not three stacked (stage 3). Read the
     same relation from the other side with `LineItem.meets()`.
-  - `IdealAnchor(lines)` — marks a point as the **point at infinity** of a
-    direction. `position()` returns None *always*: there is no coordinate at
-    infinity. Parallel lines share one ideal point, so the anchor holds a
-    set, as `MeetAnchor` does; `CanvasScene.ideal_point_of(line)` finds one
-    of the same direction (mod 180, within `PARALLEL_TOLERANCE_DEG`) or makes
-    it. **It must stay selectable**, and Qt will not select a hidden item —
+  - `IdealAnchor(angle_degrees)` — the **point at infinity** of a direction.
+    **The angle is the point**, stored mod 180, not read back from a line:
+    the plane's line at infinity carries one point per direction, and a line
+    merely *passes through* one. Deriving it from a line instead (the first
+    version) made a parallel follow whichever line the anchor happened to
+    look at first, and broke when that line was rotated — the point is
+    unmoved by lines coming, going or turning. `position()` returns None
+    *always*: there is no coordinate at infinity.
+    `CanvasScene.ideal_point_at(angle)` / `ideal_point_of(line)` find or
+    make it; `lines_to_infinity(point)` reads the lines running that way
+    from the geometry each time, so `(ls)` is never stale.
+    `PARALLEL_TOLERANCE_DEG` is **1e-6**, not 0.1: it exists to absorb
+    floating-point drift between directions equal by construction. Loose, it
+    lumps near-parallel lines together and a "parallel" comes out off by the
+    tolerance — visibly. **It must stay selectable**, and Qt will not select a hidden item —
     so `PointItem.is_ideal()` keeps it *visible* while `paint()` returns
     early, `shape()` is empty and `boundingRect()` is empty, and
     `Definable._apply_visibility` leaves it alone. Present for selection,

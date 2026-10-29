@@ -147,10 +147,14 @@ class ElementsPanel(QDockWidget):
         if point.is_ideal():
             # No coordinate to show: that is the whole point of it.
             lines = ", ".join(
-                sorted(self._scene.line_id(ln) for ln in point.anchor().live_lines())
+                self._scene.line_id(ln)
+                for ln in self._scene.lines_to_infinity(point)
             )
             name = self._scene.element_name(point)
-            return f"{name}  at infinity" + (f"  [of {lines}]" if lines else "")
+            angle = point.anchor().angle()
+            return f"{name}  at infinity, {angle:g}\u00b0" + (
+                f"  [along {lines}]" if lines else ""
+            )
         centre = point.center()
         text = f"{self._scene.element_name(point)}  ({centre.x():.1f}, {centre.y():.1f})"
         tags = []

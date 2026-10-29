@@ -128,77 +128,53 @@ class MeetAnchor(Anchor):
 
 
 class IdealAnchor(Anchor):
-    """Marks a point as the **point at infinity** of a direction.
+    """A **point at infinity**: a direction, stored as an angle.
 
-    A line's two ends run out to the same ideal point, and parallel lines
-    share it — which is exactly what "parallels meet at infinity" means. So
-    the anchor holds a *set* of lines, as :class:`MeetAnchor` does, and a
-    second line parallel to the first joins the same anchor rather than
-    making a point of its own.
+    The plane has one line at infinity, carrying one point for every
+    direction, so an ideal point *is* an angle — degrees clockwise from
+    horizontal, taken **modulo 180**, since a line has no sense of direction.
 
-    It has **no position**, ever. ``position()`` returns None, so the scene
-    marks the point undefined and never draws it at a coordinate — which is
-    the truth: there is no coordinate. The view shows it where its lines
-    leave the viewport instead.
+    The angle is stored, not read back from a line. A line merely *passes
+    through* this point, the way a line passes through an ordinary one;
+    lines come, go, and rotate away, and none of that should change which
+    point this is. Deriving the angle from a line instead made a parallel
+    follow whichever line the anchor happened to look at first.
+
+    It has no position, ever. ``position()`` returns None, which is the
+    truth: there is no coordinate at infinity.
     """
 
     kind = "ideal"
     persistent = True
 
-    def __init__(self, lines: list):
+    def __init__(self, angle_degrees: float):
         """
         Args:
-            lines: The lines sharing this direction; at least one.
+            angle_degrees: The direction, in degrees clockwise from
+                horizontal. Normalised into ``[0, 180)``.
         """
-        self.lines = list(lines)
+        self.angle_degrees = float(angle_degrees) % 180.0
 
     def position(self) -> QPointF | None:
-        # At infinity: there is no finite place to be, and saying so is what
-        # keeps the point undefined and undrawn.
+        # At infinity: no finite place to be, which is what keeps the point
+        # undefined and so undrawn.
         return None
 
     def constrain_drag(self, scene_pos: QPointF) -> QPointF | None:
-        # Unreachable: an undefined point is hidden, and Qt leaves hidden
-        # items out of hit-testing, so it can never be picked up.
+        # Unreachable: the point has no shape, so it can never be picked up.
         return None
 
-    def live_lines(self) -> list:
-        """The lines still on the canvas."""
-        return [line for line in self.lines if line.scene() is not None]
+    def angle(self) -> float:
+        """The direction, in degrees clockwise from horizontal, in [0, 180)."""
+        return self.angle_degrees
 
-    def direction(self) -> QLineF | None:
-        """The shared direction as a segment, or None if every line is gone."""
-        for line in self.live_lines():
-            segment = line.scene_line()
-            if segment.length() > 1e-9:
-                return segment
-        return None
-
-    def angle(self) -> float | None:
-        """The direction in degrees clockwise from horizontal.
-
-        Prism's own angle convention, so the answer feeds straight back into
-        ``(add-line <angle> …)``.
-
-        Returns:
-            The angle, or None if no line is left to read it from.
-        """
-        segment = self.direction()
-        if segment is None:
-            return None
-        import math
-
-        delta = segment.p2() - segment.p1()
-        return math.degrees(math.atan2(delta.y(), delta.x()))
+    def matches(self, angle_degrees: float, tolerance: float) -> bool:
+        """Whether a direction runs to this same point at infinity."""
+        gap = abs(float(angle_degrees) - self.angle_degrees) % 180.0
+        return min(gap, 180.0 - gap) <= tolerance
 
     def references_line(self, line) -> bool:
-        return any(other is line for other in self.lines)
-
-    def add_line(self, line) -> None:
-        """Note another line running to this same point at infinity."""
-        if not self.references_line(line):
-            self.lines.append(line)
-
-    def drop_line(self, line) -> None:
-        """Forget a line that has gone."""
-        self.lines = [other for other in self.lines if other is not line]
+        # An ideal point depends on no line: it is a direction the plane has
+        # whether or not anything is drawn along it, so deleting a line must
+        # not take it away.
+        return False

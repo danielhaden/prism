@@ -1078,8 +1078,11 @@ class CanvasScene(QGraphicsScene):
         )
 
     #: Directions within this many degrees count as the same direction, and
-    #: so as running to the same point at infinity.
-    PARALLEL_TOLERANCE_DEG = 0.1
+    #: so as running to the same point at infinity. Tight on purpose: it is
+    #: here to absorb floating-point drift between directions that are equal
+    #: *by construction*, not to call two hand-drawn lines parallel. Loose,
+    #: it would quietly draw a "parallel" off by its own width.
+    PARALLEL_TOLERANCE_DEG = 1e-6
 
     def ideal_points(self) -> list:
         """Every point at infinity currently on the canvas."""
@@ -1109,13 +1112,25 @@ class CanvasScene(QGraphicsScene):
         angle = self._line_angle(line)
         if angle is None:
             return None
+        return self.ideal_point_at(angle)
+
+    def ideal_point_at(self, angle_degrees: float) -> PointItem:
+        """The point at infinity in a given direction, made if there is none.
+
+        The direction *is* the point, so one in the same direction (within
+        :attr:`PARALLEL_TOLERANCE_DEG`, modulo 180) is the same point.
+
+        Args:
+            angle_degrees: Degrees clockwise from horizontal.
+
+        Returns:
+            The point at infinity for that direction.
+        """
         for point in self.ideal_points():
-            other = point.anchor().angle()
-            if other is not None and self._same_direction(angle, other):
-                point.anchor().add_line(line)
+            if point.anchor().matches(angle_degrees, self.PARALLEL_TOLERANCE_DEG):
                 return point
-        point = PointItem(line.scene_line().p2())
-        point.set_anchor(IdealAnchor([line]))
+        point = PointItem(QPointF(0, 0))
+        point.set_anchor(IdealAnchor(angle_degrees))
         self._apply_default_point_style(point)
         self._tag(point)
         self.addItem(point)
@@ -1132,6 +1147,31 @@ class CanvasScene(QGraphicsScene):
             return None
         delta = segment.p2() - segment.p1()
         return math.degrees(math.atan2(delta.y(), delta.x()))
+
+    def lines_to_infinity(self, point: PointItem) -> list:
+        """The lines currently running to a point at infinity.
+
+        Read from the geometry each time rather than stored, so it is always
+        what is actually on the canvas: lines come and go and rotate away,
+        and the ideal point is unmoved by any of it.
+
+        Args:
+            point: A point at infinity.
+
+        Returns:
+            The lines pointing that way, in canvas order.
+        """
+        if not point.is_ideal():
+            return []
+        wanted = point.anchor()
+        found = []
+        for line in self.ordered_lines():
+            angle = self._line_angle(line)
+            if angle is not None and wanted.matches(
+                angle, self.PARALLEL_TOLERANCE_DEG
+            ):
+                found.append(line)
+        return found
 
     def _same_direction(self, first: float, second: float) -> bool:
         """Whether two angles point along the same line.
