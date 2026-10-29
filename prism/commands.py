@@ -60,6 +60,10 @@ def parse_fraction(text: str) -> float | None:
         The value, or None if it can't be read.
     """
     text = str(text).strip()
+    # float() reads "inf" and "nan", which are not positions — and would
+    # otherwise shadow them as names, and reach math.radians(inf) as angles.
+    if not text or text[-1].lower() not in "0123456789.":
+        return None
     if "/" in text:
         parts = text.split("/")
         if len(parts) != 2:
@@ -107,6 +111,7 @@ class CommandInterpreter:
             "draw-triangle": self._form_draw_triangle,
             "draw-cevians": self._form_draw_cevians,
             "harmonic": self._form_harmonic,
+            "ideal-point": self._form_ideal_point,
             "points": self._form_points,
             "lines": self._form_lines,
             "meets": self._form_meets,
@@ -283,8 +288,8 @@ class CommandInterpreter:
         fraction = parse_fraction(value)
         if fraction is None:
             raise CommandError(
-                f"Couldn't read {value!r} as a position. Use a fraction like "
-                "1/3 or a decimal like 0.5."
+                f"Couldn't read {self._describe(value)} as a position. Use "
+                "a fraction like 1/3 or a decimal like 0.5."
             )
         if not 0.0 <= fraction <= 1.0:
             raise CommandError(
@@ -309,8 +314,8 @@ class CommandInterpreter:
         fraction = parse_fraction(value)
         if fraction is None:
             raise CommandError(
-                f"Couldn't read {value!r} as a position. Use a fraction like "
-                "1/3 or a decimal like 0.5."
+                f"Couldn't read {self._describe(value)} as a position. Use "
+                "a fraction like 1/3 or a decimal like 0.5."
             )
         return fraction
 
@@ -466,6 +471,8 @@ class CommandInterpreter:
             "                              an edge to the vertex lacking one\n"
             "  (harmonic <A> <B> <C> [<P>]) the fourth harmonic of C with\n"
             "                              respect to A and B, by quadrangle\n"
+            "  (ideal-point <line>)        its point at infinity; join to it\n"
+            "                              to draw a parallel\n"
             "  (points) / (lines)          everything on the canvas\n"
             "  (meets <lines>)             where those lines cross\n"
             "  (lines-through <point>)     the lines it lies on\n"
@@ -594,12 +601,20 @@ class CommandInterpreter:
         drawn = []
         for a in starts:
             for b in ends:
-                if a is b or a.center() == b.center():
+                if a is b:
                     continue
-                line = self._join(a, b)
+                line = self._join_or_parallel(a, b)
+                if line is None:
+                    continue
                 if not any(other is line for other in drawn):
                     drawn.append(line)
         if not drawn:
+            if all(self._is_ideal(point) for point in starts + ends):
+                raise CommandError(
+                    "Those are all points at infinity. Two of them determine "
+                    "the line at infinity, which Prism has no way to draw — "
+                    "join one to an ordinary point instead, for a parallel."
+                )
             raise CommandError(
                 "Can't draw a line: those are the same point, or two points in "
                 "the same place."
@@ -635,6 +650,77 @@ class CommandInterpreter:
             return "The canvas is already empty."
         self.scene.clear_all()
         return f"Cleared {_count(points, 'point')} and {_count(lines, 'line')}."
+
+    def _form_ideal_point(self, args) -> PointItem:
+        """``(ideal-point L1)`` — the point at infinity of a line's direction.
+
+        A line's two ends run out to the same ideal point, and **parallel
+        lines share it**, so asking a second parallel line gives the same
+        point back rather than another one.
+
+        It has no position — there is no coordinate at infinity — so it is
+        never drawn on the canvas. The view marks it where its lines leave
+        the viewport. What it is *for* is joining: ``(add-line P1 <ideal>)``
+        is the line through ``P1`` parallel to that one, because joining a
+        point to a point at infinity is exactly what drawing a parallel is.
+
+        Returns:
+            The point at infinity.
+        """
+        if len(args) != 1:
+            raise CommandError(
+                "Usage: (ideal-point <line>)\n"
+                "  e.g. (ideal-point L1)   the point L1 runs out to\n"
+                "  Join to it to draw a parallel: (add-line P1 (ideal-point L1))"
+            )
+        line = self._as_line(args[0])
+        point = self.scene.ideal_point_of(line)
+        if point is None:
+            raise CommandError(
+                f"{self._element_name(line)} has no direction to speak of, so "
+                "it has no point at infinity."
+            )
+        return point
+
+    @staticmethod
+    def _is_ideal(point) -> bool:
+        """Whether a point is a point at infinity."""
+        anchor = point.anchor() if point.has_anchor() else None
+        return anchor is not None and anchor.kind == "ideal"
+
+    def _join_or_parallel(self, a: PointItem, b: PointItem):
+        """Join two points, or draw a parallel when one is at infinity.
+
+        Joining a point to a **point at infinity** is drawing the line
+        through it in that direction — which is what a parallel is. Two
+        ideal points would determine the line at infinity, which Prism has no
+        way to draw, so that pair is skipped.
+
+        Returns:
+            The line, or None if the pair gives nothing to draw.
+        """
+        ideal_a, ideal_b = self._is_ideal(a), self._is_ideal(b)
+        if ideal_a and ideal_b:
+            return None  # both at infinity: that is the line at infinity
+        if ideal_a or ideal_b:
+            through, infinite = (b, a) if ideal_a else (a, b)
+            angle = infinite.anchor().angle()
+            if angle is None:
+                raise CommandError(
+                    "That point at infinity has no line left to take a "
+                    "direction from."
+                )
+            # The parallel through this point may already be drawn — if the
+            # point is on a line of that direction, that line *is* the join,
+            # exactly as a shared side is for two ordinary points.
+            for line in self.scene.lines_through(through):
+                drawn = self.scene._line_angle(line)
+                if drawn is not None and self.scene._same_direction(drawn, angle):
+                    return line
+            return self.scene.add_line_through(through, angle)
+        if a.center() == b.center():
+            return None
+        return self._join(a, b)
 
     def _form_point(self, args) -> PointItem:
         if len(args) != 2:
@@ -1607,6 +1693,13 @@ class CommandInterpreter:
         return f"L{lines.index(line) + 1}" if line in lines else "L?"
 
     def _describe_point(self, point) -> str:
+        if self._is_ideal(point):
+            names = ", ".join(
+                sorted(self._line_name(ln) for ln in point.anchor().live_lines())
+            )
+            label = f'  "{point.label_text()}"' if point.label_text() else ""
+            where = f" of {names}" if names else ""
+            return f"at infinity{where}{label}"
         c = point.center()
         label = f'  "{point.label_text()}"' if point.label_text() else ""
         if point.is_meet():
@@ -1713,11 +1806,13 @@ def _count(number: int, noun: str) -> str:
 
 
 def _is_number(text: str) -> bool:
-    try:
-        float(text)
-        return True
-    except ValueError:
-        return False
+    """Whether an atom reads as a plain number.
+
+    Deliberately **not** ``float(text)`` alone: that accepts ``inf`` and
+    ``nan``, which would be taken for angles and reach ``math.radians`` — and
+    would stop ``inf`` being usable as a name.
+    """
+    return parse_fraction(text) is not None and "/" not in str(text)
 
 
 def _match_by_id(items, name: str, prefix: str):

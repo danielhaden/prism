@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from prism.anchors import MeetAnchor
+from prism.anchors import IdealAnchor, MeetAnchor
 from prism.dependencies import (
     Changed,
     DependencyGraph,
@@ -1062,6 +1062,71 @@ class CanvasScene(QGraphicsScene):
             (it for it in self.selectedItems() if isinstance(it, LineItem)),
             key=lambda it: getattr(it, "_seq", 0),
         )
+
+    #: Directions within this many degrees count as the same direction, and
+    #: so as running to the same point at infinity.
+    PARALLEL_TOLERANCE_DEG = 0.1
+
+    def ideal_points(self) -> list:
+        """Every point at infinity currently on the canvas."""
+        return [
+            point
+            for point in self.ordered_points()
+            if point.anchor() is not None and point.anchor().kind == "ideal"
+        ]
+
+    def ideal_point_of(self, line: LineItem) -> PointItem | None:
+        """The point at infinity of a line's direction, made if there is none.
+
+        Parallel lines run to the **same** ideal point, so a line whose
+        direction matches an existing one joins that point's anchor rather
+        than getting a point of its own — the same identity rule meets
+        follow.
+
+        The point has no position: it is created undefined, and stays that
+        way, so it is never drawn at a coordinate and never hit-tested.
+
+        Args:
+            line: The line whose direction to take.
+
+        Returns:
+            The point at infinity, or None if the line is degenerate.
+        """
+        angle = self._line_angle(line)
+        if angle is None:
+            return None
+        for point in self.ideal_points():
+            other = point.anchor().angle()
+            if other is not None and self._same_direction(angle, other):
+                point.anchor().add_line(line)
+                return point
+        point = PointItem(line.scene_line().p2())
+        point.set_anchor(IdealAnchor([line]))
+        self._apply_default_point_style(point)
+        self._tag(point)
+        self.addItem(point)
+        # No position, so it is undefined from birth and never drawn.
+        point.set_position_undefined(True)
+        self.commit_undo()
+        return point
+
+    @staticmethod
+    def _line_angle(line: LineItem) -> float | None:
+        """A line's direction in degrees clockwise from horizontal."""
+        segment = line.scene_line()
+        if segment.length() < 1e-9:
+            return None
+        delta = segment.p2() - segment.p1()
+        return math.degrees(math.atan2(delta.y(), delta.x()))
+
+    def _same_direction(self, first: float, second: float) -> bool:
+        """Whether two angles point along the same line.
+
+        Taken **modulo 180**: a line has no sense of direction, so 30° and
+        210° are the same line, running to the same point at infinity.
+        """
+        gap = abs(first - second) % 180.0
+        return min(gap, 180.0 - gap) <= self.PARALLEL_TOLERANCE_DEG
 
     def meet_of(self, a: LineItem, b: LineItem) -> PointItem | None:
         """The point where two lines meet, if they meet on the canvas.

@@ -76,6 +76,13 @@ class Definable:
         return True
 
     def _apply_visibility(self) -> None:
+        if getattr(self, "is_ideal", None) is not None and self.is_ideal():
+            # A point at infinity is permanently undefined — there is no
+            # coordinate for it — but it must stay selectable, and Qt will
+            # not select a hidden item. It draws nothing and has no shape,
+            # so being "visible" costs nothing on screen.
+            self.setVisible(self._shown)
+            return
         visible = self._shown and not self._undefined
         if not visible and self.isSelected():
             self.setSelected(False)

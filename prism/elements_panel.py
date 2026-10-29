@@ -144,6 +144,13 @@ class ElementsPanel(QDockWidget):
     # -- Describing --------------------------------------------------------
 
     def _describe_point(self, point: PointItem) -> str:
+        if point.is_ideal():
+            # No coordinate to show: that is the whole point of it.
+            lines = ", ".join(
+                sorted(self._scene.line_id(ln) for ln in point.anchor().live_lines())
+            )
+            name = self._scene.element_name(point)
+            return f"{name}  at infinity" + (f"  [of {lines}]" if lines else "")
         centre = point.center()
         text = f"{self._scene.element_name(point)}  ({centre.x():.1f}, {centre.y():.1f})"
         tags = []

@@ -62,6 +62,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
     determine it; further concurrent lines **join the same anchor**, so three
     concurrent lines give one point, not three stacked (stage 3). Read the
     same relation from the other side with `LineItem.meets()`.
+  - `IdealAnchor(lines)` — marks a point as the **point at infinity** of a
+    direction. `position()` returns None *always*: there is no coordinate at
+    infinity. Parallel lines share one ideal point, so the anchor holds a
+    set, as `MeetAnchor` does; `CanvasScene.ideal_point_of(line)` finds one
+    of the same direction (mod 180, within `PARALLEL_TOLERANCE_DEG`) or makes
+    it. **It must stay selectable**, and Qt will not select a hidden item —
+    so `PointItem.is_ideal()` keeps it *visible* while `paint()` returns
+    early, `shape()` is empty and `boundingRect()` is empty, and
+    `Definable._apply_visibility` leaves it alone. Present for selection,
+    absent from the picture and from hit-testing. Persisted as
+    `{"kind": "ideal", "lines": [...]}`; a point anchor dict with no `"kind"`
+    is a line anchor, which is what older drawings hold.
+    Joining to one draws the **parallel** (`_join_or_parallel`), reusing a
+    parallel already through that point; two of them would give the line at
+    infinity, which is refused with that reason.
   - `LineAnchor(line, t, locked)` — keeps a point on a line; **dragging
     slides** it, unless `locked`, when it is held at `t`. A locked anchor's
     `constrain_drag` returns its current position: returning `None` means
@@ -234,6 +249,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 - Commands are **S-expressions**; forms **return the element they create**, so
   they compose: `(add-line 260 (point L1 2/3))`.
+- `parse_fraction` / `_is_number` reject **`inf`** and **`nan`**: bare
+  `float()` accepts both, which made `(define inf …)` fail as "a number",
+  let `(add-line nan …)` draw a line at `(nan, nan)`, and crashed
+  `math.radians(inf)` with a domain error.
 - Reader: `prism/sexpr.py`. `;` starts a remark to end of line, **and ends an
   atom**, as in lisp — so `(rm P1;why)` loses its `)` to the remark and reports
   a missing bracket, which is what lisp does too. A `;` inside `"quoted text"`
@@ -496,8 +515,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   centred exactly on the border, half the circle is clipped away and nearly
   invisible. The pointer is measured against the **drawn** position, not the
   raw crossing, so you aim at what you see. Hidden lines offer none.
-  **The right-click action on it is not built yet** — it needs a
-  representation for ideal points, which Prism still lacks.
+  Right-clicking it offers **Select *L1*'s Point at Infinity**, which runs
+  `(ideal-point L1)` like every other canvas action and selects the result;
+  the circle is **filled** while that point is selected, since the point has
+  nowhere of its own on screen to show it.
 - The view uses `FullViewportUpdate`, because an edge marker can change from
   a scene change anywhere; the default partial updates left stale chrome.
 - Multi-select: **Ctrl-click** or **rubber-band** (plain clicks replace).

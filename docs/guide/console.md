@@ -328,6 +328,40 @@ harmonic well-defined.
     line and `D` is the point at infinity. Prism has no way to represent that
     yet, so it says so rather than guessing.
 
+### `(ideal-point <line>)`
+
+The line's **point at infinity** — the point it runs out to, in both
+directions.
+
+```
+(ideal-point L1)                  →  P4  at infinity of L1
+(add-line P2 (ideal-point L1))    →  the line through P2 parallel to L1
+```
+
+**Parallel lines share it.** Asking a second line of the same direction gives
+the same point back, not another one — which is exactly what "parallels meet
+at infinity" means, and it is the same identity rule crossings follow.
+
+It has **no position**, because there is no coordinate at infinity. So it is
+never drawn on the canvas, never clicked, and never caught by a rubber band.
+It appears in [`(ls)`](#ls-points-lines) and the Elements panel as
+`at infinity of L1`, with no coordinates.
+
+What it is *for* is **joining**: a line through a point and a point at
+infinity is the parallel through that point. If that parallel is already
+drawn, that line comes back rather than a second one on top of it, the same
+as for two ordinary points.
+
+Two points at infinity determine the **line at infinity**, which Prism has no
+way to draw — joining them says so.
+
+!!! tip "Reaching one on the canvas"
+    Hover near where a line leaves the view: a small orange circle appears on
+    the line at the edge. Right-click it for **Select *L1*'s Point at
+    Infinity**, which runs this command and selects the point. The circle
+    fills in while that point is selected, since the point has nowhere of its
+    own on screen to show it.
+
 ### `(format <line> <thickness> [<colour>] [<style>])`
 
 Change how a line is drawn.

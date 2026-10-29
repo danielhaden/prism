@@ -5,7 +5,7 @@ import math
 import shiboken6
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import QGraphicsView
+from PySide6.QtWidgets import QGraphicsView, QMenu
 
 from prism.items import LineItem, PointItem
 from prism.templates import TEMPLATE_MIME, deserialize, instantiate
@@ -200,6 +200,16 @@ class CanvasView(QGraphicsView):
             crossing.y() + along.y() * self.BORDER_INSET_PX,
         )
 
+    def _ideal_selected(self, line) -> bool:
+        """Whether this line's point at infinity is the selected one."""
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "ideal_points"):
+            return False
+        return any(
+            point.isSelected() and point.anchor().references_line(line)
+            for point in scene.ideal_points()
+        )
+
     def _track_border_handle(self, position: QPointF) -> None:
         """Offer, or stop offering, the handle under the pointer."""
         found = self.border_handle_at(position)
@@ -214,13 +224,16 @@ class CanvasView(QGraphicsView):
     def _draw_border_handle(self, painter) -> None:
         if self._border_handle is None:
             return
-        at, _line = self._border_handle
+        at, line = self._border_handle
         painter.save()
         painter.setWorldMatrixEnabled(False)  # viewport pixels
-        pen = QPen(QColor(self.BORDER_HANDLE_COLOR), 2)
+        colour = QColor(self.BORDER_HANDLE_COLOR)
+        pen = QPen(colour, 2)
         pen.setCosmetic(True)
         painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+        # Filled once that point at infinity is selected, so the handle shows
+        # the state of a point that has nowhere on screen to show it itself.
+        painter.setBrush(colour if self._ideal_selected(line) else Qt.NoBrush)
         painter.drawEllipse(at, self.BORDER_HANDLE_PX, self.BORDER_HANDLE_PX)
         painter.restore()
 
@@ -449,6 +462,44 @@ class CanvasView(QGraphicsView):
         self.recenter_if_lost()
 
     # -- Pan (middle mouse drag) ------------------------------------------
+
+    def contextMenuEvent(self, event):
+        """Offer the point at infinity when the edge handle is right-clicked.
+
+        Handled here rather than in the scene because the handle is chrome:
+        it is not a scene item, so nothing would route an item menu to it.
+        """
+        if self._tool == Tool.SELECT:
+            handle = self.border_handle_at(QPointF(event.pos()))
+            if handle is not None:
+                self._border_handle = handle
+                self.viewport().update()
+                self._offer_point_at_infinity(event, handle[1])
+                event.accept()
+                return
+        super().contextMenuEvent(event)
+
+    def _offer_point_at_infinity(self, event, line) -> None:
+        """Show the handle's menu and act on it."""
+        scene = self.scene()
+        name = scene.line_id(line) if hasattr(scene, "line_id") else "the line"
+        menu = QMenu()
+        chosen = menu.addAction(f"Select {name}'s Point at Infinity")
+        chosen.setToolTip(
+            "The point this line runs out to. Join to it to draw a parallel."
+        )
+        picked = menu.exec(event.globalPos())
+        if picked is not chosen:
+            return
+        # Echo it as the command that would have done it, like every other
+        # canvas action; then take the point back to select it.
+        scene.run_as_command(f"(ideal-point {name})")
+        point = scene.ideal_point_of(line)
+        if point is None:
+            return
+        scene.clearSelection()
+        point.setSelected(True)
+        self.viewport().update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MiddleButton:

@@ -123,10 +123,16 @@ def capture(scene) -> dict:
             and id(pt_anchor.line) in l_index
         ):
             anchor = {
+                "kind": "line",
                 "line": l_index[id(pt_anchor.line)],
                 "t": pt_anchor.t,
                 "locked": getattr(pt_anchor, "locked", False),
             }
+        elif pt_anchor is not None and pt_anchor.kind == "ideal":
+            indices = [l_index.get(id(line)) for line in pt_anchor.lines]
+            indices = [index for index in indices if index is not None]
+            if indices:
+                anchor = {"kind": "ideal", "lines": sorted(indices)}
         point_data.append(
             {
                 "xy": [point.center().x(), point.center().y()],
@@ -248,18 +254,24 @@ def restore(scene, state: dict) -> None:
     # Wire relationships once both sides exist.
     _wire_lines(lines, points, state["lines"], meets_ready=False)
 
-    from prism.anchors import LineAnchor
+    from prism.anchors import IdealAnchor, LineAnchor
 
     for point, data in zip(points, state["points"]):
-        if data["anchor"] is not None:
-            line = lines[data["anchor"]["line"]]
-            point.set_anchor(
-                LineAnchor(
-                    line,
-                    data["anchor"]["t"],
-                    data["anchor"].get("locked", False),
-                )
+        spec = data["anchor"]
+        if spec is None:
+            continue
+        # Older drawings have no "kind": they are all line anchors.
+        if spec.get("kind", "line") == "ideal":
+            point.set_anchor(IdealAnchor([lines[i] for i in spec["lines"]]))
+            point.set_position_undefined(True)
+            continue
+        point.set_anchor(
+            LineAnchor(
+                lines[spec["line"]],
+                spec["t"],
+                spec.get("locked", False),
             )
+        )
 
     for members in state.get("groups", []):
         group = GroupItem()

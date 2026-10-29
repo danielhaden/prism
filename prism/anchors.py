@@ -7,6 +7,8 @@ responds to being dragged:
 * :class:`LineAnchor` keeps a point on a line; dragging it *slides* it along.
 * :class:`MeetAnchor` keeps a point at the crossing of two lines;
   dragging it *detaches* it into a free point.
+* :class:`IdealAnchor` marks a point as a **point at infinity** — a
+  direction rather than a place. It has no position at all.
 
 All points are the same kind of object; whether one is "an intersection point"
 is just a matter of which anchor (if any) it currently carries.
@@ -123,3 +125,80 @@ class MeetAnchor(Anchor):
     def set_lines(self, lines: list) -> None:
         """Replace the set of lines meeting here."""
         self.lines = list(lines)
+
+
+class IdealAnchor(Anchor):
+    """Marks a point as the **point at infinity** of a direction.
+
+    A line's two ends run out to the same ideal point, and parallel lines
+    share it — which is exactly what "parallels meet at infinity" means. So
+    the anchor holds a *set* of lines, as :class:`MeetAnchor` does, and a
+    second line parallel to the first joins the same anchor rather than
+    making a point of its own.
+
+    It has **no position**, ever. ``position()`` returns None, so the scene
+    marks the point undefined and never draws it at a coordinate — which is
+    the truth: there is no coordinate. The view shows it where its lines
+    leave the viewport instead.
+    """
+
+    kind = "ideal"
+    persistent = True
+
+    def __init__(self, lines: list):
+        """
+        Args:
+            lines: The lines sharing this direction; at least one.
+        """
+        self.lines = list(lines)
+
+    def position(self) -> QPointF | None:
+        # At infinity: there is no finite place to be, and saying so is what
+        # keeps the point undefined and undrawn.
+        return None
+
+    def constrain_drag(self, scene_pos: QPointF) -> QPointF | None:
+        # Unreachable: an undefined point is hidden, and Qt leaves hidden
+        # items out of hit-testing, so it can never be picked up.
+        return None
+
+    def live_lines(self) -> list:
+        """The lines still on the canvas."""
+        return [line for line in self.lines if line.scene() is not None]
+
+    def direction(self) -> QLineF | None:
+        """The shared direction as a segment, or None if every line is gone."""
+        for line in self.live_lines():
+            segment = line.scene_line()
+            if segment.length() > 1e-9:
+                return segment
+        return None
+
+    def angle(self) -> float | None:
+        """The direction in degrees clockwise from horizontal.
+
+        Prism's own angle convention, so the answer feeds straight back into
+        ``(add-line <angle> …)``.
+
+        Returns:
+            The angle, or None if no line is left to read it from.
+        """
+        segment = self.direction()
+        if segment is None:
+            return None
+        import math
+
+        delta = segment.p2() - segment.p1()
+        return math.degrees(math.atan2(delta.y(), delta.x()))
+
+    def references_line(self, line) -> bool:
+        return any(other is line for other in self.lines)
+
+    def add_line(self, line) -> None:
+        """Note another line running to this same point at infinity."""
+        if not self.references_line(line):
+            self.lines.append(line)
+
+    def drop_line(self, line) -> None:
+        """Forget a line that has gone."""
+        self.lines = [other for other in self.lines if other is not line]

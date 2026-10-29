@@ -100,7 +100,20 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
 
     # -- Geometry ----------------------------------------------------------
 
+    def is_ideal(self) -> bool:
+        """Whether this is a **point at infinity** — a direction, not a place.
+
+        Such a point is kept *visible* to Qt so it can be selected and acted
+        on, but it draws nothing and has no shape, so it is never seen on the
+        canvas and never caught by a click or a rubber band. The view shows
+        it where its lines leave the viewport instead.
+        """
+        anchor = self.anchor()
+        return anchor is not None and anchor.kind == "ideal"
+
     def boundingRect(self) -> QRectF:
+        if self.is_ideal():
+            return QRectF()
         r = max(self._radius + 4.0, self._glow_radius, self.HIT_PX) + 2.0
         return QRectF(-r, -r, 2 * r, 2 * r)
 
@@ -110,6 +123,8 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # screen pixels, comparable to a line's band, since points sit above
         # lines and are the more specific thing to aim at. (These coordinates
         # are screen pixels: the item ignores view transformations.)
+        if self.is_ideal():
+            return QPainterPath()  # nothing to click at infinity
         path = QPainterPath()
         r = max(self._radius + 2.0, self.HIT_PX)
         path.addEllipse(QPointF(0, 0), r, r)
@@ -478,6 +493,8 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             scene.commit_undo()
 
     def paint(self, painter, option, widget=None):
+        if self.is_ideal():
+            return  # there is no coordinate at infinity to draw at
         origin = QPointF(0, 0)
         painter.save()
 
