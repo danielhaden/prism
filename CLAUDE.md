@@ -382,16 +382,38 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   the display name would send a hand-named script like `net(1).prism` to
   `net1.prism` and leave the original behind.
 - **Book** (`prism/book_panel.py`; right, tabbed with Library/Scripts): a
-  `QPdfView` reader for *one* PDF — Olive Whicher's *Projective Geometry* —
-  pointed at from **Settings → Book (PDF)…** (`PRISM_BOOK_PATH` overrides).
-  Continuous pages, fit-to-width by default, and the last page read is
-  remembered (reset when the book is re-pointed). Uses PySide6's **QtPdf /
+  `QPdfView` reader over a **shelf** of PDFs — Whicher's *Projective
+  Geometry*, Coxeter's — with a dropdown at the top to pick between them and
+  a **…** button for Add / Rename / Remove. Added from **Settings → Add
+  Book…**; `PRISM_BOOK_PATH` stands in for the whole shelf (one book, nothing
+  to add or remove — `settings.shelf_is_fixed()` greys the menu out).
+  Continuous pages, fit-to-width by default. Uses PySide6's **QtPdf /
   QtPdfWidgets** — part of PySide6, so no new dependency.
+  The shelf lives in `settings.books()` as JSON under `books/shelf`, each
+  entry `{name, path, page}`, with `books/current` the index. **Each book
+  keeps its own page**, so turning to the other and back returns to where you
+  were. A shelf that was never written is built from the old single
+  `paths/book_path` + `book/last_page`, so an upgrade opens where it left off.
+  Display names come off the filename (`book_name_for`): drop `.pdf`, cut at
+  the first ` -- ` (which is what tames an Anna's-Archive download), truncate
+  to `BOOK_NAME_LIMIT`. The full path is the dropdown's tooltip.
   Gotchas: `QPdfView.zoomFactor()` stays at its last *custom* value while
   fit-to-width is on, so a zoom step reconstructs the fitted scale from the page
   width (`_fitted_zoom`); `QPdfPageNavigator.jump()` to the page it's already on
-  emits nothing, so the controls are synced by hand after a load; page rendering
-  is **asynchronous**, so a pixel check needs an event-pumping wait.
+  emits nothing, so the controls are synced by hand after a load; closing a
+  document **re-emits a page change**, which would record the outgoing page
+  against the incoming book — hence `_loading`, and reading the target page
+  before the close. The combo uses `activated`, not `currentIndexChanged`, so
+  only a choice the user made turns a page. The shelf row lives *outside* the
+  placeholder/reader stack, so a book that has gone missing still leaves the
+  dropdown there to switch away from it.
+  Testing gotcha: **`QPdfView`'s viewport does not paint into an offscreen
+  `QWidget.render()`** — only the chrome does, so a pixel count over the
+  panel measures buttons and borders and passes on a blank page. Check the
+  page at the document instead (`QPdfDocument.render(page, size)`), which
+  also distinguishes two books by their content rather than their page count.
+  Page rendering is **asynchronous**, so either way needs an event-pumping
+  wait.
 
 ## The drawing, between sessions
 

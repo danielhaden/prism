@@ -1,30 +1,44 @@
 # The Book
 
-Prism's constructions come out of a book — Olive Whicher's *Projective
-Geometry: Creative Polarities in Space and Time* — so the app can keep a copy of
-it open beside the canvas. The **Book** panel is a PDF reader docked on the
-right, tabbed with the Library and Scripts; toggle it from **View → Show Book**.
+Prism's constructions come out of books — Olive Whicher's *Projective
+Geometry: Creative Polarities in Space and Time*, Coxeter's *Projective
+Geometry* — so the app can keep them open beside the canvas. The **Book**
+panel is a PDF reader docked on the right, tabbed with the Library and
+Scripts; toggle it from **View → Show Book**.
 
-## Pointing Prism at the book
+## The shelf
 
-Prism doesn't ship the book. The first time you open the panel it asks for a
-copy:
+Prism doesn't ship any books. The first time you open the panel it asks for
+one:
 
-1. **Settings → Book (PDF)…** (or the **Choose Book…** button in the panel).
+1. **Settings → Add Book…** (or the **Add Book…** button in the panel).
 2. Pick the PDF.
 
-The choice is remembered between sessions. The chooser starts on **All files**
-rather than `*.pdf`, because a scan filed away by hand often has no `.pdf` on
-the end — Prism goes by the file's contents, not its name.
+Add as many as you read from. They appear in the **dropdown** at the top of
+the panel, and choosing one turns to it. The **…** button beside the dropdown
+adds another, renames the current one, or takes it off the shelf — removing a
+book forgets it, and leaves the PDF itself exactly where it is.
 
-!!! tip "Overriding the path"
-    Setting `PRISM_BOOK_PATH` in the environment overrides the saved path,
-    which is handy for testing or for keeping two copies around.
+Names are read off the filename: the `.pdf` goes, anything after a `--`
+separator goes with it (which is what turns a download's whole bibliography
+into *Projective Geometry, 2nd Edition*), and a long name is cut short to fit.
+**Rename…** if the result isn't what you'd call it. The dropdown's tooltip
+always carries the full path.
+
+The chooser starts on **All files** rather than `*.pdf`, because a scan filed
+away by hand often has no `.pdf` on the end — Prism goes by the file's
+contents, not its name.
+
+!!! tip "Overriding the shelf"
+    Setting `PRISM_BOOK_PATH` in the environment stands in for the whole
+    shelf: that one PDF, and no adding or removing. Handy for testing.
 
 ## Reading
 
 | Control | What it does |
 |---------|--------------|
+| dropdown | Which book to read |
+| **…** | Add, rename, or remove a book |
 | **◀** / **▶** | Previous / next page |
 | page box | Type a page number to jump there |
 | **−** / **+** | Zoom out / in, in 25% steps |
@@ -34,6 +48,6 @@ Pages scroll continuously, so you can also just drag the scrollbar through a
 chapter. Zooming in or out leaves **Fit** behind and holds the scale you chose
 until you press **Fit** again.
 
-Prism remembers the page you were last on and opens there next time, so the
-panel behaves like a book with a bookmark in it rather than a file you reopen.
-Pointing Prism at a *different* book clears that bookmark.
+**Every book keeps its own page.** Turn from one to the other and back and you
+return to where you were, not to wherever the other book happens to be open —
+a shelf of books with bookmarks in them, rather than a file viewer.
