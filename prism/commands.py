@@ -488,7 +488,9 @@ class CommandInterpreter:
             "                              functions are kept\n"
             "  (label <element> <text>)    name a point or line; quote text\n"
             "                              with spaces, \"\" removes the label\n"
-            "  (format <line> <w> <c> <s>) thickness, colour, dash style\n"
+            "  (format <elem> <size> …)    thickness (a line) or radius (a\n"
+            "                              point), colour, then a dash style or\n"
+            "                              a glow; a list works\n"
             "  (label -auto)               label everything: points A, B, C…\n"
             "                              and lines a, b, c…\n"
             "  (label -clear)              remove every label\n"
@@ -1260,24 +1262,61 @@ class CommandInterpreter:
     }
 
     def _form_format(self, args) -> str:
-        """``(format L1 0.5 #d3d3d3 "dashed")`` — how a line is drawn.
+        """``(format L1 0.5 #d3d3d3 "dashed")`` — how an element is drawn.
 
-        Thickness, colour and style, in that order; any of them may be left
-        off, and a list of lines may be given instead of one.
+        Size, then colour, then whatever is left: a **dash style** for lines,
+        a **glow radius** for points. Any may be left off, and a list stands
+        in for one element, so ``(format (lines) 2 red)`` restyles the canvas
+        in a breath.
+
+        Size means a line's thickness or a point's radius — the one measure
+        each kind has, both in screen pixels, so neither changes with zoom.
+
+        The last argument is read as a number if it is one and as a style
+        name otherwise, which is how the two kinds share the slot. A style
+        given where nothing is a line, or a glow where nothing is a point,
+        says so rather than passing silently.
+
+        Returns:
+            What was formatted.
         """
         if not 2 <= len(args) <= 4:
             raise CommandError(_FORMAT_USAGE)
-        width = self._as_float(args[1], "a thickness") if len(args) > 1 else None
+        size = self._as_number(args[1], "a thickness or radius")
+        if size < 0:
+            raise CommandError("A size below 0 draws nothing. Give 0 or more.")
         color = self._as_color(args[2]) if len(args) > 2 else None
-        style = self._as_line_style(args[3]) if len(args) > 3 else None
+        style = glow = None
+        if len(args) > 3:
+            glow = parse_fraction(self._value(args[3]))
+            if glow is None:
+                style = self._as_line_style(args[3])
+            elif glow < 0:
+                raise CommandError("A glow below 0 draws nothing. Give 0 or more.")
 
-        lines = self._flatten([args[0]], LineItem, "line")
-        if not lines:
-            raise CommandError("(format …) needs a line to work on.")
+        elements = self._flatten(
+            [args[0]], (PointItem, LineItem), "point or line"
+        )
+        if not elements:
+            raise CommandError("(format …) needs a point or a line to work on.")
+        lines = [item for item in elements if isinstance(item, LineItem)]
+        points = [item for item in elements if isinstance(item, PointItem)]
+        if style is not None and not lines:
+            raise CommandError(
+                "A dash style belongs to a line, and none of those are lines.\n"
+                "A point takes (format <point> <radius> [<colour>] [<glow>])."
+            )
+        if glow is not None and not points:
+            raise CommandError(
+                "A glow is a point's surround, and none of those are points.\n"
+                'A line takes a dash style there, e.g. "dashed".'
+            )
         for line in lines:
-            line.set_style(color=color, width=width, style=style)
+            line.set_style(color=color, width=size, style=style)
+        for point in points:
+            point.set_display(radius=size, color=color, glow_radius=glow)
         self.scene.commit_undo()
-        described = ", ".join(self._line_name(line) for line in lines)
+        described = ", ".join(self._element_name(item) for item in elements)
         return f"Formatted {described}"
 
     def _as_color(self, argument) -> QColor:
@@ -1675,10 +1714,14 @@ def _count(n: int, noun: str) -> str:
 
 #: Shown when (format …) can't read its arguments.
 _FORMAT_USAGE = (
-    "Usage: (format <line> <thickness> [<colour>] [<style>])\n"
-    '  e.g. (format L14 0.5 #d3d3d3 "dashed")\n'
-    "  colour: a hex code or a name; style: solid, dashed, dotted,\n"
-    "  dash-dot, dash-dot-dot. A list of lines works too."
+    "Usage: (format <element> <size> [<colour>] [<style or glow>])\n"
+    '  e.g. (format L14 0.5 #d3d3d3 "dashed")   one line\n'
+    "   or: (format (points) 3 red 9)            every point\n"
+    "  size:   a line's thickness or a point's radius, in screen pixels\n"
+    "  colour: a hex code like #d3d3d3, or a name like grey\n"
+    "  last:   a dash style for lines - solid, dashed, dotted, dash-dot,\n"
+    "          dash-dot-dot - or a glow radius for points\n"
+    "  A list works wherever one element does."
 )
 
 

@@ -54,7 +54,7 @@ so labels can contain one.
 ## Naming elements
 
 Elements are referred to either by their **label** (`A`, `a` — matched
-case-insensitively) or by the **id shown by [`list`](#list)** (`P1`, `L1`).
+case-insensitively) or by the **id shown by [`ls`](#ls-points-lines)** (`P1`, `L1`).
 
 !!! note "Ids are positional"
     `P1` / `L1` are the numbers `list` prints *right now*; they shift as you
@@ -159,7 +159,7 @@ A pair the figure **already has a line through** is never drawn over — that
 line comes back instead. Two distinct points determine one line, so if the
 figure says both of them lie on one, that line *is* their join and there is
 nothing to add. "Says" means the same recorded relation
-[`(lines-through …)`](#lines-through-point) reads: bound, anchored, pinned, or
+[`(lines-through …)`](#enumerators-building-without-naming-every-step) reads: bound, anchored, pinned, or
 a crossing.
 
 That is what makes the cross product do real work. Given a triangle and a
@@ -176,7 +176,7 @@ two vertices — leaving exactly the third. Those are the
 rather than being drawn twice.
 
 The value is the line when only one came of it, and the list of lines
-otherwise — so it feeds straight into [`(format …)`](#format-line-thickness-colour-style)
+otherwise — so it feeds straight into [`(format …)`](#format-element-size-colour-style-or-glow)
 or [`(define …)`](#define-name-value).
 
 **Through points, at an angle** (the first argument is a number):
@@ -314,25 +314,44 @@ In the projective sense a triangle needs three points **not on a line**, so
 collinear points are refused rather than given three copies of the same side.
 The same goes for the same point twice.
 
-### `(format <line> <thickness> [<colour>] [<style>])`
+### `(format <element> <size> [<colour>] [<style or glow>])`
 
-Change how a line is drawn.
+Change how a line or a point is drawn.
 
 ```
 (format L14 0.5 #d3d3d3 "dashed")
-(format L2 3)                       # thickness alone
+(format L2 3)                       # size alone
 (format L2 1 grey)                  # a colour name works too
 (format (lines) 0.25 #aabbcc "dotted")
+(format (points) 3 red)             # every point at once
+(format (points) 3 red 9)           # …with a wider surround
 ```
 
-Thickness is in **screen pixels** and stays that width at any zoom. Colour is
-a hex code or any name Qt knows. The styles are `solid`, `dashed`, `dotted`,
-`dash-dot` and `dash-dot-dot`.
+**Size** is a line's thickness or a point's radius — the one measure each kind
+has. Both are in **screen pixels** and stay that size at any zoom. Colour is a
+hex code or any name Qt knows.
 
-Arguments after the line may be left off, so `(format L1 0.5)` changes only
-the thickness. A **list** works in place of a single line, which is the useful
-form for a net — dropping every construction line back to a pale hairline
-leaves the figure you care about standing out:
+The **last argument** belongs to whichever kind you are formatting: for lines
+a dash style — `solid`, `dashed`, `dotted`, `dash-dot`, `dash-dot-dot` — and
+for points the radius of the [surround](points-and-lines.md#display-properties)
+that cuts lines away behind the dot. It is read as a number if it is one and
+as a style name otherwise. Giving a style where nothing in the list is a line,
+or a glow where nothing is a point, says so rather than passing silently.
+
+Arguments after the element may be left off, so `(format L1 0.5)` changes only
+the thickness.
+
+**A list works in place of a single element**, which is the point of
+[`(lines)`](#enumerators-building-without-naming-every-step) and `(points)`:
+
+```
+(format (lines) 2 blue)              # every line
+(format (points) 3 red)              # every point
+(format (list (points) (lines)) 2 teal)   # both, one colour
+```
+
+That is the useful form for a net — dropping every construction line back to a
+pale hairline leaves the figure you care about standing out:
 
 ```
 (define scaffolding (lines))
@@ -340,7 +359,18 @@ leaves the figure you care about standing out:
 (format scaffolding 0.5 #d3d3d3 "dashed")
 ```
 
-Formatting is undoable and is kept with the drawing between sessions.
+Naming the list first is worth doing when you mean *these* lines: `(lines)`
+read later includes everything drawn since.
+
+Formatting is undoable, and is kept with the drawing between sessions — with
+one exception.
+
+!!! warning "A crossing's formatting doesn't persist"
+    Points where lines meet are **not saved**: they are recomputed from the
+    lines when the drawing is reopened, and come back in the default style.
+    `(format (points) …)` styles them for the session, and free points keep
+    their styling as you would expect. Style the lines, or place the points
+    you mean to keep.
 
 ### `(draw-cevians <triangle> <line>)`
 
@@ -401,7 +431,7 @@ Empty the whole canvas.
 
 The names you have [defined](#define-name-value) are **left alone**. A list
 prunes itself to what is still there when it is next used, and a
-[function](#lambda-name--body) doesn't depend on the canvas at all — so a
+[function](#lambda-name-body) doesn't depend on the canvas at all — so a
 script can clear and rebuild without losing what it defined. That is the usual
 way to begin a script, since one otherwise draws on top of whatever happens to
 be there already.

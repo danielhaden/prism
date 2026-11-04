@@ -152,11 +152,24 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   locking a line at an arbitrary angle. Both are built by
   `_add_locked_line(start, end)`, which they share.
 - Line properties dialog: color, thickness (cosmetic), dash style. The same
-  thing from the console is `(format <line> <thickness> [<colour>] [<style>])`
-  → `LineItem.set_style()`, which the dialog now shares. Trailing arguments
-  may be omitted, a **list** of lines works, colours are hex or Qt names, and
+  thing from the console is `(format <element> <size> [<colour>] [<style or
+  glow>])` → `LineItem.set_style()`, which the dialog now shares. Trailing
+  arguments may be omitted, a **list** works, colours are hex or Qt names, and
   styles are `solid`/`dashed`/`dotted`/`dash-dot`/`dash-dot-dot`. The pen
   stays **cosmetic**, so thickness is screen pixels at any zoom.
+- `(format …)` takes **points too** → `PointItem.set_display()`: size is the
+  radius, and the fourth argument is the glow radius rather than a dash style.
+  Which one it is is read off the argument — a number is a glow, anything else
+  a style name — and a style with no line in the list (or a glow with no
+  point) is refused rather than ignored. `(format (points) 3 red)` is the
+  whole reason the form exists in that shape.
+- **A crossing's formatting does not persist.** `scene_state.capture()` saves
+  only points with no anchor; meets are recomputed on restore and come back
+  in the default style. Formatting a free point survives, so the two behave
+  differently through a reload. Pre-existing — the point dialog has always
+  had it — but `(format (points) …)` makes it easy to hit. Fixing it means
+  capturing each meet's style against its defining lines and reapplying after
+  `recompute_intersections()`.
 - Right-click a line → **Add Point to Line** adds a line-anchored point where
   you clicked (`CanvasScene.add_point_on_line_at`, which projects the click
   with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
@@ -198,8 +211,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   several points writes `(rm …)` **highest id first**, since removing one
   renumbers those after it. A label containing `"` is applied directly — the
   s-expression reader has no escapes. Still with no console form, so they
-  write nothing: display/line properties, visible range, Show Full Line, Snap
-  Point to Line, Lock to Line, Pin Lines Through Point.
+  write nothing: visible range, Show Full Line, Snap Point to Line, Lock to
+  Line, Pin Lines Through Point. (Display properties now have one —
+  `(format …)` — though the dialogs themselves still don't route through it.)
 - `(add point …)` and `(point <line> <fraction>)` take fractions **outside
   0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
   does: a click outside the frame is ordinary and the menu must be able to
