@@ -147,7 +147,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **Visible range**: right-click → "Define Visible Range…" adds an anchor point
   + neg/pos extents; only that segment is drawn.
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
-  move, can't rotate). The horizon uses this.
+  move, can't rotate). The horizon and the vertical use this, and nothing
+  else does — the mechanism is direction-agnostic, but there is no UI for
+  locking a line at an arbitrary angle. Both are built by
+  `_add_locked_line(start, end)`, which they share.
 - Line properties dialog: color, thickness (cosmetic), dash style. The same
   thing from the console is `(format <line> <thickness> [<colour>] [<style>])`
   → `LineItem.set_style()`, which the dialog now shares. Trailing arguments
@@ -180,8 +183,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   lines cross — and shows it if hidden. Disabled with a reason when more than
   two lines are selected. Fires the console command, like Add Horizon.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
-  adds an unattached point there, and **Add Horizon** a horizontal
-  orientation-locked line at the clicked height.
+  adds an unattached point there, **Add Horizon** a horizontal
+  orientation-locked line at the clicked height, and **Add Vertical** the
+  same a quarter turn round at the clicked width (`add_vertical_at`).
 - **Canvas actions should run as console commands.** `MainWindow` hands the
   scene `console.run_command` via `set_command_runner()`; an action calls
   `scene.run_as_command("(…)")`, which returns False when no runner is set so
@@ -189,6 +193,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   headless). **Every canvas action with a console equivalent now does this**
   — a figure built by clicking replays as one built by typing. Conversions
   live on the scene: `canvas_fractions()`, `horizon_fraction_at()`,
+  `vertical_fraction_at()`,
   `fraction_along_line()`, `point_id()`/`line_id()`/`element_id()`. Deleting
   several points writes `(rm …)` **highest id first**, since removing one
   renumbers those after it. A label containing `"` is applied directly — the
@@ -199,8 +204,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
   does: a click outside the frame is ordinary and the menu must be able to
   express it.
-- `(add horizon …)` accepts fractions **outside 0-1** (above/below the frame)
-  via `_as_canvas_fraction`; `_as_fraction` stays strict for the other forms.
+- `(add horizon …)` and `(add vertical …)` accept fractions **outside 0-1**
+  (beyond the frame) via `_as_canvas_fraction`; `_as_fraction` stays strict
+  for the other forms.
   Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
@@ -240,6 +246,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   is ordinary text, since the quote branch is tried first. Interpreter:
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
+  `(add vertical <fraction>)`,
   `(add-line <angle> <points>)`, `(add-line <points> <points>)`,
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,

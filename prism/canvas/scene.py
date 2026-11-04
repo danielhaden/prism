@@ -574,6 +574,23 @@ class CanvasScene(QGraphicsScene):
         rect = self.reference_rect()
         return self._add_horizon_at_y(rect.top() + fraction * rect.height())
 
+    def add_vertical(self, fraction: float) -> LineItem:
+        """Add a vertical, orientation-locked line down the canvas.
+
+        The horizon turned a quarter turn, and locked for the same reason:
+        a direction worth settling before the rest of the figure hangs off
+        it.
+
+        Args:
+            fraction: Where to place it across the reference frame, from 0
+                (the left of the canvas) to 1 (the right).
+
+        Returns:
+            The new line.
+        """
+        rect = self.reference_rect()
+        return self._add_vertical_at_x(rect.left() + fraction * rect.width())
+
     def set_command_runner(self, runner: Callable | None) -> None:
         """Let canvas actions go through the console.
 
@@ -618,6 +635,21 @@ class CanvasScene(QGraphicsScene):
         rect = self.reference_rect()
         return (y - rect.top()) / rect.height()
 
+    def vertical_fraction_at(self, x: float) -> float:
+        """Where a width sits across the reference frame, as a fraction.
+
+        What :meth:`horizon_fraction_at` does for a height. Values outside
+        0-1 mean left or right of the frame, which is allowed.
+
+        Args:
+            x: A width in scene coordinates.
+
+        Returns:
+            The fraction.
+        """
+        rect = self.reference_rect()
+        return (x - rect.left()) / rect.width()
+
     def add_horizon_at(self, scene_pos: QPointF) -> LineItem:
         """Add a horizon through a position on the canvas.
 
@@ -634,9 +666,44 @@ class CanvasScene(QGraphicsScene):
         """
         return self._add_horizon_at_y(scene_pos.y())
 
+    def add_vertical_at(self, scene_pos: QPointF) -> LineItem:
+        """Add a vertical through a position on the canvas.
+
+        What :meth:`add_horizon_at` is to :meth:`add_horizon`.
+
+        Args:
+            scene_pos: Where to put it, in scene coordinates; only the
+                width matters, since the line is vertical.
+
+        Returns:
+            The new line.
+        """
+        return self._add_vertical_at_x(scene_pos.x())
+
     def _add_horizon_at_y(self, y: float) -> LineItem:
         rect = self.reference_rect()
-        line = self.add_line(QPointF(rect.left(), y), QPointF(rect.right(), y))
+        return self._add_locked_line(
+            QPointF(rect.left(), y), QPointF(rect.right(), y)
+        )
+
+    def _add_vertical_at_x(self, x: float) -> LineItem:
+        rect = self.reference_rect()
+        return self._add_locked_line(
+            QPointF(x, rect.top()), QPointF(x, rect.bottom())
+        )
+
+    def _add_locked_line(self, start: QPointF, end: QPointF) -> LineItem:
+        """An orientation-locked line spanning the frame, as one undo step.
+
+        Args:
+            start: One end of the span; the line itself is infinite, so
+                the two only fix its direction and its handles.
+            end: The other end.
+
+        Returns:
+            The new line.
+        """
+        line = self.add_line(start, end)
         line.set_orientation_locked(True)
         self.on_line_changed(line)
         self.commit_undo()
@@ -1248,6 +1315,7 @@ class CanvasScene(QGraphicsScene):
         )
         free_point_action = menu.addAction("Add Free Point")
         horizon_action = menu.addAction("Add Horizon")
+        vertical_action = menu.addAction("Add Vertical")
         menu.addSeparator()
         hidden = self.hidden_points()
         show_action = (
@@ -1268,6 +1336,10 @@ class CanvasScene(QGraphicsScene):
             fraction = self.horizon_fraction_at(event.scenePos().y())
             if not self.run_as_command(f"(add horizon {_number(fraction)})"):
                 self.add_horizon_at(event.scenePos())
+        elif chosen is vertical_action:
+            fraction = self.vertical_fraction_at(event.scenePos().x())
+            if not self.run_as_command(f"(add vertical {_number(fraction)})"):
+                self.add_vertical_at(event.scenePos())
         elif show_action is not None and chosen is show_action:
             if not self.run_as_command("(show -all)"):
                 self.show_all_points()

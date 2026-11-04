@@ -108,6 +108,29 @@ Otherwise it's an ordinary infinite line — style it, label it, hang pencils of
 it, drag it up and down. Dragging an endpoint handle slides the whole line
 rather than tilting it.
 
+### `(add vertical <fraction>)`
+
+The horizon a quarter turn round: a **vertical** line down the canvas, its
+orientation **locked** in the same way.
+
+```
+(add vertical 1/2)     # down the middle
+(add vertical 1/3)     # a third of the way across
+(add vertical 0.75)    # decimals work too
+```
+
+The position is a fraction of the way **across** the reference frame: **0 is
+the left edge, 1 is the right**. As with the horizon, values outside that are
+allowed and mean left or right of the frame.
+
+!!! tip "The canvas runs this one too"
+    **Right-click blank canvas → Add Vertical** works out the fraction you
+    clicked at and runs `(add vertical …)` for you.
+
+A horizon and a vertical give you two fixed directions to build against, and
+where they cross the canvas records a point for itself — so the pair is also a
+way to put a point somewhere exactly, without measuring it out.
+
 ### `(add-line <points> <points>)`
 
 Add infinite lines, in one of two forms. Both take **lists**, and a one-element
@@ -661,6 +684,7 @@ can work on the canvas and come away with the script for what you did.
 |--------|------|
 | Add Free Point | `(add point <across> <down>)` |
 | Add Horizon | `(add horizon <fraction>)` |
+| Add Vertical | `(add vertical <fraction>)` |
 | Add Point to Line | `(point <line> <fraction>)` |
 | Add Point at Intersection | `(point <line> <line>)` |
 | Add Line Through Point | `(add-line 45 (list <point>))` |

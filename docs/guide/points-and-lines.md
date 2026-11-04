@@ -168,9 +168,12 @@ the point so it reads cleanly instead of dissolving into a knot of ink.
 ## Lines
 
 Right-click blank canvas → **Add Horizon** drops a horizontal,
-[orientation-locked](#locked-orientation) line at the height you clicked. It
-runs the [`(add horizon …)`](console.md#add-horizon-fraction) console command
-to do it, so the command is echoed and recorded like any other.
+[orientation-locked](#locked-orientation) line at the height you clicked, and
+**Add Vertical** the same thing a quarter turn round, at the width you
+clicked. Each runs its console command —
+[`(add horizon …)`](console.md#add-horizon-fraction) or
+[`(add vertical …)`](console.md#add-vertical-fraction) — so it is echoed and
+recorded like any other.
 
 Lines are **infinite projective entities**. When you draw a line through two
 points, it extends across the whole canvas; the two points you clicked become
@@ -210,6 +213,15 @@ Horizon**, which puts it at the height you clicked, or with the
 which measures a fraction down the reference frame instead. The menu is the one
 to reach for when the height should sit against geometry already on the canvas;
 the console form when you want it measured.
+
+A **vertical** is the same line a quarter turn round — **Add Vertical** on the
+same menu, or [`(add vertical <fraction>)`](console.md#add-vertical-fraction),
+which measures across the frame rather than down it. Nothing else about it
+differs.
+
+These two are the only locked lines you can make. The lock itself doesn't care
+about direction — it freezes whatever angle the line already has — but there is
+no way yet to freeze a line you drew at some other angle.
 
 ### Line properties
 

@@ -435,6 +435,8 @@ class CommandInterpreter:
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
             "                              0 = top of canvas, 1 = bottom;\n"
             "                              outside that is beyond the frame\n"
+            "  (add vertical <fraction>)   the same line a quarter turn round;\n"
+            "                              0 = left of canvas, 1 = right\n"
             "  (add-line <pts> <pts>)      a line from each of the first points\n"
             "                              to each of the second, bound to both;\n"
             "                              one of each is the plain case, as in\n"
@@ -489,18 +491,21 @@ class CommandInterpreter:
     def _form_add(self, args):
         if not args:
             raise CommandError(
-                "Usage: (add point <across> <down>) or (add horizon "
-                "<fraction>); a line is (add-line …)"
+                "Usage: (add point <across> <down>), (add horizon "
+                "<fraction>)\n"
+                "   or: (add vertical <fraction>); a line is (add-line …)"
             )
         what = args[0]
         if not isinstance(what, str):
             raise CommandError(
-                "Usage: (add point ...) or (add horizon ...); a line is "
-                "(add-line ...)"
+                "Usage: (add point ...), (add horizon ...) or (add vertical "
+                "...); a line is (add-line ...)"
             )
         what = what.lower()
         if what == "horizon":
             return self._add_horizon(args[1:])
+        if what == "vertical":
+            return self._add_vertical(args[1:])
         if what == "point":
             return self._add_point(args[1:])
         if what == "line":
@@ -511,7 +516,8 @@ class CommandInterpreter:
             )
         raise CommandError(
             f"Don't know how to add {args[0]!r}. Try (add point <across> "
-            "<down>) or (add horizon <fraction>); a line is (add-line …)."
+            "<down>), (add horizon <fraction>) or (add vertical <fraction>);\n"
+            "a line is (add-line …)."
         )
 
     def _add_point(self, args) -> PointItem:
@@ -534,6 +540,15 @@ class CommandInterpreter:
                 "  below the frame. e.g. (add horizon 1/3)"
             )
         return self.scene.add_horizon(self._as_canvas_fraction(args[0]))
+
+    def _add_vertical(self, args) -> LineItem:
+        if not args:
+            raise CommandError(
+                "Usage: (add vertical <fraction>)\n"
+                "  0 = left of canvas, 1 = right; outside that is left or\n"
+                "  right of the frame. e.g. (add vertical 1/3)"
+            )
+        return self.scene.add_vertical(self._as_canvas_fraction(args[0]))
 
     #: How the form describes itself when it is called wrongly.
     _ADD_LINE_USAGE = (
