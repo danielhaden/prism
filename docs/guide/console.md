@@ -571,6 +571,22 @@ first number toward the second whichever way round they are. A step that
 doesn't divide the span stops short of the far end rather than overshooting
 it — `(range 0 1 0.3)` gives `0 0.3 0.6 0.9`. At most 200 numbers.
 
+**Joining the run to a point off the line** needs nothing further:
+[`(add-line …)`](#add-line-points-points) is already a cross product, so name
+what the map gave back and hand it the other point.
+
+```
+(add vertical 3/10)
+(define col (map (lambda (f) (point L1 f)) (range 1/10 9/10 1/10)))
+(define v (add point 8/10 1/2))
+(add-line col v)
+```
+
+Nine lines, each from one point of the run through `v` — a pencil cut by a
+transversal, which is where harmonic work tends to start. Every line is bound
+to both its points, so dragging `v` swings the whole pencil and sliding the
+vertical carries the run along it.
+
 ### `(map <function> <list>)`
 
 Call a function on **each element** of a list, in turn:
