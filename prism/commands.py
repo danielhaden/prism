@@ -119,6 +119,7 @@ class CommandInterpreter:
             "take": self._form_take,
             "last": self._form_last,
             "repeat": self._form_repeat,
+            "range": self._form_range,
             "help": self._form_help,
         }
 
@@ -128,6 +129,7 @@ class CommandInterpreter:
     NON_RECORDING = {
         "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
         "points-off", "diff", "without", "intersect", "take", "last", "lambda",
+        "range",
     }
 
     def execute(self, text: str) -> str:
@@ -252,8 +254,16 @@ class CommandInterpreter:
         value = self._variables[name]
         if isinstance(value, Lambda):
             return value
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value  # a number has nothing on the canvas to outlive
         if isinstance(value, list):
-            kept = [item for item in value if _on_canvas(item)]
+            kept = [
+                item
+                for item in value
+                # Numbers are not on the canvas and never were, so they
+                # are not what this prunes.
+                if isinstance(item, (int, float)) or _on_canvas(item)
+            ]
             if len(kept) != len(value):
                 self._variables[name] = kept
             if not kept:
@@ -274,6 +284,29 @@ class CommandInterpreter:
             return float(value)
         except (TypeError, ValueError):
             raise CommandError(f"Couldn't read {value!r} as {what}.")
+
+    def _as_number(self, argument, what: str) -> float:
+        """A number written as a fraction or a decimal, over any range.
+
+        :meth:`_as_float` reads what Python reads, so ``1/10`` is not a
+        number to it; everywhere the console takes a quantity, a fraction
+        is how it tends to be written.
+
+        Args:
+            argument: A fraction, a decimal, or a form yielding one.
+            what: What the number is, for the message if it cannot be read.
+
+        Returns:
+            The value.
+        """
+        value = self._value(argument)
+        number = parse_fraction(value)
+        if number is None:
+            raise CommandError(
+                f"Couldn't read {value!r} as {what}. Use a fraction like "
+                "1/10 or a decimal like 0.1."
+            )
+        return number
 
     def _as_fraction(self, argument) -> float:
         value = self._value(argument)
@@ -337,6 +370,8 @@ class CommandInterpreter:
             return self._element_name(value)
         if isinstance(value, list):
             return self._render(value)
+        if isinstance(value, float):
+            return _number_text(value)
         return repr(value)
 
     def _as_point(self, argument) -> PointItem:
@@ -475,7 +510,11 @@ class CommandInterpreter:
             "  (take <n> <list>)           the first n of a list\n"
             "  (last <n> <list>)           the last n — what was just made\n"
             "  (repeat <n> <form>)         run a form n times\n"
-            "  (list <element> …)          gather elements into a list\n"
+            "  (range <from> <to> <step>)  the numbers from one to the other,\n"
+            "                              both ends included; map over it to\n"
+            "                              run a form at each in turn\n"
+            "  (list <item> …)             gather elements or numbers into\n"
+            "                              a list\n"
             "  (define <name> <value>)     give a value a name\n"
             "  (lambda (<name> …) <body>)  a function, as a value; the names\n"
             "                              are its parameters\n"
@@ -577,10 +616,9 @@ class CommandInterpreter:
         """
         if len(args) != 2:
             raise CommandError(self._ADD_LINE_USAGE)
-        first = args[0]
-        if isinstance(first, str) and _is_number(first):
+        angle = self._angle_or_none(args[0])
+        if angle is not None:
             # (add-line <angle> <points>)
-            angle = float(first)
             points = self._flatten(args[1:], PointItem, "point")
             if not points:
                 raise CommandError("No points to draw a line through.")
@@ -614,6 +652,40 @@ class CommandInterpreter:
                 "the same place."
             )
         return self._only(drawn)
+
+    def _angle_or_none(self, argument) -> float | None:
+        """The argument as an angle, if an angle is what it is.
+
+        Which of the two ``add-line`` forms was meant is read off the first
+        argument: a number means the angle form. A bare *name* holding a
+        number counts too, which is how a pencil falls out of a range::
+
+            (map (lambda (a) (add-line a (list P1))) (range 0 150 30))
+
+        Deliberately **nothing is evaluated** here. The argument is looked up
+        where a name is looked up and left alone otherwise, because the points
+        branch evaluates it again — and a first argument like
+        ``(add point 1/2 1/2)`` evaluated twice would quietly place two
+        points. A nested form yielding a number is therefore still not an
+        angle; write the number, or give it a name.
+
+        A name shadows a label, as everywhere else in the language, so
+        ``(define a 30)`` makes ``a`` an angle even if a line is labelled a.
+
+        Args:
+            argument: The first argument, raw and unevaluated.
+
+        Returns:
+            The angle in degrees, or None if that argument means points.
+        """
+        if not isinstance(argument, str):
+            return None
+        if _is_number(argument):
+            return float(argument)
+        bound = self._lookup(argument)
+        if isinstance(bound, bool) or not isinstance(bound, (int, float)):
+            return None
+        return float(bound)
 
     @staticmethod
     def _only(lines: list):
@@ -1034,6 +1106,60 @@ class CommandInterpreter:
             result = self._value(args[1])
         return result
 
+    #: Most numbers one ``(range …)`` may give.
+    RANGE_LIMIT = 200
+
+    def _form_range(self, args) -> list:
+        """``(range 2/10 9/10 1/10)`` — the numbers from one to another.
+
+        The numeric list the rest of the language had no way to write.
+        :meth:`_form_list` gathers *elements*, so when the thing that
+        varies is a position rather than a point there was nothing for
+        :meth:`_form_map` to walk::
+
+            (map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))
+
+        **Both ends are included** when the step divides the span, which
+        is what "2/10 to 9/10 by tenths" means read aloud. The walk runs
+        from the first number toward the second whichever way round they
+        are, so the step is taken as a distance and its sign ignored.
+
+        Numbers, not positions: angles work as readily as fractions, as in
+        ``(range 0 150 30)`` for a pencil.
+
+        Args:
+            args: From, to, and the step between.
+
+        Returns:
+            The numbers.
+        """
+        if len(args) != 3:
+            raise CommandError(
+                "Usage: (range <from> <to> <step>)\n"
+                "  e.g. (range 2/10 9/10 1/10) - 2/10, 3/10, … 9/10\n"
+                "  Both ends are included; fractions and decimals both\n"
+                "  work, and so do plain numbers like angles."
+            )
+        start = self._as_number(args[0], "a number")
+        stop = self._as_number(args[1], "a number")
+        step = abs(self._as_number(args[2], "a step"))
+        if step == 0:
+            raise CommandError(
+                "A step of 0 never arrives. Give the distance between one\n"
+                "number and the next, e.g. (range 2/10 9/10 1/10)."
+            )
+        # The tolerance is what makes the far end land: 9/10 reached by
+        # tenths from 2/10 is 0.8999999999999999 in binary, which would
+        # otherwise stop one number short.
+        count = int(abs(stop - start) / step + 1e-9) + 1
+        if count > self.RANGE_LIMIT:
+            raise CommandError(
+                f"That is {count} numbers, and (range …) gives at most "
+                f"{self.RANGE_LIMIT}.\nUse a larger step."
+            )
+        way = 1.0 if stop >= start else -1.0
+        return [start + way * step * index for index in range(count)]
+
     def _as_list(self, argument) -> list:
         """An argument as a list, whether it is one or a single element."""
         value = self._value(argument)
@@ -1205,10 +1331,11 @@ class CommandInterpreter:
         return f"Showing {self._render(element)}"  # described as it now is
 
     def _form_list(self, args) -> list:
-        """``(list P1 P2 L1)`` — gather elements into a list value."""
+        """``(list P1 P2 L1)`` — gather elements, or numbers, into a list."""
         if not args:
             raise CommandError(
-                "(list …) gathers elements, e.g. (list P1 P2 P3).\n"
+                "(list …) gathers elements or numbers, e.g. (list P1 P2 P3)\n"
+                "or (list 2/10 5/10).\n"
                 "  To see what's on the canvas, use (ls)."
             )
         gathered = []
@@ -1223,12 +1350,19 @@ class CommandInterpreter:
                 )
             if isinstance(value, list):
                 gathered.extend(value)  # lists flatten, so they compose
+            elif parse_fraction(value) is not None:
+                # Numbers are values too: a list of positions is what
+                # (map …) walks when the thing varying is a place rather
+                # than a point.
+                gathered.append(parse_fraction(value))
             else:
                 gathered.append(self._as_element(argument))
         return gathered
 
     def _form_define(self, args) -> str:
         """``(define tri (list P1 P2 P3))`` — give a value a name.
+
+        An element, a list, a number (``(define tilt 30)``) or a function.
 
         A function may be written the short way, with the name and its
         parameters together::
@@ -1254,7 +1388,10 @@ class CommandInterpreter:
         if isinstance(value, Lambda):
             value.name = name
         elif isinstance(value, str):
-            value = self._as_element(args[1])
+            # A number is a value like any other now that (list …) and
+            # (range …) carry them, so (define tilt 30) names an angle.
+            number = parse_fraction(value)
+            value = number if number is not None else self._as_element(args[1])
         self._variables[name] = value
         return f"{name} = {self._render(value)}"
 
@@ -1440,6 +1577,8 @@ class CommandInterpreter:
             return value
         if isinstance(value, Lambda):
             return value.described()
+        if isinstance(value, float):
+            return _number_text(value)
         if isinstance(value, PointItem):
             return f"{self._point_name(value)}  {self._describe_point(value)}"
         if isinstance(value, LineItem):
@@ -1450,6 +1589,8 @@ class CommandInterpreter:
         """``P1``/``L1`` for an element, or the rendering of anything else."""
         if isinstance(item, PointItem):
             return self._point_name(item)
+        if isinstance(item, float):
+            return _number_text(item)
         if isinstance(item, LineItem):
             return self._line_name(item)
         if isinstance(item, Lambda):
@@ -1568,6 +1709,21 @@ def _match_by_label(items, name: str):
 def _count(number: int, noun: str) -> str:
     """``3 points``, but ``1 point``."""
     return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
+
+
+def _number_text(value: float) -> str:
+    """A number as it was written, not as a binary float reads.
+
+    ``2/10`` stepped by tenths lands on 0.30000000000000004; the console
+    should say 0.3, which is the number that was meant.
+
+    Args:
+        value: The number.
+
+    Returns:
+        Its text.
+    """
+    return f"{value:g}"
 
 
 def _is_number(text: str) -> bool:

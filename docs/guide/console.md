@@ -188,7 +188,11 @@ or [`(define …)`](#define-name-value).
 ```
 
 - **angle** — degrees **clockwise from the horizontal** (the same convention as
-  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical.
+  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical. A
+  name holding a number counts as one, which is how a pencil comes out of a
+  [range](#range-from-to-step):
+  `(map (lambda (a) (add-line a (list P1))) (range 0 150 30))`. A nested
+  *form* yielding a number does not — write the number or name it.
 - **points** — a label, an id, a nested form that yields a point, or a list of
   any of those.
 
@@ -429,14 +433,20 @@ point where lines cross, and `[hidden]`. Lines show their defining endpoints,
     something surprising. No saved script is affected — inspection commands
     were never recorded.
 
-### `(list <element> …)`
+### `(list <item> …)`
 
-Gather elements into a **list value**.
+Gather elements — or numbers — into a **list value**.
 
 ```
 (list P1 P2 P3)       # a list of three points
 (list L1 L2)          # lines work too
+(list 2/10 5/10 8/10) # and so do numbers
 ```
+
+A list of numbers is what [`(map …)`](#map-function-list) walks when the
+thing that varies is a *position* rather than a point. Write them out when
+they are irregular; [`(range …)`](#range-from-to-step) spells out an even
+run for you.
 
 On its own a list isn't much use — name it with
 [`(define …)`](#define-name-value) and then act on all of it at once. Lists
@@ -450,6 +460,8 @@ Give a value a name.
 ```
 (define tri (list P1 P2 P3))
 (define apex P4)
+(define tilt 30)              # a number is a value too
+(define tenths (range 0 1 1/10))
 ```
 
 The name can then be used wherever the value could be, and a name you define
@@ -469,7 +481,8 @@ ambiguous.
 
 A name can outlive what it holds — clear the canvas, or remove one of the
 points, and the list quietly shrinks to what is still there. If nothing is
-left, using the name says so.
+left, using the name says so. Numbers are never pruned this way: they were
+never on the canvas to lose.
 
 !!! warning "Names don't outlive the session"
     A definition lives as long as the app is open. The canvas persists between
@@ -525,6 +538,39 @@ A function may also be called where it stands, with no name at all:
     Allowed, but calls may not nest more than 50 deep; past that Prism says a
     function is probably calling itself without end, rather than falling over.
 
+### `(range <from> <to> <step>)`
+
+The numbers from one to another, by a step — **both ends included**.
+
+```
+(range 2/10 9/10 1/10)   # 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+(range 0 150 30)         # 0 30 60 90 120 150 — angles, not positions
+(range 9/10 2/10 1/10)   # the same run downwards
+```
+
+This is the list [`(map …)`](#map-function-list) was missing. A point whose
+place varies has nothing to iterate over otherwise — there is no element to
+walk, only a number that changes:
+
+```
+(map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))
+```
+
+Eight points down the vertical at 3/10, a tenth apart. Along a line you have
+already drawn, [`(point <line> <fraction>)`](#point-line-fraction) is the
+better body: those points are **anchored** to the line and ride it when it
+moves.
+
+```
+(add vertical 3/10)
+(map (lambda (f) (point L1 f)) (range 1/10 9/10 1/10))
+```
+
+The step is a distance; its sign is ignored, and the walk runs from the
+first number toward the second whichever way round they are. A step that
+doesn't divide the span stops short of the far end rather than overshooting
+it — `(range 0 1 0.3)` gives `0 0.3 0.6 0.9`. At most 200 numbers.
+
 ### `(map <function> <list>)`
 
 Call a function on **each element** of a list, in turn:
@@ -532,6 +578,7 @@ Call a function on **each element** of a list, in turn:
 ```
 (map cevian (points-on L1))
 (map (lambda (q) (add-line (list q) (points-off L1 tri))) (points-on L1))
+(map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))
 ```
 
 This is the form to reach for when the thing to draw **depends on** the

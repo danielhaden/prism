@@ -251,7 +251,26 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
-  `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(help)`.
+  `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>
+  <to> <step>)`, `(help)`.
+- **Numbers are values**, not only element names: `(list …)` gathers them,
+  `(define tilt 30)` names one, and `(range <from> <to> <step>)` builds a
+  list of them — which is what `(map …)` had no way to walk when the thing
+  varying is a *position* rather than a point
+  (`(map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))`). Three
+  things this touched: `_as_number()` reads fractions where `_as_float()`
+  can't (`float("1/10")` raises); `_surviving()` must not prune numbers out
+  of a named list, since `_on_canvas()` calls `.scene()` on them; and
+  `_number_text()` (`:g`) keeps 0.30000000000000004 out of the echo.
+  `(range …)` includes **both ends** (tolerance 1e-9 on the count, or 9/10
+  by tenths from 2/10 stops one short), ignores the step's sign, walks
+  either direction, and caps at `RANGE_LIMIT` (200).
+- **`_angle_or_none()` must not evaluate its argument.** `(add-line …)`
+  picks its form from the first argument, and the points branch evaluates
+  that argument again — so evaluating it to test for a number would place
+  two points for `(add-line (add point 1/2 1/2) …)`. It therefore only
+  reads a literal number or a `_lookup()` of a bare word; a nested form
+  yielding a number is deliberately not an angle.
 - **Lists and names** (first step of triangle support): `(list …)` gathers
   elements into a Python list and **flattens** nested lists so they compose;
   `(define <name> <value>)` binds it in `CommandInterpreter._variables`.
