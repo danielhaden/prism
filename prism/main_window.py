@@ -278,9 +278,9 @@ class MainWindow(QMainWindow):
         scripts_folder_action.triggered.connect(self._choose_scripts_folder)
         settings_menu.addAction(scripts_folder_action)
 
-        book_action = QAction("Book (PDF)…", self)
-        book_action.setToolTip("Choose the PDF the Book panel reads")
-        book_action.triggered.connect(self._choose_book)
+        book_action = QAction("Add Book…", self)
+        book_action.setToolTip("Put another PDF on the Book panel's shelf")
+        book_action.triggered.connect(self._add_book)
         settings_menu.addAction(book_action)
 
         settings_menu.addSeparator()
@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
             set_scripts_dir(chosen)
             self.scripts.refresh()
 
-    def _choose_book(self) -> None:
-        self.book.choose_book()
+    def _add_book(self) -> None:
+        self.book.add_book()
         self.book.show()
         self.book.raise_()
