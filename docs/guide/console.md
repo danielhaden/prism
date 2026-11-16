@@ -396,6 +396,58 @@ A side parallel to the line never meets it, so there is no point to draw to;
 the command says which side and stops rather than drawing something arbitrary.
 Running it twice draws nothing new.
 
+### `(segment <line> <point> <point>)`
+
+Draw only the part of a line between two points on it.
+
+```
+(segment L1 P2 P3)              # by id
+(segment a B C)                 # by label
+(segment L1 (list P2 P3))       # a list of two works
+(segment L1 (meets L1 (list L2 L3)))   # the two crossings, whatever they are
+(segment L1 -full)              # draw the whole line again
+```
+
+The line is **unchanged**. It still lies where it lay, points still slide along
+the whole of it, and it still meets what it meets along the drawn part. Only the
+drawing stops at the two points.
+
+It stops *at them*, not where they were: the two points are what is remembered,
+so the segment follows them. Slide one along the line and the end goes with it.
+Move a line whose crossing bounds the segment and the end goes with the
+crossing — including out past the other end, which simply draws the segment the
+other way round.
+
+Both points have to be on the line. A point anchored to it, or a crossing the
+line helps make, is on it outright; anything else is measured, against the same
+band a click gets. A point that isn't on the line is refused by name:
+
+```
+> (segment L1 P1 P2)
+P2 isn't on L1, so there is no part of the line it could bound. Put it on
+the line first — (point L1 <fraction>) places one there, and a crossing is
+already on both its lines.
+```
+
+Setting a segment replaces a
+[visible range](points-and-lines.md#anchor-and-extents) set the other way, and
+vice versa: a line is cut down one way or the other, never both.
+
+!!! note "The crossings beyond the ends"
+
+    A crossing exists where the **drawn** parts of two lines meet, so the
+    crossings out past the ends go away while the segment is drawn, and come
+    back with the whole line. One that something is built on, or that you have
+    labelled or hidden, stays on as an undefined point rather than going
+    entirely.
+
+    The crossings that **bound** the segment are the exception: those are
+    looked for along the whole line, since a segment must not get to decide
+    where its own ends are.
+
+`-full` puts the whole line back, and is what the canvas's **Show Full Line**
+writes. Deleting either bounding point does the same thing.
+
 ### `(rm <element>)`
 
 Remove a point or a line from the canvas.
@@ -747,7 +799,8 @@ none they take the whole canvas:
 !!! warning "They report relations, not geometry"
     A line counts as through a point when the figure **says** so: the point is
     its crossing, or the line is bound to it, pinned to pivot on it, anchored
-    to it, or carries its visible range. Two lines that happen to cross
+    to it, carries its visible range, or is drawn only as far as it. Two
+    lines that happen to cross
     exactly at a *placed* point are **not** reported — Prism makes no crossing
     point there (the point you placed is already the meet), so no relation was
     ever recorded:
@@ -788,12 +841,13 @@ can work on the canvas and come away with the script for what you did.
 | Delete Point / Hide Point | `(rm <element>)` |
 | Clear (toolbar) | `(clear)` |
 | Show N Hidden Points | `(show -all)` |
+| Show Segment Between Points Only | `(segment <line> <point> <point>)` |
+| Show Full Line | `(segment <line> -full)` |
 
 Some canvas commands have no console form yet and so write nothing: **Modify
-Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Show
-Full Line**, **Snap Point to Line**, **Lock to Line**, and **Pin Lines
-Through Point**. A script of a session that used those will be
-missing those steps.
+Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Snap
+Point to Line**, **Lock to Line**, and **Pin Lines Through Point**. A script of
+a session that used those will be missing those steps.
 
 !!! note "Ids shift"
     Commands are written with ids (`P1`, `L2`), and removing an element

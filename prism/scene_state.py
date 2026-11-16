@@ -145,7 +145,11 @@ def capture(scene) -> dict:
         seg = line.scene_line()
         pen = line.pen()
         visible_range = None
-        if line.has_visible_range():
+        if line.has_segment_ends():
+            refs = [point_ref(end) for end in line.segment_ends()]
+            if all(ref is not None for ref in refs):
+                visible_range = {"ends": refs}
+        elif line.has_visible_range():
             anchor = line.range_anchor()
             if anchor is not None and point_ref(anchor) is not None:
                 visible_range = {
@@ -272,7 +276,10 @@ def restore(scene, state: dict) -> None:
     _restore_crossing_labels(scene, lines, state.get("crossings", []))
     # Meets exist only now, so relationships naming one are wired here. Doing
     # it earlier is why a pivot onto a crossing used to be dropped silently.
-    _wire_lines(lines, points, state["lines"], meets_ready=True, scene=scene)
+    if _wire_lines(lines, points, state["lines"], meets_ready=True, scene=scene):
+        # A segment cut the line down only now, so what it crosses has
+        # changed: the first recompute measured the whole line.
+        scene.recompute_intersections()
     # Undefined-ness is derived, never stored, so work it out afresh.
     scene.settle_definitions()
 
@@ -339,7 +346,7 @@ def _resolve_point(ref, points, scene=None):
     return None
 
 
-def _wire_lines(lines, points, line_data, meets_ready: bool, scene=None) -> None:
+def _wire_lines(lines, points, line_data, meets_ready: bool, scene=None) -> bool:
     """Re-make each line's relationships to points.
 
     Called twice: once for placed points, and again once the recompute has
@@ -351,11 +358,17 @@ def _wire_lines(lines, points, line_data, meets_ready: bool, scene=None) -> None
         line_data: Their snapshot entries.
         meets_ready: Whether to wire the references that name a meet.
         scene: The scene, required when ``meets_ready``.
+
+    Returns:
+        Whether a line was cut down to a segment in this pass, which changes
+            what the lines cross and so needs the crossings recomputed.
     """
 
     def wanted(ref) -> bool:
         is_meet_ref = isinstance(ref, dict)
         return ref is not None and is_meet_ref == meets_ready
+
+    segmented = False
 
     for line, data in zip(lines, line_data):
         for end, ref in zip((1, 2), data["bind"]):
@@ -367,9 +380,24 @@ def _wire_lines(lines, points, line_data, meets_ready: bool, scene=None) -> None
             point = _resolve_point(data["pivot"], points, scene)
             if point is not None:
                 line.set_pivot(point)
-        if data["range"] is not None and wanted(data["range"]["anchor"]):
-            point = _resolve_point(data["range"]["anchor"], points, scene)
+        stored = data["range"]
+        if stored is None:
+            continue
+        if "ends" in stored:
+            # One reference naming a meet puts the whole pair in the second
+            # pass: a segment needs both ends at once, so it waits for the
+            # later of them.
+            refs = stored["ends"]
+            if any(isinstance(ref, dict) for ref in refs) != meets_ready:
+                continue
+            ends = [_resolve_point(ref, points, scene) for ref in refs]
+            if all(end is not None for end in ends):
+                line.set_segment_ends(*ends)
+                segmented = True
+        elif wanted(stored["anchor"]):
+            point = _resolve_point(stored["anchor"], points, scene)
             if point is not None:
                 line.set_visible_range(
-                    point, data["range"]["neg"], data["range"]["pos"]
+                    point, stored["neg"], stored["pos"]
                 )
+    return segmented

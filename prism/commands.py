@@ -97,6 +97,7 @@ class CommandInterpreter:
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
+            "segment": self._form_segment,
             "label": self._form_label,
             "format": self._form_format,
             "list": self._form_list,
@@ -496,6 +497,10 @@ class CommandInterpreter:
             "  (label -clear)              remove every label\n"
             "  (hide <element>)            stop drawing it; nothing is lost\n"
             "  (show <element> | -all)     draw it again\n"
+            "  (segment <line> <p> <p>)    draw only the part of the line\n"
+            "                              between two points on it, and\n"
+            "                              follow them as they move\n"
+            "  (segment <line> -full)      draw the whole line again\n"
             "  (draw-triangle <p> <p> <p>) the three sides joining three\n"
             "                              points (or a list of three)\n"
             "  (draw-cevians <tri> <line>) from each crossing on the line,\n"
@@ -1369,6 +1374,45 @@ class CommandInterpreter:
         self.scene.commit_undo()
         return f"Showing {self._render(element)}"  # described as it now is
 
+    def _form_segment(self, args) -> LineItem:
+        """``(segment L1 P2 P3)`` — draw only the part between two points.
+
+        The line itself is unchanged: it still lies where it lay, still meets
+        what it meets along the drawn part, and the two points still slide
+        along the whole of it. Only the drawing stops at them — and follows
+        them, so moving either end moves where the segment stops.
+
+        ``(segment L1 -full)`` puts the whole line back, which is the one
+        thing the ``-full`` flag is for.
+        """
+        if not args:
+            raise CommandError(_SEGMENT_USAGE)
+        line = self._as_line(args[0])
+        if len(args) == 2:
+            flag = self._value(args[1])
+            if isinstance(flag, str) and flag.lstrip("-").lower() == "full":
+                if not line.has_visible_range():
+                    return line  # already whole; nothing to say about it
+                self.scene.show_full_line(line)
+                return line
+        points = self._flatten(args[1:], PointItem, "point")
+        if len(points) != 2:
+            raise CommandError(
+                f"A segment runs between two points, and that gave "
+                f"{_count(len(points), 'point')}.\n" + _SEGMENT_USAGE
+            )
+        for point in points:
+            if not line.passes_through(point):
+                raise CommandError(
+                    f"{self._point_name(point)} isn't on "
+                    f"{self._line_name(line)}, so there is no part of the "
+                    "line it could bound. Put it on the line first — "
+                    f"(point {self._line_name(line)} <fraction>) places one "
+                    "there, and a crossing is already on both its lines."
+                )
+        self.scene.segment_between(line, points[0], points[1])
+        return line
+
     def _form_list(self, args) -> list:
         """``(list P1 P2 L1)`` — gather elements, or numbers, into a list."""
         if not args:
@@ -1682,7 +1726,11 @@ class CommandInterpreter:
         seg = ln.scene_line()
         p1, p2 = seg.p1(), seg.p2()
         base = f"({p1.x():.1f}, {p1.y():.1f})->({p2.x():.1f}, {p2.y():.1f})"
-        if ln.has_visible_range():
+        ends = ln.segment_ends()
+        if ends is not None:
+            between = " to ".join(self._point_name(end) for end in ends)
+            extent = f"segment[{between}]"
+        elif ln.has_visible_range():
             extent = f"range[-{ln._range_neg:.0f}, +{ln._range_pos:.0f}]"
         else:
             extent = "infinite"
@@ -1695,6 +1743,13 @@ class CommandInterpreter:
             parts.append(f'"{ln.label_text()}"')
         return "  ".join(parts)
 
+
+#: Shown whenever (segment ...) is called with arguments it can't read.
+_SEGMENT_USAGE = (
+    "Usage: (segment <line> <point> <point>)  draw only the part between\n"
+    "   or: (segment <line> -full)            draw the whole line again\n"
+    "  e.g. (segment L1 P2 P3), or (segment L1 (meets L1 (list L2 L3)))"
+)
 
 #: Shown whenever (label ...) is called with arguments it can't read.
 _LABEL_USAGE = (
@@ -1747,11 +1802,6 @@ def _match_by_label(items, name: str):
         if item.label_text().lower() == lowered:
             return item
     return None
-
-
-def _count(number: int, noun: str) -> str:
-    """``3 points``, but ``1 point``."""
-    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
 
 
 def _number_text(value: float) -> str:

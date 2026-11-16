@@ -972,6 +972,69 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return created
 
+    def lines_through_both(self, first: PointItem, second: PointItem) -> list:
+        """Every line both points lie on, in creation order.
+
+        Measured with :meth:`~prism.items.line_item.LineItem.passes_through`,
+        so a recorded relation counts outright and anything else has to look
+        like it is on the line.
+
+        Args:
+            first: One point.
+            second: The other.
+
+        Returns:
+            The lines through both, which may be none.
+        """
+        if first is second:
+            return []
+        return [
+            line
+            for line in self.ordered_lines()
+            if line.passes_through(first) and line.passes_through(second)
+        ]
+
+    def segment_between(
+        self, line: LineItem, first: PointItem, second: PointItem
+    ) -> bool:
+        """Draw only the part of ``line`` between two points on it.
+
+        Args:
+            line: The line to cut down.
+            first: One bounding point.
+            second: The other.
+
+        Returns:
+            Whether anything changed.
+        """
+        if first is second:
+            return False
+        line.set_segment_ends(first, second)
+        self.on_line_changed(line)
+        self.recompute_intersections()
+        self.settle_definitions()
+        self.commit_undo()
+        return True
+
+    def show_full_line(self, line: LineItem) -> None:
+        """Draw the whole of ``line`` again, however it was cut down.
+
+        An anchor point that **Define Visible Range…** made to hold the
+        extents goes with it: it was never part of the figure, only of the
+        range. The two points bounding a segment are the figure, and stay.
+
+        Args:
+            line: The line to restore.
+        """
+        anchor = line.range_anchor()
+        line.clear_visible_range()
+        if anchor is not None:
+            self._remove_geometry(anchor)
+        self.on_line_changed(line)
+        self.recompute_intersections()
+        self.settle_definitions()
+        self.commit_undo()
+
     def on_line_changed(self, line: LineItem) -> None:
         """A line's geometry changed: bring everything computed from it up to date."""
         self.propagate_from(line)
@@ -1076,7 +1139,12 @@ class CanvasScene(QGraphicsScene):
                 # not the scene's to manage.
                 self._meets.remove(point)
                 continue
-            if self._is_depended_on(point) or point.label_text() or not point.is_shown():
+            if (
+                self._is_depended_on(point)
+                or self._bounds_a_segment(point)
+                or point.label_text()
+                or not point.is_shown()
+            ):
                 # Something is built on this meet, or you have said something
                 # about it, so it outlives the crossing: undefined, ready to
                 # come back when the lines meet again.
@@ -1215,9 +1283,10 @@ class CanvasScene(QGraphicsScene):
 
         That is: lines whose crossing it is, lines bound to it at an endpoint,
         lines pinned to pivot on it, lines anchoring their visible range to
-        it, and the line it slides along. A line that merely happens to pass
-        through the point, with no relation recorded, is **not** included —
-        the relations are what the figure is built from.
+        it, lines drawn only as far as it, and the line it slides along. A
+        line that merely happens to pass through the point, with no relation
+        recorded, is **not** included — the relations are what the figure is
+        built from.
 
         Args:
             point: The point to look from.
@@ -1233,6 +1302,7 @@ class CanvasScene(QGraphicsScene):
             or line.bound_point(2) is point
             or line.pivot() is point
             or line.range_anchor() is point
+            or line.bounded_by(point)
             or (anchor is not None and anchor.references_line(line))
         ]
         return sorted(found, key=lambda line: getattr(line, "_seq", 0))
@@ -1263,6 +1333,17 @@ class CanvasScene(QGraphicsScene):
             self.commit_undo()
         return len(hidden)
 
+    def _bounds_a_segment(self, point) -> bool:
+        """Whether some line is drawn only as far as ``point``.
+
+        Nothing is *computed* from a segment end — the line lies where it lies
+        either way — so this is asked separately from
+        :meth:`_is_depended_on`. It is still a reason for a crossing to
+        outlive its lines meeting: the segment it bounds is the user's, and
+        losing the point would quietly undo it.
+        """
+        return any(line.bounded_by(point) for line in self._lines())
+
     def _is_depended_on(self, item) -> bool:
         """Whether any geometry in the scene is computed from ``item``."""
         for other in self.items():
@@ -1273,8 +1354,10 @@ class CanvasScene(QGraphicsScene):
         return False
 
     def _intersection_of(self, a: LineItem, b: LineItem) -> QPointF | None:
-        # Use the visible (drawn) segment so markers appear where lines cross.
-        kind, point = a.display_line().intersects(b.display_line())
+        # Use the visible (drawn) segment so markers appear where lines cross
+        # — grown by a hair, so a segment bounded by two points keeps the
+        # crossings that bound it (LineItem.meeting_line).
+        kind, point = a.meeting_line(b).intersects(b.meeting_line(a))
         if kind != QLineF.IntersectionType.BoundedIntersection:
             return None
         # One point per place: if something is already there, that point *is*
@@ -1522,7 +1605,7 @@ class CanvasScene(QGraphicsScene):
                     line.unbind_endpoint(end)
             if line.pivot() is point:
                 line.clear_pivot()
-            if line.range_anchor() is point:
+            if line.range_anchor() is point or line.bounded_by(point):
                 line.clear_visible_range()
 
     def clear_all(self) -> None:

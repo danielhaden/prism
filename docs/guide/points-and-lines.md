@@ -188,7 +188,41 @@ its **defining handles**.
 
 ### Visible range
 
-Although a line is infinite, you can restrict the **visible** portion:
+Although a line is infinite, you can restrict the **visible** portion. There are
+two ways, and a line uses one or the other — setting either replaces the other.
+
+#### Between two points
+
+The usual one. Pick two points that lie on the line, right-click either of them
+(or the line itself) → **Show Segment Between Points Only**. The line is then
+drawn only from one to the other.
+
+The two points are what is remembered, not where they happen to be, so the
+segment **follows them**: slide a point along the line and the segment ends
+where it now is; move a line whose crossing bounds the segment and the end goes
+with the crossing. The console form is
+[`(segment <line> <point> <point>)`](console.md#segment-line-point-point), which
+is what clicking the menu entry writes.
+
+Both points have to be on the line. A point anchored to it, or a crossing the
+line helps make, counts outright; anything else has to look like it is on the
+line, judged by the same band a click gets. Right-clicking the line says which
+line you mean; right-clicking a point works when only one line passes through
+both, which — two distinct points determining one line — is the ordinary case.
+
+!!! note "What happens to the crossings beyond the ends"
+
+    A crossing exists where the **drawn** parts of two lines meet, so the
+    crossings out past the ends of a segment go away, and come back when the
+    whole line does. They are not deleted in any deeper sense: a crossing that
+    something is built on, or that you have labelled or hidden, stays as an
+    undefined point and returns with its line.
+
+    The crossings that **bound** the segment are the exception, and are found
+    along the whole line. They have to be: measure them against the drawn part
+    and a segment would be deciding where its own ends are.
+
+#### Anchor and extents
 
 1. Right-click the line → **Define Visible Range…**
 2. A small **anchor point** is placed on the line, and you enter a **negative**
@@ -196,9 +230,15 @@ Although a line is infinite, you can restrict the **visible** portion:
 3. The line is now drawn only from `anchor − negative` to `anchor + positive`
    along its direction.
 
-Drag the anchor to slide the visible window along the line. Right-click →
-**Show Full Line** restores the infinite line (and removes the anchor). Deleting
-the anchor also reverts the line.
+Drag the anchor to slide the visible window along the line.
+
+#### Going back to the whole line
+
+Right-click → **Show Full Line**, or
+[`(segment <line> -full)`](console.md#segment-line-point-point). An anchor point
+that **Define Visible Range…** made goes with the range — it was never part of
+the figure. The two points bounding a segment are the figure, and stay. Deleting
+either of them also puts the whole line back.
 
 ### Locked orientation
 

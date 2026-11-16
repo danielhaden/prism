@@ -104,8 +104,8 @@ class MeetAnchor(Anchor):
         live = [ln for ln in self.lines if ln.scene() is not None]
         for first in range(len(live)):
             for second in range(first + 1, len(live)):
-                kind, point = live[first].display_line().intersects(
-                    live[second].display_line()
+                kind, point = live[first].meeting_line(live[second]).intersects(
+                    live[second].meeting_line(live[first])
                 )
                 if kind == QLineF.IntersectionType.BoundedIntersection:
                     return point

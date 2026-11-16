@@ -144,8 +144,37 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   menu. Keep hit tolerances in screen pixels.
 - **Endpoint binding**: an endpoint can bind to a `PointItem` and follow it.
 - **Pivot**: pinned through a point → rotates about it (pencils/projectivities).
-- **Visible range**: right-click → "Define Visible Range…" adds an anchor point
-  + neg/pos extents; only that segment is drawn.
+- **Visible range**, two forms, never both at once (each setter clears the
+  other): an **anchor point + neg/pos extents** ("Define Visible Range…"), or
+  **two points on the line** that the drawn part runs between
+  (`set_segment_ends`, "Show Segment Between Points Only", `(segment L1 P2
+  P3)`). The two-point form keeps the *points*, not their positions, so the
+  segment follows them; `_live_segment_ends()` returns None when an end is
+  deleted or undefined, and the line then draws in full rather than guessing.
+  `has_visible_range()` covers both; `has_segment_ends()`/`segment_ends()`/
+  `bounded_by()` are the two-point form alone. `scene.show_full_line()` undoes
+  either, and removes an anchor point the dialog made (it was never part of the
+  figure) while leaving two bounding points alone.
+- **A segment must not decide where its own ends are.** `_intersection_of` and
+  `MeetAnchor.position` ask `meeting_line(other)`, not `display_line()`. Two
+  things it does: (1) grows the segment by `MEET_EPS` (1e-6) at each end, since
+  a crossing *at* an end is the ordinary case and a zero-tolerance bounded test
+  loses it to rounding — **measured, 1911 of 4000** random configurations; and
+  (2) where `other` is a line that *makes* one of the bounding points, uses
+  `unbounded_line()` instead. Without (2) there is a feedback loop, seen before
+  it was fixed: drag the line outward, its crossing lands past the segment's
+  end, the crossing is lost, the segment reopens, the crossing returns — the
+  drawing a pass behind the drag. Crossings *not* bounding the segment do go
+  away beyond the ends, which is the pre-existing "a crossing lives where the
+  drawn parts meet" rule.
+- **Segment ends are not dependencies.** `dependencies_of()` deliberately does
+  not list them, though it does list the range *anchor*: a segment end is
+  normally a point on the line (anchored to it, or a crossing of it), so the
+  edge would close a cycle every time. The line's *position* isn't computed
+  from them — only its drawing. The two consequences are handled by hand:
+  `_detach_point_references` clears the segment when an end is deleted, and
+  `_apply_meets` keeps a crossing that `_bounds_a_segment()`, alongside the
+  labelled/hidden/depended-on cases.
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
   move, can't rotate). The horizon and the vertical use this, and nothing
   else does — the mechanism is direction-agnostic, but there is no UI for
@@ -211,8 +240,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   several points writes `(rm …)` **highest id first**, since removing one
   renumbers those after it. A label containing `"` is applied directly — the
   s-expression reader has no escapes. Still with no console form, so they
-  write nothing: visible range, Show Full Line, Snap Point to Line, Lock to
-  Line, Pin Lines Through Point. (Display properties now have one —
+  write nothing: visible range, Snap Point to Line, Lock to Line, Pin Lines
+  Through Point. (Show Full Line now writes `(segment <line> -full)`.) (Display properties now have one —
   `(format …)` — though the dialogs themselves still don't route through it.)
 - `(add point …)` and `(point <line> <fraction>)` take fractions **outside
   0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
@@ -265,6 +294,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
+  `(segment <line> <point> <point>)`, `(segment <line> -full)`,
   `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>
   <to> <step>)`, `(help)`.
 - **Numbers are values**, not only element names: `(list …)` gathers them,
@@ -636,7 +666,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    n(n-1)/2 and their crossings multiply again; `repeat` caps at
    `REPEAT_LIMIT` (100).
    `lines_through` reports **recorded relations** (meet, binding, pivot,
-   range anchor, line anchor), not geometry — the user's call. Consequence
+   range anchor, segment end, line anchor), not geometry — the user's call. Consequence
    worth knowing: two lines crossing exactly at a *placed* point report
    nothing, because `_intersection_of` skips making a meet where a point
    already sits, so no relation exists to find. Building *through* a point

@@ -1,5 +1,6 @@
 """A drawable line (segment) on the canvas."""
 
+import shiboken6
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem, QMenu
 
 from prism.items.definable import Definable
 from prism.items.label import Labelable
+from prism.items.point_item import PointItem
 
 
 def _clip_line_to_rect(p0: QPointF, d: QPointF, rect):
@@ -69,6 +71,15 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
     ENDPOINT_GRAB_PX = 10.0
     HANDLE_PX = 5.0
 
+    #: How far past each end of the drawn segment a crossing still counts as
+    #: being on it, in scene units (see :meth:`meeting_line`). A crossing
+    #: exactly *at* an end is the ordinary case — segment a line between two
+    #: of its own crossings and the ends are those very points — and a plain
+    #: bounded-intersection test loses it about half the time to floating-point
+    #: rounding alone (measured: 1911 of 4000 random configurations). Far
+    #: below a pixel at any zoom.
+    MEET_EPS = 1e-6
+
     def __init__(self, start: QPointF, end: QPointF):
         super().__init__(QLineF(start, end))
 
@@ -91,11 +102,14 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         self._pivot = None
         self._pivot_last: QPointF | None = None
 
-        # Visible range: the line is infinite by default; when an anchor point
-        # and extents are set, only a segment of it is drawn.
+        # Visible range: the line is infinite by default. Two ways to cut it
+        # down, and only ever one of them at a time: an anchor point with an
+        # extent each way, or a pair of points on the line that the drawn
+        # segment runs between (and follows as they move).
         self._range_anchor = None
         self._range_neg = 0.0
         self._range_pos = 0.0
+        self._range_ends = None
 
         # When locked, the line's direction is immutable: it can still be
         # moved, but no gesture rotates it (see set_orientation_locked).
@@ -150,6 +164,21 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         line_props_action = menu.addAction("Line Properties…")
         proj_action = menu.addAction("Add Projectivity…")
         range_action = menu.addAction("Define Visible Range…")
+        # Two selected points on this line: draw only the part between them.
+        # Right-clicking the line says which line is meant, so no ambiguity
+        # survives here even when several lines pass through both points.
+        segment_action = None
+        segment_points = (
+            scene.selected_points()
+            if scene is not None and hasattr(scene, "selected_points")
+            else []
+        )
+        if len(segment_points) == 2 and all(
+            self.passes_through(point) for point in segment_points
+        ):
+            segment_action = menu.addAction("Show Segment Between Points Only")
+        else:
+            segment_points = []
         show_full_action = (
             menu.addAction("Show Full Line") if self.has_visible_range() else None
         )
@@ -182,6 +211,8 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
             self._add_projectivity_at(local_pos)
         elif chosen is range_action:
             self.open_visible_range_dialog()
+        elif segment_action is not None and chosen is segment_action:
+            self.show_segment_between(segment_points)
         elif show_full_action is not None and chosen is show_full_action:
             self._show_full_line()
         elif chosen is not None:
@@ -238,15 +269,27 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
             scene.on_line_changed(self)
             scene.commit_undo()
 
-    def _show_full_line(self) -> None:
-        anchor = self._range_anchor
-        self.clear_visible_range()
+    def show_segment_between(self, points: list) -> None:
+        """Draw only the part of this line between two points on it.
+
+        Args:
+            points: The two bounding points, in any order.
+        """
         scene = self.scene()
-        if scene is not None:
-            if anchor is not None:
-                scene._remove_geometry(anchor)
-            scene.recompute_intersections()
-            scene.commit_undo()
+        if scene is None:
+            return
+        first, second = (scene.point_id(point) for point in points)
+        command = f"(segment {scene.line_id(self)} {first} {second})"
+        if not scene.run_as_command(command):
+            scene.segment_between(self, points[0], points[1])
+
+    def _show_full_line(self) -> None:
+        scene = self.scene()
+        if scene is None:
+            self.clear_visible_range()
+            return
+        if not scene.run_as_command(f"(segment {scene.line_id(self)} -full)"):
+            scene.show_full_line(self)
 
     def set_style(
         self,
@@ -400,25 +443,75 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
 
     def set_visible_range(self, anchor, neg: float, pos: float) -> None:
         """Show only the segment ``neg`` back and ``pos`` forward of ``anchor``."""
+        self._range_ends = None
         self._range_anchor = anchor
         self._range_neg = abs(neg)
         self._range_pos = abs(pos)
-        self.prepareGeometryChange()
-        self._reposition_label()
-        self.update()
+        self._range_changed()
+
+    def set_segment_ends(self, first: PointItem, second: PointItem) -> None:
+        """Show only the part of the line between two points on it.
+
+        The two points are kept, not their positions, so the drawn segment
+        follows them: slide one along the line, or move a line whose crossing
+        is one of them, and the segment ends where the point now is. Both are
+        projected onto the line, so a point that only sits near it still
+        bounds the segment squarely.
+
+        Args:
+            first: One bounding point.
+            second: The other.
+        """
+        self._range_anchor = None
+        self._range_ends = (first, second)
+        self._range_changed()
 
     def clear_visible_range(self) -> None:
-        """Revert to a full (infinite) line."""
+        """Revert to a full (infinite) line, however it was cut down."""
         self._range_anchor = None
+        self._range_ends = None
+        self._range_changed()
+
+    def _range_changed(self) -> None:
         self.prepareGeometryChange()
         self._reposition_label()
         self.update()
 
     def has_visible_range(self) -> bool:
-        return self._range_anchor is not None
+        """Whether only part of this line is drawn, either way."""
+        return self._range_anchor is not None or self._range_ends is not None
+
+    def has_segment_ends(self) -> bool:
+        """Whether the drawn part is bounded by two points on the line."""
+        return self._range_ends is not None
 
     def range_anchor(self):
         return self._range_anchor
+
+    def segment_ends(self) -> tuple | None:
+        """The two points bounding the drawn segment, or None."""
+        return self._range_ends
+
+    def bounded_by(self, point) -> bool:
+        """Whether ``point`` is one of the two ends of the drawn segment."""
+        return any(end is point for end in (self._range_ends or ()))
+
+    def _live_segment_ends(self) -> tuple | None:
+        """The bounding points, while both can still place a segment.
+
+        An end that has been deleted, or whose own definition has failed (a
+        crossing whose lines no longer cross), leaves nothing to measure
+        between. The line then draws in full rather than guessing: the segment
+        comes back by itself the moment the point does.
+        """
+        if self._range_ends is None:
+            return None
+        for end in self._range_ends:
+            if not shiboken6.isValid(end) or end.scene() is None:
+                return None
+            if end.position_undefined():
+                return None
+        return self._range_ends
 
     def _direction(self) -> QPointF | None:
         """Unit direction of the line (local coords), or None if degenerate."""
@@ -457,8 +550,6 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         scene = self.scene()
         if scene is None:
             return []
-        from prism.items.point_item import PointItem
-
         return [
             it
             for it in scene.items()
@@ -495,6 +586,11 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         d = self._direction()
         if d is None:
             return None
+        ends = self._live_segment_ends()
+        if ends is not None:
+            return tuple(
+                self._project_local(self.mapFromScene(end.center())) for end in ends
+            )
         if self._range_anchor is not None:
             c = self._project_local(self.mapFromScene(self._range_anchor.center()))
             return (
@@ -511,11 +607,100 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         return clipped if clipped is not None else (line.p1(), line.p2())
 
     def display_line(self) -> QLineF:
-        """The drawn segment in scene coordinates (for intersections)."""
+        """The drawn segment in scene coordinates."""
         seg = self._display_segment()
         if seg is None:
             return self.scene_line()
         return QLineF(self.mapToScene(seg[0]), self.mapToScene(seg[1]))
+
+    def meeting_line(self, other: "LineItem | None" = None) -> QLineF:
+        """How far this line runs when asking where it crosses ``other``.
+
+        The drawn segment, grown by :attr:`MEET_EPS` at each end: a crossing
+        exists where the drawn parts meet, and the ends of a segment are
+        themselves usually crossings, which a zero-tolerance test loses to
+        rounding about half the time.
+
+        With one exception, which is the whole reason this isn't just
+        :meth:`display_line`: where ``other`` is a line that *makes* one of
+        the points bounding the segment, the crossing is looked for along the
+        **whole** line. A segment must not get to decide where its own ends
+        are. Measure that crossing against the drawn part instead, and moving
+        ``other`` outward puts the crossing past the end, which loses the
+        crossing, which reopens the line, which brings the crossing back —
+        round and round, a pass behind the drag.
+
+        Args:
+            other: The line being crossed, if the question is about a
+                particular one.
+
+        Returns:
+            The segment to test, in scene coordinates.
+        """
+        line = (
+            self.unbounded_line()
+            if other is not None and self._bounded_by_crossing_with(other)
+            else self.display_line()
+        )
+        d = self._direction()
+        if d is None:
+            return line
+        # The direction is this item's; the segment is already in scene
+        # coordinates, and the item is never rotated or scaled.
+        eps = self.MEET_EPS
+        return QLineF(
+            QPointF(line.x1() - d.x() * eps, line.y1() - d.y() * eps),
+            QPointF(line.x2() + d.x() * eps, line.y2() + d.y() * eps),
+        )
+
+    def unbounded_line(self) -> QLineF:
+        """The whole line, clipped only to the scene, segment or no segment."""
+        d = self._direction()
+        scene = self.scene()
+        line = self.line()
+        if d is None or scene is None:
+            return self.scene_line()
+        rect = self.mapRectFromScene(scene.sceneRect())
+        clipped = _clip_line_to_rect(line.p1(), d, rect)
+        if clipped is None:
+            return self.scene_line()
+        return QLineF(self.mapToScene(clipped[0]), self.mapToScene(clipped[1]))
+
+    def _bounded_by_crossing_with(self, other) -> bool:
+        """Whether a point bounding the drawn segment is a crossing with ``other``."""
+        for end in self._range_ends or ():
+            if not shiboken6.isValid(end):
+                continue
+            anchor = end.anchor() if end.has_anchor() else None
+            if anchor is None or anchor.kind != "meet":
+                continue
+            if anchor.references_line(self) and anchor.references_line(other):
+                return True
+        return False
+
+    def passes_through(self, point: PointItem) -> bool:
+        """Whether ``point`` lies on this line.
+
+        A recorded relation settles it outright: a point anchored to the line,
+        or a crossing this line helps make, is on it however the arithmetic
+        comes out. Otherwise it is measured, against the same band a click
+        gets (:attr:`HIT_PX`), so a point that looks on the line counts as on
+        it.
+
+        Args:
+            point: The point to test.
+
+        Returns:
+            Whether it is on this line.
+        """
+        if point is None or point.position_undefined():
+            return False
+        if point.anchor_references_line(self):
+            return True
+        local = self.mapFromScene(point.center())
+        return QLineF(local, self._project_local(local)).length() <= (
+            self._px(self.HIT_PX) / 2
+        )
 
     # -- Pivot (pinned through a point; rotates about it) -----------------
 

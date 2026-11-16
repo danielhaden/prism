@@ -130,6 +130,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # a stray selected point (a crossing caught by a rubber band, say)
         # used to make the command vanish with no explanation.
         line_action = one_line_action = pencil_action = None
+        segment_action = segment_line = None
         two_points = (
             scene.selected_points()
             if scene is not None and hasattr(scene, "selected_points")
@@ -141,6 +142,25 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             # single-point commands below would be three ways to draw a line
             # in one menu, so they stand down.
             line_action = menu.addAction("Add Line Through Points")
+            # Both points on one line: draw only the part between them. Which
+            # line is a real question out here — several may pass through both
+            # — so the entry says what it needs rather than vanishing.
+            through = scene.lines_through_both(*two_points)
+            selected = [line for line in through if line.isSelected()]
+            if len(selected) == 1:
+                segment_line = selected[0]
+            elif len(through) == 1:
+                segment_line = through[0]
+            if segment_line is not None:
+                segment_action = menu.addAction(
+                    "Show Segment Between Points Only"
+                )
+            elif through:
+                unavailable = menu.addAction(
+                    "Show Segment Between Points Only — "
+                    f"{len(through)} lines through both, select one"
+                )
+                unavailable.setEnabled(False)
             menu.addSeparator()
         elif scene is not None:
             reason = self._join_unavailable_reason(two_points)
@@ -209,6 +229,8 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             first, second = (scene.point_id(p) for p in two_points)
             if not scene.run_as_command(f"(add-line (list {first}) (list {second}))"):
                 scene.add_line_between(two_points[0], two_points[1])
+        elif segment_action is not None and chosen is segment_action:
+            segment_line.show_segment_between(two_points)
         elif one_line_action is not None and chosen is one_line_action:
             angle = self.NEW_LINE_ANGLE
             if not scene.run_as_command(
