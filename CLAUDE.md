@@ -252,19 +252,32 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   for the other forms.
   Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
-- **Never remove an item from the scene while Qt is delivering a mouse event.**
-  `QGraphicsItem::mouseMoveEvent` captures a **raw** `QList<QGraphicsItem*>`
-  of the selected items it is about to move, then calls `setPos` on each. Our
-  `PointItem.itemChange` runs inside that loop and reaches
-  `recompute_intersections` → `_apply_meets`, which used to `removeItem()` a
-  marker whose lines had stopped meeting. Destroy a *selected* one and the
-  next `setPos` reads freed memory: `EXC_BAD_ACCESS` at 0x68, no traceback,
-  the app simply dies. It cost three crash reports to find, so: the scene sets
-  `_delivering` around `super().mouse{Press,Move,Release}Event`, `_retire_meet`
-  only hides a marker while that is set, and `_end_delivery` sweeps the hidden
-  ones the moment the event is over. Adding items mid-event is fine; removing
-  is not. Anything new that deletes geometry from a signal or an `itemChange`
-  has to go the same way.
+- **Nothing may leave the scene while a mouse gesture is in flight, and Prism
+  moves the selection itself.** A drag ran `PointItem.itemChange` →
+  `recompute_intersections` → `_apply_meets`, which `removeItem()`d a marker
+  whose lines had stopped meeting — freeing it while Qt was still working on
+  it. The crash reports say exactly where: in `QGraphicsItem::setPos`, at the
+  instruction after `itemChange(ItemPositionChange)` returns, reloading
+  `this->d_ptr` to compare the new position with the old. `x0` is 0 there: the
+  item was freed inside its own `itemChange` and its memory had been recycled.
+  `EXC_BAD_ACCESS`, no traceback, the app simply dies. Two things keep that
+  shut, and both are needed:
+    * `drag_items` does the moving. Qt's own `QGraphicsItem::mouseMoveEvent`
+      walks a **raw** `QList<QGraphicsItem*>` of the selected items, taken
+      before it hands control to any `itemChange`. Prism walks its own list
+      instead, holding the items as Python references — which is also what
+      keeps a `removeItem`'d item alive, since that hands ownership back to
+      Python — and skipping anything that has left the canvas. `PointItem`,
+      `GroupItem` and `LabelItem` route their `mouseMoveEvent` through it;
+      lines were never in that loop (`ItemIsMovable` is off) and handle their
+      own drags.
+    * `_retire_meet` only *hides* a marker while `_mid_gesture()` — any event
+      being delivered, or a drag between press and release — and keeps a
+      reference to it. `_sweep_retired_meets` removes them once the gesture
+      is over. Before this, a drag over a busy figure destroyed markers
+      between one move event and the next, dozens of times a gesture.
+  Adding items mid-gesture is fine; freeing them is not. Anything new that
+  deletes geometry from a signal or an `itemChange` has to go the same way.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
   the real modal menu opens and the test hangs). Patch the module's name
   instead: `prism.items.line_item.QMenu = FakeMenu`. And re-fetch items after

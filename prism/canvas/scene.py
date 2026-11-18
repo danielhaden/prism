@@ -10,12 +10,14 @@ endpoints follow and intersections recompute.
 import math
 from typing import Callable
 
+import shiboken6
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsScene,
+    QGraphicsSceneMouseEvent,
     QMenu,
 )
 
@@ -29,6 +31,27 @@ from prism.dependencies import (
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
+
+
+def _movable_ancestor_selected(item: QGraphicsItem) -> bool:
+    """Whether something above ``item`` is selected and will carry it along.
+
+    Qt's rule, kept so Prism's own drag moves exactly what Qt's would: an
+    item inside a selected, movable parent must not be moved again on its own
+    account.
+
+    Args:
+        item: The item to look above.
+
+    Returns:
+        Whether a movable ancestor of it is selected.
+    """
+    parent = item.parentItem()
+    while parent is not None:
+        if parent.isSelected() and parent.flags() & QGraphicsItem.ItemIsMovable:
+            return True
+        parent = parent.parentItem()
+    return False
 
 
 def _closest_on_segment(p: QPointF, seg: QLineF) -> QPointF:
@@ -101,10 +124,14 @@ class CanvasScene(QGraphicsScene):
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._syncing_anchors = False
-        # Whether Qt is part-way through handing a mouse event to the items,
-        # during which nothing may be removed from the scene (_retire_meet).
-        self._delivering = False
+        # How deep Qt is in handing a mouse event to the items. Nothing may
+        # leave the scene while that is non-zero, nor while a drag is in
+        # flight — see :meth:`_retire_meet`.
+        self._delivery_depth = 0
         self._retired_meets: list[PointItem] = []
+        # What a press picked up, as (item, position when the press began).
+        # Prism moves these itself; see :meth:`drag_items`.
+        self._drag_items: list = []
         self._seq_counter = 0
 
         # Undo/redo: snapshots of the whole scene, newest last.
@@ -125,32 +152,41 @@ class CanvasScene(QGraphicsScene):
     def _begin_delivery(self) -> None:
         """Qt is about to hand a mouse event to the items.
 
-        Paired with :meth:`_end_delivery`. Between the two, a crossing marker
-        that stops being a crossing is only hidden — see :meth:`_retire_meet`.
+        Paired with :meth:`_end_delivery`. It counts rather than flags, so a
+        delivery that somehow arrives inside another one doesn't declare the
+        outer one over.
         """
-        self._delivering = True
+        self._delivery_depth += 1
 
     def _end_delivery(self) -> None:
-        """Qt has finished with the event: it is safe to remove items again."""
-        self._delivering = False
+        """Qt has finished with the event; take away what was waiting to go."""
+        self._delivery_depth = max(0, self._delivery_depth - 1)
         self._sweep_retired_meets()
+
+    def _mid_gesture(self) -> bool:
+        """Whether Qt is holding on to the items right now.
+
+        True while an event is being delivered, and for the whole of a drag:
+        Qt keeps hold of the item it handed the press to until the release,
+        and of a raw list of what it is moving while each move is delivered.
+        """
+        return self._delivery_depth > 0 or self.mouseGrabberItem() is not None
 
     def _retire_meet(self, point: PointItem) -> None:
         """Take away a marker whose lines no longer meet there.
 
-        Normally that is simply removing it. While Qt is delivering a mouse
-        event it is not: `recompute_intersections` runs from a dragged point's
-        `itemChange`, and `QGraphicsItem::mouseMoveEvent` is part-way through
-        a **raw list** of the selected items it is moving, which it captured
-        before calling us. Destroy one of those from under it and its next
-        `setPos` reads freed memory — a segfault, not an exception, and one
-        that takes the whole app with it. So the marker is hidden now and
-        removed the moment the event is over.
+        Normally that is simply removing it. Mid-gesture it is not: Qt is
+        holding the items being dragged, and `recompute_intersections` runs
+        from a dragged point's own ``itemChange``. Free a point from in there
+        and the ``setPos`` that called it carries on reading it — a segfault,
+        not an exception, and one that takes the app with it. So the marker is
+        hidden now, held as a reference so nothing can free it, and removed
+        once the gesture is over.
 
         Args:
             point: The marker to take away.
         """
-        if not self._delivering:
+        if not self._mid_gesture():
             self.removeItem(point)
             return
         point.setVisible(False)
@@ -158,8 +194,8 @@ class CanvasScene(QGraphicsScene):
             self._retired_meets.append(point)
 
     def _sweep_retired_meets(self) -> None:
-        """Remove the markers that were only hidden during an event."""
-        if not self._retired_meets:
+        """Remove the markers that were only hidden, once that is safe."""
+        if not self._retired_meets or self._mid_gesture():
             return
         retired, self._retired_meets = self._retired_meets, []
         for point in retired:
@@ -433,6 +469,105 @@ class CanvasScene(QGraphicsScene):
             super().mouseReleaseEvent(event)
         finally:
             self._end_delivery()
+
+    # -- Dragging the selection --------------------------------------------
+
+    def begin_item_drag(self, item: QGraphicsItem) -> None:
+        """Note what a press picked up, ready to move it.
+
+        Call it once the base class has had the press, by which time the
+        selection has settled.
+
+        Args:
+            item: The item the press went to.
+        """
+        picked = list(self.selectedItems())
+        if not any(other is item for other in picked):
+            picked.append(item)
+        self._drag_items = [
+            (it, it.pos())
+            for it in picked
+            if it.flags() & QGraphicsItem.ItemIsMovable
+            and not _movable_ancestor_selected(it)
+        ]
+
+    def drag_items(self, event: QGraphicsSceneMouseEvent) -> bool:
+        """Move everything the press picked up.
+
+        Qt would do this for us, and that is the trouble: its
+        ``QGraphicsItem.mouseMoveEvent`` walks a **raw pointer list** of the
+        selected items, taken before it hands control to any ``itemChange``.
+        Ours rebuilds the figure from there, which can take a crossing marker
+        off the canvas — and the next pointer in Qt's list then names freed
+        memory. The app dies on the spot, with no traceback to say why.
+
+        So Prism walks the list itself. The items are held as Python
+        references for the whole drag, so nothing can be freed part-way
+        through, and one that has left the canvas is skipped rather than
+        written to.
+
+        Args:
+            event: The mouse-move event, as the item received it.
+
+        Returns:
+            Whether the drag was handled, so Qt should not also move things.
+        """
+        if not self._drag_items or not (event.buttons() & Qt.LeftButton):
+            return False
+        for item, start in self._drag_items:
+            if not shiboken6.isValid(item) or item.scene() is not self:
+                continue  # it went away mid-drag
+            delta = self._drag_delta(item, event)
+            if delta is not None:
+                item.setPos(start + delta)
+        return True
+
+    def end_item_drag(self) -> None:
+        """Forget what was being dragged: the gesture is over."""
+        self._drag_items = []
+
+    @staticmethod
+    def _drag_delta(
+        item: QGraphicsItem, event: QGraphicsSceneMouseEvent
+    ) -> QPointF | None:
+        """How far the cursor has moved, in the terms ``setPos`` wants.
+
+        A position is in the parent's coordinates, which for a point is the
+        scene. A label's parent is the point it belongs to, and a point
+        carries ``ItemIgnoresTransformations`` — its coordinates are screen
+        pixels — so that case has to go through the view, as Qt's own does.
+
+        Args:
+            item: The item being moved.
+            event: The mouse-move event.
+
+        Returns:
+            What to add to where the item was when the press began, or None
+                if the view can't say.
+        """
+        down = event.buttonDownScenePos(Qt.LeftButton)
+        parent = item.parentItem()
+        if parent is None:
+            return event.scenePos() - down
+        widget = event.widget()
+        view = widget.parentWidget() if widget is not None else None
+        if view is not None and hasattr(view, "viewportTransform"):
+            to_parent, invertible = parent.deviceTransform(
+                view.viewportTransform()
+            ).inverted()
+            if invertible:
+                here = to_parent.map(
+                    QPointF(view.mapFromGlobal(event.screenPos()))
+                )
+                began = to_parent.map(
+                    QPointF(
+                        view.mapFromGlobal(
+                            event.buttonDownScreenPos(Qt.LeftButton)
+                        )
+                    )
+                )
+                return here - began
+        return parent.mapFromScene(event.scenePos()) - parent.mapFromScene(down)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -1675,8 +1810,9 @@ class CanvasScene(QGraphicsScene):
         self._cancel_line()
         self.clear()
         self._meets.clear()
-        # clear() destroyed them; keeping the wrappers would mean removing
-        # freed objects on the next sweep.
+        # clear() destroyed them; keeping the wrappers would mean touching
+        # freed objects on the next sweep, or on the next move of a drag.
         self._retired_meets.clear()
+        self._drag_items.clear()
         self._snap_indicator = None
         self.commit_undo()

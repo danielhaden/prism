@@ -491,11 +491,32 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         scene.hide_snap_indicator()
         return value
 
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "begin_item_drag"):
+            scene.begin_item_drag(self)
+
+    def mouseMoveEvent(self, event):
+        # Prism moves the selection itself, rather than letting Qt walk a raw
+        # pointer list across our itemChange; see CanvasScene.drag_items.
+        scene = self.scene()
+        if (
+            scene is not None
+            and hasattr(scene, "drag_items")
+            and scene.drag_items(event)
+        ):
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event):
         scene = self.scene()
         if scene is not None:
             scene.hide_snap_indicator()
         super().mouseReleaseEvent(event)
+        if scene is not None and hasattr(scene, "end_item_drag"):
+            scene.end_item_drag()
         if scene is not None and hasattr(scene, "commit_undo"):
             scene.commit_undo()
 
