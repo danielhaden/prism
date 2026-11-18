@@ -101,6 +101,10 @@ class CanvasScene(QGraphicsScene):
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._syncing_anchors = False
+        # Whether Qt is part-way through handing a mouse event to the items,
+        # during which nothing may be removed from the scene (_retire_meet).
+        self._delivering = False
+        self._retired_meets: list[PointItem] = []
         self._seq_counter = 0
 
         # Undo/redo: snapshots of the whole scene, newest last.
@@ -117,6 +121,50 @@ class CanvasScene(QGraphicsScene):
 
     #: Most snapshots kept; older history is discarded.
     UNDO_LIMIT = 100
+
+    def _begin_delivery(self) -> None:
+        """Qt is about to hand a mouse event to the items.
+
+        Paired with :meth:`_end_delivery`. Between the two, a crossing marker
+        that stops being a crossing is only hidden — see :meth:`_retire_meet`.
+        """
+        self._delivering = True
+
+    def _end_delivery(self) -> None:
+        """Qt has finished with the event: it is safe to remove items again."""
+        self._delivering = False
+        self._sweep_retired_meets()
+
+    def _retire_meet(self, point: PointItem) -> None:
+        """Take away a marker whose lines no longer meet there.
+
+        Normally that is simply removing it. While Qt is delivering a mouse
+        event it is not: `recompute_intersections` runs from a dragged point's
+        `itemChange`, and `QGraphicsItem::mouseMoveEvent` is part-way through
+        a **raw list** of the selected items it is moving, which it captured
+        before calling us. Destroy one of those from under it and its next
+        `setPos` reads freed memory — a segfault, not an exception, and one
+        that takes the whole app with it. So the marker is hidden now and
+        removed the moment the event is over.
+
+        Args:
+            point: The marker to take away.
+        """
+        if not self._delivering:
+            self.removeItem(point)
+            return
+        point.setVisible(False)
+        if not any(other is point for other in self._retired_meets):
+            self._retired_meets.append(point)
+
+    def _sweep_retired_meets(self) -> None:
+        """Remove the markers that were only hidden during an event."""
+        if not self._retired_meets:
+            return
+        retired, self._retired_meets = self._retired_meets, []
+        for point in retired:
+            if point.scene() is self:
+                self.removeItem(point)
 
     def init_history(self) -> None:
         """Record the starting state; call once the scene is set up."""
@@ -342,7 +390,11 @@ class CanvasScene(QGraphicsScene):
             event.accept()
             return
 
-        super().mousePressEvent(event)
+        self._begin_delivery()
+        try:
+            super().mousePressEvent(event)
+        finally:
+            self._end_delivery()
 
     def mouseMoveEvent(self, event):
         if self._tool == Tool.LINE:
@@ -369,7 +421,18 @@ class CanvasScene(QGraphicsScene):
                 self.show_snap_indicator(snapped)
             else:
                 self.hide_snap_indicator()
-        super().mouseMoveEvent(event)
+        self._begin_delivery()
+        try:
+            super().mouseMoveEvent(event)
+        finally:
+            self._end_delivery()
+
+    def mouseReleaseEvent(self, event):
+        self._begin_delivery()
+        try:
+            super().mouseReleaseEvent(event)
+        finally:
+            self._end_delivery()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -1151,7 +1214,7 @@ class CanvasScene(QGraphicsScene):
                 point.set_position_undefined(True)
             else:
                 self._meets.remove(point)
-                self.removeItem(point)
+                self._retire_meet(point)
 
     @staticmethod
     def _claim_meet(candidates: list, lines: list):
@@ -1612,5 +1675,8 @@ class CanvasScene(QGraphicsScene):
         self._cancel_line()
         self.clear()
         self._meets.clear()
+        # clear() destroyed them; keeping the wrappers would mean removing
+        # freed objects on the next sweep.
+        self._retired_meets.clear()
         self._snap_indicator = None
         self.commit_undo()

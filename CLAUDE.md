@@ -252,6 +252,19 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   for the other forms.
   Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
+- **Never remove an item from the scene while Qt is delivering a mouse event.**
+  `QGraphicsItem::mouseMoveEvent` captures a **raw** `QList<QGraphicsItem*>`
+  of the selected items it is about to move, then calls `setPos` on each. Our
+  `PointItem.itemChange` runs inside that loop and reaches
+  `recompute_intersections` → `_apply_meets`, which used to `removeItem()` a
+  marker whose lines had stopped meeting. Destroy a *selected* one and the
+  next `setPos` reads freed memory: `EXC_BAD_ACCESS` at 0x68, no traceback,
+  the app simply dies. It cost three crash reports to find, so: the scene sets
+  `_delivering` around `super().mouse{Press,Move,Release}Event`, `_retire_meet`
+  only hides a marker while that is set, and `_end_delivery` sweeps the hidden
+  ones the moment the event is over. Adding items mid-event is fine; removing
+  is not. Anything new that deletes geometry from a signal or an `itemChange`
+  has to go the same way.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
   the real modal menu opens and the test hangs). Patch the module's name
   instead: `prism.items.line_item.QMenu = FakeMenu`. And re-fetch items after
