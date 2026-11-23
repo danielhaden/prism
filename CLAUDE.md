@@ -719,6 +719,34 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   the document never stops being plain text and `toPlainText()` is still
   exactly what came back. Speaker lines are their own line and bold, because
   the old column padding (`f"{who:<7}"`) only lined up in a monospace font.
+- **The question is on the right in a bubble, the reply on the left**, as in
+  the Claude desktop app, in its warm palette (`PAPER`, `BUBBLE`, `CARD`,
+  `INK`, light only). Which side a line falls on is a **property of its
+  block format** (`ROLE_PROPERTY` → `ASKED` / `ANSWERED` / `NOTE`), so the
+  document is still plain text — the block *state* was already taken by the
+  highlighter's fences, and the two sit side by side without either knowing
+  about the other. The "You" label went with the bubble: the side it is on
+  says whose words they are, and a label as well says it twice. The reply
+  keeps its name, since it may have come from Claude or from a local model.
+- **A bubble is painted, not laid out.** No text block can have a corner
+  radius, so `_TranscriptView.paintEvent` draws the rounded rect behind the
+  glyphs, from runs gathered in `_cards()`. Only the **left** edge hugs the
+  text; the right is the column's own edge, so a question long enough to
+  wrap is a rectangle rather than a shape with a ragged right side. A script
+  gets the same treatment as a card, which is what `END_SCRIPT` is for — the
+  closing fence needs a state of its own so the card can include it while
+  the line after it still reads "not in a script".
+- **Flush left inside a bubble that is flush right** is the one thing a
+  single block alignment cannot give: `AlignRight` hugs the bubble but
+  leaves every line ragged down its left edge. So the lines are set
+  `AlignLeft` and the **left margin** puts the bubble on the right —
+  `_fit_bubbles()` measures each question at full bubble width and then
+  gives it the margin that leaves room for its widest line and no more.
+  Widening can't make a block wrap, so one pass settles it; it runs when a
+  question lands and on every resize, behind a `_fitting` guard.
+- `PAGE_MARGIN` is the document margin, and it is what a card is padded
+  *into*: a script's lines are laid out by the document, so the only room
+  its card has to breathe is the page's own margin.
 - **The speaker line names the provider**, not "Claude" — saying Claude over
   a local model's reply is a plain lie about where the words came from.
   `SPEAKERS` must list any name `_speaker_name()` can return, or the

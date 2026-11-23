@@ -8,21 +8,26 @@ needs no approval dialogs and cannot wreck a drawing.
 
 from typing import Callable
 
-from PySide6.QtCore import QRegularExpression, Qt, Signal
+from PySide6.QtCore import QRectF, QRegularExpression, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QPainter,
     QSyntaxHighlighter,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
+    QTextFormat,
 )
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -68,6 +73,43 @@ CODE_FAMILIES = ("Menlo", "SF Mono", "Consolas", "DejaVu Sans Mono", "monospace"
 PROSE_POINT_SIZE = 14
 CODE_POINT_SIZE = 12
 
+#: The Claude desktop app's warm palette, matched by eye: a bone page, the
+#: question in a light clay bubble, near-black warm ink rather than pure
+#: black. Light only — Prism's other panels don't follow the system theme
+#: either, and a half-done dark mode is worse than none.
+PAPER = "#faf9f5"
+BUBBLE = "#f0eee6"
+CARD = "#f5f4ee"
+CARD_EDGE = "#e7e4d9"
+INK = "#141413"
+QUIET = "#8a8780"
+FENCE_INK = "#b8b5ab"
+
+#: Which side of the conversation a line belongs to, kept as a property of
+#: its **block format**. The highlighter already uses the block *state* for
+#: fences, and Qt gives a block format arbitrary properties, so the two sit
+#: side by side without either having to know about the other.
+ROLE_PROPERTY = QTextFormat.UserProperty + 1
+ASKED = 1       # the question: right, in a bubble
+ANSWERED = 2    # the reply: left, on the page itself
+NOTE = 3        # Prism's own words, neither side's
+
+#: The bubble's padding, corner, and how much of the width it leaves alone
+#: before a question wraps — a question that ran the full width would read
+#: as the reply does, which is the one thing the bubble is there to prevent.
+BUBBLE_PAD_X = 11
+BUBBLE_PAD_Y = 7
+BUBBLE_RADIUS = 14
+BUBBLE_INSET = 64
+#: Air between one turn and the next.
+TURN_GAP = 12
+#: A script sits on a card of its own, as it does in the desktop app.
+CARD_RADIUS = 8
+CARD_PAD_X = 9
+CARD_PAD_Y = 5
+#: Room down each side of the page, which is also what a card is padded into.
+PAGE_MARGIN = 12
+
 
 def _font(families, point_size: int) -> QFont:
     """A font from the first of ``families`` that exists.
@@ -99,6 +141,10 @@ class _Transcript(QSyntaxHighlighter):
 
     #: Inside a fenced block, as a block state.
     IN_SCRIPT = 1
+    #: The fence that **closes** one. It needs a state of its own so the card
+    #: drawn behind a script can include it, while the line after it still
+    #: reads the state before it as "not in a script".
+    END_SCRIPT = 2
 
     def __init__(self, document):
         super().__init__(document)
@@ -109,21 +155,38 @@ class _Transcript(QSyntaxHighlighter):
         self._fence = QTextCharFormat()
         self._fence.setFontFamilies(list(CODE_FAMILIES))
         self._fence.setFontPointSize(CODE_POINT_SIZE)
-        self._fence.setForeground(QColor("#b0b0b0"))
+        self._fence.setForeground(QColor(FENCE_INK))
 
+        # A label, not a heading: the desktop app shows no name at all, and
+        # this one is here only because the answer may come from Claude or
+        # from a model on this machine, and which it was is not a detail.
         self._speaker = QTextCharFormat()
         self._speaker.setFontWeight(QFont.Bold)
-        self._speaker.setForeground(QColor("#777777"))
+        self._speaker.setFontPointSize(11)
+        self._speaker.setForeground(QColor(QUIET))
 
         self._aside = QTextCharFormat()
-        self._aside.setForeground(QColor("#999999"))
+        self._aside.setForeground(QColor(QUIET))
         self._aside.setFontItalic(True)
 
     def highlightBlock(self, text: str) -> None:
+        role = self.currentBlock().blockFormat().intProperty(ROLE_PROPERTY)
+        if role == ASKED:
+            # The question is the person's own words in their own bubble:
+            # nothing in it is a speaker's name or a script of ours, and a
+            # stray ``` they typed must not open a card.
+            self.setCurrentBlockState(0)
+            return
+        if role == NOTE:
+            self.setFormat(0, len(text), self._aside)
+            self.setCurrentBlockState(0)
+            return
         was_script = self.previousBlockState() == self.IN_SCRIPT
         if self.FENCE.match(text).hasMatch():
             self.setFormat(0, len(text), self._fence)
-            self.setCurrentBlockState(0 if was_script else self.IN_SCRIPT)
+            self.setCurrentBlockState(
+                self.END_SCRIPT if was_script else self.IN_SCRIPT
+            )
             return
         self.setCurrentBlockState(self.IN_SCRIPT if was_script else 0)
         if was_script:
@@ -133,6 +196,321 @@ class _Transcript(QSyntaxHighlighter):
         elif text.startswith("  — ") or text.startswith("      "):
             # What Prism itself says about a reply, rather than the reply.
             self.setFormat(0, len(text), self._aside)
+
+
+class _TranscriptView(QTextEdit):
+    """The conversation: the question on the right, the reply on the left.
+
+    Which side a line falls on is a property of its block format, so the
+    document is still **plain text** — ``toPlainText()`` returns exactly what
+    came back, which is what the Send Script to Editor path reads. Alignment
+    and margins are Qt's; the rounded bubble is not, since no text block can
+    have a corner radius, so it is painted behind the glyphs here.
+
+    The bubble **hugs its text** rather than filling the column: it is drawn
+    from the widest line in the run, not from the block width, which is why
+    this walks the laid-out lines rather than taking a bounding rect.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fitting = False
+        self.setReadOnly(True)
+        self.setFrameShape(QFrame.NoFrame)
+        # The page's own margin, and it has to be wide enough for a card to
+        # be padded outwards into: a script's lines are laid out by the
+        # document, so the only room its card has to breathe is here.
+        self.document().setDocumentMargin(PAGE_MARGIN)
+        self.setStyleSheet(
+            f"QTextEdit {{ background: {PAPER}; color: {INK}; "
+            f"selection-background-color: #e3ded0; "
+            f"selection-color: {INK}; }}"
+        )
+
+    # -- Writing it --------------------------------------------------------
+
+    def start_turn(self, role: int) -> None:
+        """Begin a new turn, on the side `role` belongs to.
+
+        Args:
+            role: ASKED, ANSWERED or NOTE.
+        """
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        if not self.document().isEmpty():
+            cursor.insertBlock()
+        cursor.setBlockFormat(self._shape(role, opening=True))
+        cursor.setCharFormat(QTextCharFormat())
+        self.setTextCursor(cursor)
+
+    def add(self, text: str) -> None:
+        """Put text at the end of the turn in progress.
+
+        Newlines are inserted as blocks of their own rather than left to Qt,
+        which would hand each one the opening block's top margin and space a
+        bubble's own lines as though each were a new turn.
+
+        Args:
+            text: What to add; may hold newlines, and arrives a chunk at a
+                time while a reply streams.
+        """
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        role = cursor.blockFormat().intProperty(ROLE_PROPERTY)
+        for index, piece in enumerate(text.split("\n")):
+            if index:
+                cursor.insertBlock(self._shape(role, opening=False))
+            cursor.insertText(piece)
+        self.setTextCursor(cursor)
+        if role == ASKED:
+            self._fit_bubbles()
+        self.ensureCursorVisible()
+
+    def _shape(self, role: int, opening: bool) -> QTextBlockFormat:
+        """How a line of this turn sits on the page.
+
+        Args:
+            role: ASKED, ANSWERED or NOTE.
+            opening: Whether it is the turn's first line, which is the only
+                one that carries the gap from the turn before.
+
+        Returns:
+            The block format.
+        """
+        shape = QTextBlockFormat()
+        shape.setProperty(ROLE_PROPERTY, role)
+        shape.setTopMargin(TURN_GAP if opening else 0)
+        shape.setAlignment(Qt.AlignLeft)
+        if role == ASKED:
+            # Flush left *within the bubble*; what puts the bubble on the
+            # right is the left margin, which _fit_bubbles then pulls in to
+            # the width of this particular question.
+            shape.setLeftMargin(BUBBLE_INSET)
+            shape.setRightMargin(BUBBLE_PAD_X)
+        return shape
+
+    # -- Fitting a bubble to its question ----------------------------------
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_bubbles()
+
+    def _fit_bubbles(self) -> None:
+        """Pull each question's bubble in to the width of its own text.
+
+        A bubble hugs its text *and* its text reads flush left inside it, and
+        no single block alignment gives both: right-aligning the lines hugs
+        the bubble but leaves every line ragged down its left edge, which is
+        the one thing a bubble is not. So the lines are set flush left and
+        the **left margin** is what puts the bubble on the right.
+
+        Each run is measured at full bubble width and then given the margin
+        that leaves room for its widest line and no more. Widening a block
+        can't make it wrap, so a single pass settles it; a question that
+        wrapped anyway is already as wide as it is allowed to be.
+        """
+        if self._fitting:
+            return
+        self._fitting = True
+        try:
+            runs = list(self._question_runs())
+            for run in runs:
+                self._set_margin(run, BUBBLE_INSET)
+            # Force the layout, so what is measured next is this width.
+            self.document().documentLayout().documentSize()
+            for run in runs:
+                self._set_margin(run, self._margin_for(run))
+        finally:
+            self._fitting = False
+
+    def _question_runs(self):
+        """Each question, as the list of blocks it occupies."""
+        run: list = []
+        block = self.document().firstBlock()
+        while block.isValid():
+            if block.blockFormat().intProperty(ROLE_PROPERTY) == ASKED:
+                run.append(block)
+            elif run:
+                yield run
+                run = []
+            block = block.next()
+        if run:
+            yield run
+
+    def _margin_for(self, run: list) -> float:
+        """How far from the left this question's bubble should start.
+
+        Args:
+            run: The question's blocks.
+
+        Returns:
+            The left margin in pixels.
+        """
+        if any(block.layout().lineCount() > 1 for block in run):
+            return BUBBLE_INSET  # it filled the bubble; nothing to pull in
+        widest = 0.0
+        for block in run:
+            layout = block.layout()
+            for index in range(layout.lineCount()):
+                widest = max(widest, layout.lineAt(index).naturalTextRect().width())
+        document = self.document()
+        room = (
+            document.textWidth()
+            - 2 * document.documentMargin()
+            - BUBBLE_PAD_X
+            - widest
+            - 1  # a pixel of slack, so re-laying out can't wrap it
+        )
+        return max(BUBBLE_INSET, room)
+
+    def _set_margin(self, run: list, margin: float) -> None:
+        """Give every line of one question the same left margin.
+
+        Args:
+            run: The question's blocks.
+            margin: The margin in pixels.
+        """
+        if not run or run[0].blockFormat().leftMargin() == margin:
+            return
+        cursor = QTextCursor(run[0])
+        cursor.setPosition(
+            run[-1].position() + max(run[-1].length() - 1, 0), QTextCursor.KeepAnchor
+        )
+        shape = QTextBlockFormat()
+        shape.setLeftMargin(margin)
+        cursor.mergeBlockFormat(shape)
+
+    # -- Drawing it --------------------------------------------------------
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing)
+        for rect, role in self._cards():
+            if role == ASKED:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(BUBBLE))
+                painter.drawRoundedRect(rect, BUBBLE_RADIUS, BUBBLE_RADIUS)
+            else:
+                painter.setPen(QColor(CARD_EDGE))
+                painter.setBrush(QColor(CARD))
+                painter.drawRoundedRect(
+                    rect.adjusted(0.5, 0.5, -0.5, -0.5), CARD_RADIUS, CARD_RADIUS
+                )
+        painter.end()
+        super().paintEvent(event)
+
+    def _cards(self) -> list:
+        """What to draw behind the text, as ``(rect, role)`` in viewport pixels.
+
+        A run of consecutive lines of one kind is one shape — a question
+        typed over three lines is a single bubble, not three — so this walks
+        the document gathering runs and measures each as a whole.
+
+        Returns:
+            The shapes, in document order.
+        """
+        shapes: list = []
+        run: list = []
+        kind = None
+        block = self.document().firstBlock()
+        while block.isValid():
+            here = self._kind_of(block)
+            if here != kind:
+                shapes.extend(self._shape_for(kind, run))
+                run, kind = [], here
+            if here is not None:
+                run.append(block)
+            block = block.next()
+        shapes.extend(self._shape_for(kind, run))
+        return shapes
+
+    def _kind_of(self, block: object) -> object:
+        """Which shape, if any, a line wants behind it.
+
+        Args:
+            block: The text block.
+
+        Returns:
+            ASKED, ANSWERED for a script of the reply's, or None.
+        """
+        role = block.blockFormat().intProperty(ROLE_PROPERTY)
+        if role == ASKED:
+            return ASKED
+        if block.userState() in (_Transcript.IN_SCRIPT, _Transcript.END_SCRIPT):
+            return ANSWERED
+        return None
+
+    def _shape_for(self, kind: object, run: list) -> list:
+        """Measure one run of lines.
+
+        Args:
+            kind: ASKED, ANSWERED or None.
+            run: The blocks, in order.
+
+        Returns:
+            A one-element ``[(rect, kind)]``, or nothing at all.
+        """
+        if kind is None or not run:
+            return []
+        hug = kind == ASKED
+        extent = None
+        for block in run:
+            rect = self._extent_of(block, hug)
+            if rect is None:
+                continue
+            extent = rect if extent is None else extent.united(rect)
+        if extent is None or extent.isEmpty():
+            return []
+        if hug:
+            # Only the *left* edge hugs the text. The right is the column's
+            # own edge, so a question long enough to wrap is a rectangle
+            # rather than a bubble with a ragged right side — the lines end
+            # where they happen to break, and the shape behind them should
+            # not.
+            extent.setRight(max(extent.right(), self._column_right()))
+            return [(extent.adjusted(-BUBBLE_PAD_X, -BUBBLE_PAD_Y,
+                                     BUBBLE_PAD_X, BUBBLE_PAD_Y), kind)]
+        return [(extent.adjusted(-CARD_PAD_X, -CARD_PAD_Y,
+                                 CARD_PAD_X, CARD_PAD_Y), kind)]
+
+    def _column_right(self) -> float:
+        """The right edge a question is set against, in viewport pixels."""
+        document = self.document()
+        return (
+            document.textWidth()
+            - document.documentMargin()
+            - BUBBLE_PAD_X
+            - self.horizontalScrollBar().value()
+        )
+
+    def _extent_of(self, block: object, hug: bool) -> object:
+        """Where a line's glyphs actually are, in viewport pixels.
+
+        Args:
+            block: The text block.
+            hug: Whether to measure the glyphs (a bubble, which fits its
+                text) or the whole column (a card, which does not).
+
+        Returns:
+            The rect, or None for a block with no layout yet.
+        """
+        box = self.document().documentLayout().blockBoundingRect(block)
+        box = box.translated(
+            -self.horizontalScrollBar().value(), -self.verticalScrollBar().value()
+        )
+        if not hug:
+            return box
+        layout = block.layout()
+        extent = None
+        for index in range(layout.lineCount()):
+            line = layout.lineAt(index).naturalTextRect().translated(box.topLeft())
+            if line.width() <= 0:
+                continue
+            extent = line if extent is None else extent.united(line)
+        if extent is None:
+            # An empty line inside a bubble still holds the bubble open.
+            return QRectF(box.right(), box.top(), 0.0, box.height())
+        return extent
 
 
 class _AskInput(QPlainTextEdit):
@@ -145,7 +523,13 @@ class _AskInput(QPlainTextEdit):
         self.setPlaceholderText(
             "Ask for a construction, or about the drawing. Enter to send."
         )
-        self.setFixedHeight(64)
+        self.setFixedHeight(68)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setStyleSheet(
+            f"QPlainTextEdit {{ background: #ffffff; color: {INK}; "
+            f"border: 1px solid {CARD_EDGE}; border-radius: 12px; "
+            f"padding: 7px 9px; }}"
+        )
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -197,10 +581,9 @@ class AgentPanel(QDockWidget):
 
         prose = _font(PROSE_FAMILIES, PROSE_POINT_SIZE)
 
-        self._transcript = QPlainTextEdit()
-        self._transcript.setReadOnly(True)
+        self._transcript = _TranscriptView()
         self._transcript.setFont(prose)
-        self._transcript.setViewportMargins(4, 4, 4, 4)
+        self._transcript.setViewportMargins(2, 4, 2, 4)
         self._highlighter = _Transcript(self._transcript.document())
 
         self._input = _AskInput()
@@ -365,7 +748,7 @@ class AgentPanel(QDockWidget):
             )
             return False
         self._input.clear()
-        self._say("You", asked)
+        self._asked(asked)
         context = canvas_context(self._interpreter())
         self._messages.append(
             {"role": "user", "content": f"{context}\n\n{asked}".strip()}
@@ -382,7 +765,8 @@ class AgentPanel(QDockWidget):
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._forget_worker)
-        self._append(f"\n{self._speaker_name()}\n")
+        self._transcript.start_turn(ANSWERED)
+        self._append(f"{self._speaker_name()}\n")
         self._worker.start()
         return True
 
@@ -395,7 +779,7 @@ class AgentPanel(QDockWidget):
         # would be sent back as context next turn and read as a finished one.
         if self._messages and self._messages[-1]["role"] == "user":
             self._messages.pop()
-        self._append("\n  — stopped.\n")
+        self._append("\n  — stopped.")
         self._end("Stopped.")
 
     def clear_chat(self) -> None:
@@ -456,7 +840,7 @@ class AgentPanel(QDockWidget):
             if problems:
                 self._append(
                     "  — that script won't all run:\n"
-                    + "".join(f"      {line}\n" for line in problems)
+                    + "\n".join(f"      {line}" for line in problems)
                 )
                 note = f"{len(problems)} line(s) won't run — see above. " + note
         self._end(note)
@@ -466,7 +850,7 @@ class AgentPanel(QDockWidget):
         # send it again, unanswered, on top of the next one.
         if self._messages and self._messages[-1]["role"] == "user":
             self._messages.pop()
-        self._append(f"\n  — {message}\n")
+        self._append(f"\n  — {message}")
         self._end(message)
 
     def _forget_worker(self) -> None:
@@ -479,9 +863,10 @@ class AgentPanel(QDockWidget):
     # -- The transcript ----------------------------------------------------
 
     def _greet(self) -> None:
+        self._transcript.start_turn(NOTE)
         self._append(
             "Ask for a construction and the assistant writes a script. Read "
-            "it, then send it to the Scripts panel to run.\n"
+            "it, then send it to the Scripts panel to run."
         )
         self._greet_status()
 
@@ -516,15 +901,21 @@ class AgentPanel(QDockWidget):
             return
         self._status.setText(self._models.currentText())
 
-    def _say(self, who: str, text: str) -> None:
-        self._append(f"\n{who}\n{text}\n")
+    def _asked(self, text: str) -> None:
+        """Put the question in its bubble, on the right.
+
+        No "You" label: the bubble and the side it is on already say whose
+        words they are, which is how the desktop app does it, and a label as
+        well would be saying it twice.
+
+        Args:
+            text: What was asked.
+        """
+        self._transcript.start_turn(ASKED)
+        self._append(text)
 
     def _append(self, text: str) -> None:
-        cursor = self._transcript.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.insertText(text)
-        self._transcript.setTextCursor(cursor)
-        self._transcript.ensureCursorVisible()
+        self._transcript.add(text)
 
     def _begin(self, note: str) -> None:
         self._send_button.setEnabled(False)

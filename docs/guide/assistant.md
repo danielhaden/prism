@@ -54,11 +54,26 @@ before. The line under the buttons shows what each turn cost in tokens.
 
 ## Reading it
 
+Your question sits on the right in a bubble; the reply runs down the left of
+the page, as it does in the Claude desktop app. Nothing labels the question —
+the side it is on says whose words they are — while the reply is named, since
+it may have come from Claude or from a model on your own machine and that is
+not a detail.
+
+A bubble is as wide as the question needs and no wider, up to about two
+thirds of the panel, after which it wraps. Narrow the dock and the bubbles
+are re-fitted to it.
+
 Prose is set in a book serif and scripts in a monospace face, because the
 panel holds two kinds of writing at once and one font cannot serve both —
-prose wants to be read, a script wants its columns. The faces are the first
-available of a short list at the top of `prism/agent_panel.py`, so changing
-them is a one-line edit.
+prose wants to be read, a script wants its columns. A script also sits on a
+card of its own, so it can be told from the prose around it at a glance. The
+faces, and the colours of the page, the bubble and the card, are constants at
+the top of `prism/agent_panel.py`, so changing them is a one-line edit.
+
+The transcript is plain text throughout: select it, copy it, and you get
+exactly what was said, bubbles and cards included — they are drawn behind the
+words rather than written into them.
 
 ## Choosing a model
 
