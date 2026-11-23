@@ -429,11 +429,45 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`P1`, `L1`). Fractions accept `1/3` or `0.5`. Angles are **degrees clockwise
   from horizontal**. Canvas fractions: 0 = top/left, 1 = bottom/right, of the
   *reference frame*.
-- **Scripts**: Console "Save Script…" records the session's *building* commands;
-  ScriptsPanel lists/runs them. Location set via **Settings → Scripts Folder…**
-  (`prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides; `.prism` text files).
+- **Scripts**: Console "Save Script…" records the session's *building*
+  commands and opens the result in the ScriptsPanel editor, which runs it.
+  Opening, saving and the default folder are the **File menu**'s (see **The
+  File menu (scripts)**; `prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides;
+  `.prism` text files).
   `prism/settings.py` also holds the book path/page (see **Panels → Book**) and
   the window layout.
+
+## The File menu (scripts)
+
+- **File** is the first menu, and every command in it acts on the **open
+  script** — Prism's only documents are scripts, since the canvas keeps itself
+  (see **The drawing, between sessions**). New Script / Open Prism Script… /
+  Open Recent / Save Script / Save Script As… / Set Default Script Folder… /
+  Use Current Script's Folder, on the standard `QKeySequence` shortcuts.
+- **The menu settles itself in `aboutToShow`** (`_sync_file_menu`). What it
+  offers depends on the open script's path, its dirty flag and what is on
+  disk, none of which announces itself; reading those as the menu opens beats
+  keeping four actions in step from afar. Open Recent is rebuilt there too.
+- **The default scripts folder is a starting point, not a fence.**
+  `settings.scripts_dir()` is where **Save Script** writes and where **Open**
+  starts looking; opening a script elsewhere changes nothing. Two ways to move
+  it, both under File: a folder dialog, or **Use Current Script's Folder**,
+  enabled only when the open script is somewhere else. It moved out of the
+  Settings menu — one setting in two menus is only ever a question of which
+  one is stale. `PRISM_SCRIPTS_DIR` still overrides, and
+  `scripts_dir_is_fixed()` greys both commands out when it does (mirrors
+  `shelf_is_fixed`).
+- **Recent scripts** live in `settings.recent_scripts()` as a JSON list under
+  `scripts/recent`, capped at `RECENT_LIMIT` (8). The getter **filters to
+  files that still exist**, and `remember_script` writes that filtered list
+  back, so a deleted script leaves for good rather than lingering. Menu text
+  is the bare name, qualified with the parent folder only when two entries
+  share one (`_recent_label`) — once scripts come from anywhere, two called
+  `net` is ordinary.
+- `ConsolePanel.scriptSaved` now carries **the path**. `MainWindow` remembers
+  it and opens it in the editor, so what you just recorded is there to read
+  and run again. It used to carry nothing and refresh the list.
+- `settings.list_scripts()` is **gone** — nothing lists a folder any more.
 
 ## Panels
 
@@ -458,8 +492,16 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`_seen_sections`). Its **objectName is still `SelectionPanel`**, which is
   what Qt saves dock layouts against — renaming it would strand saved
   layouts, so it stays. It replaced the old selection-only panel.
-- **Scripts** (right, tabbed with Library): the folder's `.prism` files in a
-  list, with an editor under it in a vertical splitter. The editor is
+- **Scripts** (right, tabbed with Library): an editor over **one script at a
+  time**. It used to list the scripts folder above the editor; the list is
+  gone and **the File menu opens a script instead** — a script is an ordinary
+  file that may live anywhere, so a list of one folder could only ever show
+  some of them. The panel keeps the editing concerns (the open path, the
+  dirty flag, reading and writing); `MainWindow` owns the commands and the
+  dialogs. Saving an untitled script needs a dialog, so the panel's own Save
+  button calls back through `set_save_handler(…)` — the same bargain as
+  `CanvasScene.set_command_runner`, and it falls back to `save()` when no
+  handler is set so the panel stays usable headless. The editor is
   `prism/script_editor.py`'s **`ScriptEditor`** — a `QPlainTextEdit` with a
   line-number gutter (`_LineNumbers`, a plain child widget so it doesn't
   scroll horizontally with the text). Numbers are drawn at `NUMBER_SCALE`
@@ -473,9 +515,11 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   repainted). Width is measured with the **bold** font, the wider of the two,
   so the gutter doesn't jostle as the cursor moves. **Run** executes the
   *editor's* text, not the file, so an edit can be tried before it's kept;
-  Save / Revert / Refresh alongside. Unsaved edits mark the script *modified*
-  and prompt (Save / Discard / Cancel) when you select another — Cancel puts
-  the selection back. Saving goes through `settings.write_script(path, text)`,
+  Save / Revert alongside (Refresh went with the list). Unsaved edits mark the
+  script *modified* and prompt (Save / Discard / Cancel) before New, Open, and
+  **on `closeEvent`** — the canvas keeps itself between sessions, but a script
+  is a file, so Cancel there `event.ignore()`s the close. Saving goes through
+  `settings.write_script(path, text)`,
   which writes the **exact path** the script was read from: deriving it from
   the display name would send a hand-named script like `net(1).prism` to
   `net1.prism` and leave the original behind.

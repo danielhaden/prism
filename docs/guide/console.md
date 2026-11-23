@@ -910,12 +910,35 @@ Click **Save Script…** next to the input and give it a name. The session's
 **building** commands are written out in order — inspection commands
 (`(ls)`, `(help)`) are left out, so the script is just the construction.
 
+It is written to your [default script folder](#where-scripts-live) and opens
+in the Scripts panel, ready to read, tidy and run again.
+
+### Opening a script
+
+Scripts are opened from the **File** menu:
+
+| Command | What it does |
+|---------|--------------|
+| **New Script** (Ctrl+N) | Start an empty script in the editor |
+| **Open Prism Script…** (Ctrl+O) | Open a `.prism` file from anywhere on disk |
+| **Open Recent** | The last few scripts you opened, by name |
+| **Save Script** (Ctrl+S) | Write the editor back to its file |
+| **Save Script As…** (Ctrl+Shift+S) | Write it somewhere new |
+
+A script is an ordinary file and may live wherever you keep your work — beside
+a drawing, in a notes folder, in a repository. That is why the File menu opens
+one rather than a list in the panel: a list can only show one folder, and the
+script you want is as often as not in another.
+
+**Open Recent** names scripts by their own name, and adds the folder when two
+of them share it. A script you have deleted or moved drops off the list rather
+than sitting there offering to open nothing.
+
 ### The Scripts panel
 
-**View → Show Scripts** opens a dock (tabbed with the Library) listing every
-script in your scripts folder, with an **editor** below the list. Select a
-script and its text appears there; drag the divider to give the list or the
-editor more room.
+**View → Show Scripts** opens a dock (tabbed with the Library) holding the
+**editor** for whichever script is open. Opening one raises the panel, so the
+File menu brings it forward for you.
 
 The editor **numbers its lines** in a small grey gutter on the left. A script
 is read as much as it is written — to find the step that drew a line, or the
@@ -930,23 +953,40 @@ where you are without hunting for the caret.
 | **Run** | Execute what's in the editor; commands and output are echoed to the console |
 | **Save** | Write the editor back to the file |
 | **Revert** | Throw away your edits and re-read the file |
-| **Refresh** | Re-read the folder, so scripts you add by hand show up |
 
 **Run uses the editor, not the file**, so you can try a change before keeping
 it. Edit, run, look at the canvas, adjust — then **Save** when it does what you
-want, or **Revert** when it doesn't. A script with unsaved edits is marked
-*modified* under the editor, and selecting a different one asks before
-discarding them. Double-clicking a script still runs it.
+want, or **Revert** when it doesn't.
+
+A script with unsaved edits is marked *modified* under the editor, and opening
+another one — or closing Prism — asks before discarding them. Saving a script
+that has never been written asks where to put it, starting in your default
+folder.
+
+The line under the buttons says where the open script is. With nothing open it
+names the default folder instead, which is where a new one would go.
 
 Replaying a script doesn't re-record its commands, so running one won't
 duplicate it into the next thing you save.
 
 ### Where scripts live
 
-Scripts are plain text files (`.prism`) in your **scripts folder**, so you can
-edit them in any editor as well as in the panel. Choose the folder from **Settings → Scripts Folder…**;
-it defaults to a per-user application-data directory, and the panel shows the
-current path at the bottom.
+Scripts are plain text files (`.prism`), so you can edit them in any editor as
+well as in the panel.
+
+One folder is the **default**: it is where the console's **Save Script…**
+writes, where **Save Script As…** starts, and where **Open Prism Script…**
+looks first. It defaults to a per-user application-data directory and is
+remembered between sessions. Two ways to change it, both under **File**:
+
+- **Set Default Script Folder…** picks one with a folder dialog.
+- **Use Current Script's Folder** adopts the folder the open script came from.
+  It is only offered when that script is somewhere else, since otherwise it
+  would do nothing.
+
+Opening a script from another folder is a one-off and changes nothing — the
+default is a starting point, not a fence. Settle into a folder of your own and
+adopt it once, and everything afterwards goes there.
 
 Scripts may contain blank lines and [remarks](#remarks):
 
