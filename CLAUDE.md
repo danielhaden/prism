@@ -688,6 +688,29 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - **A turn that fails or is stopped is taken back out of the history.**
   Leaving the question in would send it again, unanswered, stacked on the
   next one; a half-streamed reply would be sent back as though finished.
+- **Two backends, picked in the panel**: `OllamaBackend` (local, no account,
+  stdlib `urllib` so no dependency) and `ClaudeBackend`. The picker re-asks
+  Ollama's `/api/tags` **each time it is opened** — Ollama gets started and
+  pulled from while Prism runs, so a list built at launch is wrong as often
+  as not. Ollama is listed first and defaults, which is right for someone
+  with no API key. The choice is remembered as `provider:model` (split on
+  the *first* colon — Ollama names contain one).
+- **Ollama needs `num_ctx` set explicitly** (`CONTEXT_TOKENS`, 8192). Its
+  default context is small enough to cut off the command reference, which
+  leaves the model guessing at a language it was never shown. It takes the
+  system prompt as the first *message*, not a field.
+- **`check_script()` reads a script against the real command table before it
+  is offered**, and the panel says what won't run. This earns its keep: a 3B
+  model writes `(add-horizon 1/3)` and a confident paragraph explaining it,
+  and no amount of prompt text reliably stops it — measured over several
+  rounds of tuning. Only **top-level heads** and parse errors are checked;
+  nested heads would also flag a lambda's parameter list, and a check with
+  false positives is one people learn to ignore. Said, never blocked.
+- The prompt earns its length: the `add`-with-a-space versus hyphenated
+  split, "parentheses mean a command" (a small model writes
+  `(point L1 (2/3))`), and worked examples of building from an empty canvas
+  (it reaches for `(point …)` where it needs `(add point …)`). Each of those
+  came from a real failure against llama3.2, not from guessing.
 - **The API key is never Prism's.** The SDK reads it from the environment
   (`ANTHROPIC_API_KEY`, or an `ant auth login` profile). QSettings is a
   plaintext plist — nothing of the user's goes in it. `looks_configured()`

@@ -52,22 +52,59 @@ ids it writes are the ids you have.
 It is a conversation, so "now make it denser" follows on from what came
 before. The line under the buttons shows what each turn cost in tokens.
 
-## Setting it up
+## Choosing a model
 
-Prism uses [Claude](https://claude.com) and **never stores your API key**.
-The key is read from the environment by Anthropic's own library, so set it
-where Prism starts:
+The **Model** box lists what you can actually use. It re-asks each time you
+open it, so starting Ollama or pulling a model does not mean restarting
+Prism.
+
+### Ollama — no account, nothing leaves the machine
+
+If [Ollama](https://ollama.com) is running, its models are listed first and
+one is picked by default. There is nothing to set up beyond Ollama itself:
+
+```bash
+ollama serve
+ollama pull llama3.2
+```
+
+Set `OLLAMA_HOST` if it listens somewhere other than `localhost:11434`.
+
+Local models are small, and it shows — expect to correct them more than you
+would Claude, and expect plain questions to go better than elaborate
+constructions. That is survivable here precisely because the assistant
+writes a script for you to read rather than driving the canvas itself.
+
+### Claude — better at it, needs a key
+
+Prism **never stores your API key**. It is read from the environment by
+Anthropic's own library, so set it where Prism starts:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 An `ant auth login` profile works too, with no environment variable at all.
-Without either, the assistant says so and the rest of Prism is unaffected —
-it is a panel, not a dependency.
+Each turn sends the command reference, which is long; it is marked for
+[prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+so after the first turn most of it comes from cache at a fraction of the
+price. The status line shows the token counts either way.
 
-!!! note "What it costs"
-    Each turn sends the command reference, which is long. It is marked for
-    [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
-    so after the first turn of a conversation most of it is served from cache
-    at a fraction of the price — the status line shows how much.
+With neither available the assistant says so, and the rest of Prism is
+unaffected — it is a panel, not a dependency.
+
+## It checks its own work
+
+Prism knows exactly which commands exist, so before a script is offered it
+is **read against the real command table**. A line that names a form Prism
+hasn't got, or that doesn't parse, is called out:
+
+```
+  — that script won't all run:
+      line 1: there is no (add-horizon …)
+```
+
+It is said, not blocked — the script is still yours to keep, fix or throw
+away. This is worth most with a local model, which will cheerfully invent
+`(add-horizon …)` where Prism has `(add horizon …)`, and write a perfectly
+confident paragraph explaining it.

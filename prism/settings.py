@@ -31,6 +31,7 @@ SCRIPT_SUFFIX = ".prism"
 _SCRIPTS_DIR_KEY = "paths/scripts_dir"
 _RECENT_SCRIPTS_KEY = "scripts/recent"
 _EXPORT_DIR_KEY = "paths/export_dir"
+_ASSISTANT_KEY = "assistant/model"
 _BOOK_PATH_KEY = "paths/book_path"
 _WINDOW_GEOMETRY_KEY = "window/geometry"
 _WINDOW_STATE_KEY = "window/state"
@@ -98,6 +99,28 @@ def write_script(path: str, text: str) -> None:
 def load_script(path: str) -> str:
     with open(path, encoding="utf-8") as handle:
         return handle.read()
+
+
+# -- The assistant -------------------------------------------------------
+
+
+def assistant_choice() -> str:
+    """Which model the Assistant last used, as ``provider:model``.
+
+    Returns:
+        The stored choice, or ``""`` when none has been made.
+    """
+    return str(QSettings().value(_ASSISTANT_KEY, "") or "")
+
+
+def set_assistant_choice(choice: str) -> None:
+    """Remember which model the Assistant is using.
+
+    Args:
+        choice: ``provider:model`` — the model name may itself contain a
+            colon, as Ollama's do, so only the first one separates them.
+    """
+    QSettings().setValue(_ASSISTANT_KEY, choice)
 
 
 # -- Exporting -----------------------------------------------------------

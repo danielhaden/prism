@@ -60,6 +60,50 @@ something built, follow the prose with **exactly one** fenced block tagged
 When they are only asking a question, answer it — no fenced block. Never put
 two blocks in one reply; the person sends one script to the editor at a time.
 
+## Building from nothing
+
+An empty canvas has no `L1` and no `P1`. Make what you need before you refer
+to it.
+
+Two forms that are easy to confuse:
+
+- **`(add point <across> <down>)`** *places* a point anywhere on the canvas.
+- **`(point <line> <fraction>)`** *finds* one on a line that already exists.
+  It cannot make the line.
+
+So a triangle on a blank canvas places its vertices first:
+
+```prism
+; three placed points, joined
+(draw-triangle (add point 1/5 4/5) (add point 4/5 4/5) (add point 1/2 1/5))
+```
+
+and a pencil through the middle places its centre first:
+
+```prism
+(add-pencil (add point 1/2 1/2) 6)
+```
+
+## Mistakes to avoid
+
+These are the ones that actually happen:
+
+- **`add` with a space, or a hyphenated name — never both.** `add` followed
+  by a space makes something from *numbers*: `(add point 1/2 1/2)`,
+  `(add horizon 1/3)`, `(add vertical 2/3)`. Forms that take *elements* are
+  hyphenated and are not `add` at all: `(add-line …)`, `(add-pencil …)`,
+  `(draw-triangle …)`, `(move-snapped-point …)`. There is no
+  `(add-horizon …)` and no `(add-point …)`.
+- **Parentheses mean a command.** A number is written bare: `(point L1 2/3)`,
+  never `(point L1 (2/3))`. `2/3` is a value, not a form to call.
+- **Don't invent forms.** If it isn't in the reference below, it doesn't
+  exist. Say so and suggest the nearest thing that does.
+- **Check your ids.** `(add horizon 1/3)` makes `L1` on an empty canvas, but
+  `L2` if a line is already there — the canvas listing above each question
+  tells you which. When in doubt, `(label …)` what you make and use the name.
+- **One script per reply**, in one fenced block tagged `prism`. Nothing but
+  commands and `;` remarks inside it.
+
 ## The command language
 
 Everything you may write is below. If a form is not here, it does not exist
@@ -149,3 +193,50 @@ def _looks_like_prism(body: str) -> bool:
     if not lines:
         return False
     return all(line.startswith("(") or line.startswith(";") for line in lines)
+
+
+def check_script(interpreter: object, script: str) -> list:
+    """Read a script without running it, and say what won't work.
+
+    A small model gets the language *nearly* right — it invents
+    ``(add-horizon …)`` where Prism has ``(add horizon …)`` — and the reply
+    reads perfectly well either way. Prism knows exactly which forms exist,
+    so there is no reason to let that reach the editor unremarked.
+
+    Only the **head of each top-level form** is checked, plus whether the
+    line parses at all. Nested heads would catch more and also flag a
+    lambda's parameter list, and a check with false positives is one people
+    learn to ignore.
+
+    Args:
+        interpreter: The console's interpreter, asked which forms exist.
+        script: The commands to read.
+
+    Returns:
+        One plain-English complaint per bad line, in order; empty when the
+            script is sound as far as this can tell.
+    """
+    from prism.sexpr import SexprError, parse
+
+    try:
+        known = set(interpreter.command_names())
+    except Exception:
+        return []
+    problems = []
+    for number, raw in enumerate(script.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith(";"):
+            continue
+        try:
+            forms = parse(line)
+        except SexprError as exc:
+            problems.append(f"line {number}: {exc}")
+            continue
+        for form in forms:
+            if not isinstance(form, list) or not form:
+                problems.append(f"line {number}: not a command")
+                continue
+            head = form[0]
+            if isinstance(head, str) and head.lower() not in known:
+                problems.append(f"line {number}: there is no ({head} …)")
+    return problems

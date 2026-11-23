@@ -11,6 +11,7 @@ from typing import Callable
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
+    QComboBox,
     QDockWidget,
     QHBoxLayout,
     QLabel,
@@ -20,9 +21,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from prism.agent.backends import ClaudeBackend
-from prism.agent.prompt import canvas_context, extract_script, system_prompt
+from prism.agent.backends import (
+    CLAUDE_MODELS,
+    ClaudeBackend,
+    OllamaBackend,
+    ollama_models,
+)
+from prism.agent.prompt import (
+    canvas_context,
+    check_script,
+    extract_script,
+    system_prompt,
+)
 from prism.agent.worker import AgentWorker
+from prism.settings import assistant_choice, set_assistant_choice
 
 
 class _AskInput(QPlainTextEdit):
@@ -48,6 +60,20 @@ class _AskInput(QPlainTextEdit):
         super().keyPressEvent(event)
 
 
+class _ModelBox(QComboBox):
+    """The model picker. Re-asks Ollama what it has each time it is opened.
+
+    Ollama may be started, stopped or pulled from while Prism is running, so
+    a list built once at launch is wrong as often as not.
+    """
+
+    reopened = Signal()
+
+    def showPopup(self):
+        self.reopened.emit()
+        super().showPopup()
+
+
 class AgentPanel(QDockWidget):
     """Talk to Claude about the drawing; keep what it writes."""
 
@@ -62,7 +88,7 @@ class AgentPanel(QDockWidget):
         super().__init__("Assistant", parent)
         self.setObjectName("AgentPanel")
         self._interpreter_source = interpreter_source
-        self._backend = ClaudeBackend()
+        self._backend = None
         self._script_sink = None
         self._worker = None
         #: The conversation, as the API wants it.
@@ -102,9 +128,21 @@ class AgentPanel(QDockWidget):
         self._clear_button.setToolTip("Forget the conversation and start again")
         self._clear_button.clicked.connect(self.clear_chat)
 
+        self._models = _ModelBox()
+        self._models.setToolTip(
+            "Which model answers. Ollama runs on this machine and needs no "
+            "account; Claude needs an API key in the environment."
+        )
+        self._models.reopened.connect(self._refresh_models)
+        self._models.activated.connect(self._model_chosen)
+
         self._status = QLabel()
         self._status.setWordWrap(True)
         self._status.setStyleSheet("color: gray; font-size: 11px;")
+
+        picker = QHBoxLayout()
+        picker.addWidget(QLabel("Model"))
+        picker.addWidget(self._models, 1)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self._send_button)
@@ -116,12 +154,82 @@ class AgentPanel(QDockWidget):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addWidget(self._transcript)
+        layout.addLayout(picker)
         layout.addWidget(self._input)
         layout.addLayout(buttons)
         layout.addWidget(self._status)
         self.setWidget(container)
 
+        self._refresh_models()
         self._greet()
+
+    # -- Which model answers -----------------------------------------------
+
+    def _refresh_models(self) -> None:
+        """Rebuild the picker from what is actually available.
+
+        Ollama first, because it needs no account and is what most people
+        will have to hand; Claude after it, always offered, since a missing
+        key is something to be told about rather than hidden from.
+        """
+        chosen = self._choice()
+        self._models.blockSignals(True)
+        self._models.clear()
+        for name in ollama_models():
+            self._models.addItem(f"Ollama · {name}", ("ollama", name))
+        for name in CLAUDE_MODELS:
+            self._models.addItem(f"Claude · {name}", ("claude", name))
+        if self._models.count() == 0:
+            self._models.addItem("No model available", None)
+        index = self._index_of(chosen)
+        self._models.setCurrentIndex(index)
+        self._models.blockSignals(False)
+        self._adopt(self._models.itemData(index))
+
+    def _index_of(self, choice: str) -> int:
+        """Where a remembered choice sits in the picker now.
+
+        Args:
+            choice: ``provider:model``.
+
+        Returns:
+            Its row, or 0 — the first Ollama model if there is one, which is
+                the right default for someone with no API key.
+        """
+        if choice and ":" in choice:
+            provider, model = choice.split(":", 1)
+            for row in range(self._models.count()):
+                if self._models.itemData(row) == (provider, model):
+                    return row
+        return 0
+
+    def _choice(self) -> str:
+        """The current choice as ``provider:model``, for remembering."""
+        data = self._models.itemData(self._models.currentIndex())
+        if data:
+            return f"{data[0]}:{data[1]}"
+        return assistant_choice()
+
+    def _model_chosen(self, index: int) -> None:
+        data = self._models.itemData(index)
+        self._adopt(data)
+        if data:
+            set_assistant_choice(f"{data[0]}:{data[1]}")
+        self._greet_status()
+
+    def _adopt(self, data) -> None:
+        """Make the backend the picker now names.
+
+        Args:
+            data: ``(provider, model)``, or None when nothing is available.
+        """
+        if not data:
+            self._backend = None
+            return
+        provider, model = data
+        self._backend = (
+            OllamaBackend(model) if provider == "ollama" else ClaudeBackend(model)
+        )
 
     # -- Wiring ------------------------------------------------------------
 
@@ -150,6 +258,12 @@ class AgentPanel(QDockWidget):
             return False
         asked = self._input.toPlainText().strip()
         if not asked:
+            return False
+        if self._backend is None:
+            self._status.setText(
+                "No model to ask. Start Ollama (`ollama serve`) and pull one, "
+                "or set ANTHROPIC_API_KEY for Claude."
+            )
             return False
         self._input.clear()
         self._say("you", asked)
@@ -234,7 +348,19 @@ class AgentPanel(QDockWidget):
             self._script is not None and self._script_sink is not None
         )
         self._append("\n")
-        self._end(self._cost(usage))
+        note = self._cost(usage)
+        if self._script is not None:
+            # Prism knows exactly which forms exist, so there is no reason to
+            # let an invented one reach the editor unremarked. Said, not
+            # blocked: it is still the person's script to keep or throw away.
+            problems = check_script(self._interpreter(), self._script)
+            if problems:
+                self._append(
+                    "  — that script won't all run:\n"
+                    + "".join(f"      {line}\n" for line in problems)
+                )
+                note = f"{len(problems)} line(s) won't run — see above. " + note
+        self._end(note)
 
     def _on_failed(self, message: str) -> None:
         # The question goes back out of the history: leaving it there would
@@ -258,13 +384,25 @@ class AgentPanel(QDockWidget):
             "Prism assistant. Ask for a construction and it writes a script;\n"
             "read it, then send it to the Scripts panel to run.\n"
         )
-        if not ClaudeBackend.looks_configured():
+        self._greet_status()
+
+    def _greet_status(self) -> None:
+        """Say which model is answering, or why none is."""
+        if self._backend is None:
+            self._status.setText(
+                "No model available. Start Ollama (`ollama serve`) and pull "
+                "one, or set ANTHROPIC_API_KEY for Claude."
+            )
+            return
+        if isinstance(self._backend, ClaudeBackend) and not (
+            self._backend.looks_configured()
+        ):
             self._status.setText(
                 "No ANTHROPIC_API_KEY in the environment. Set one, or run "
-                "`ant auth login`, then try — Prism never stores it."
+                "`ant auth login` — Prism never stores it."
             )
-        else:
-            self._status.setText(f"Claude · {self._backend.model}")
+            return
+        self._status.setText(self._models.currentText())
 
     def _say(self, who: str, text: str) -> None:
         self._append(f"\n{who:<7} {text}\n")
@@ -295,12 +433,13 @@ class AgentPanel(QDockWidget):
         Returns:
             A short line, or the plain model name when there are none.
         """
+        who = self._models.currentText()
         if not usage:
-            return f"Claude · {self._backend.model}"
+            return who
         cached = f", {usage['cached']} cached" if usage.get("cached") else ""
         return (
-            f"Claude · {self._backend.model} · "
-            f"{usage.get('input', 0)} in{cached}, {usage.get('output', 0)} out"
+            f"{who} · {usage.get('input', 0)} in{cached}, "
+            f"{usage.get('output', 0)} out"
         )
 
     def _interpreter(self):
