@@ -154,6 +154,13 @@ class ElementsPanel(QDockWidget):
                     sorted(self._scene.line_id(ln) for ln in point.meeting_lines())
                 )
             )
+        elif point.is_at_infinity():
+            tags.append(
+                "at infinity of "
+                + ", ".join(
+                    sorted(self._scene.line_id(ln) for ln in point.infinity_lines())
+                )
+            )
         elif point.is_locked_to_line():
             tags.append("locked to line")
         elif point.has_anchor():

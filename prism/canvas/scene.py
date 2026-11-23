@@ -10,16 +10,18 @@ endpoints follow and intersections recompute.
 import math
 from typing import Callable
 
+import shiboken6
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsScene,
+    QGraphicsSceneMouseEvent,
     QMenu,
 )
 
-from prism.anchors import MeetAnchor
+from prism.anchors import InfinityAnchor, MeetAnchor
 from prism.dependencies import (
     Changed,
     DependencyGraph,
@@ -29,6 +31,27 @@ from prism.dependencies import (
 from prism.items import GroupItem, LineItem, PointItem
 from prism.items.label import LabelItem
 from prism.tools import Tool
+
+
+def _movable_ancestor_selected(item: QGraphicsItem) -> bool:
+    """Whether something above ``item`` is selected and will carry it along.
+
+    Qt's rule, kept so Prism's own drag moves exactly what Qt's would: an
+    item inside a selected, movable parent must not be moved again on its own
+    account.
+
+    Args:
+        item: The item to look above.
+
+    Returns:
+        Whether a movable ancestor of it is selected.
+    """
+    parent = item.parentItem()
+    while parent is not None:
+        if parent.isSelected() and parent.flags() & QGraphicsItem.ItemIsMovable:
+            return True
+        parent = parent.parentItem()
+    return False
 
 
 def _closest_on_segment(p: QPointF, seg: QLineF) -> QPointF:
@@ -84,6 +107,10 @@ class CanvasScene(QGraphicsScene):
     #: the viewport (so their clipped ends are never visible).
     REFERENCE_SIZE = 1200.0
 
+    #: What a new point at infinity is called. Omega is the usual name for an
+    #: ideal point; a second one becomes Omega2, and so on.
+    INFINITY_LABEL = "Ω"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSceneRect(-2000, -2000, 4000, 4000)
@@ -101,6 +128,14 @@ class CanvasScene(QGraphicsScene):
         self._snap_indicator: QGraphicsEllipseItem | None = None
         self._updating = False
         self._syncing_anchors = False
+        # How deep Qt is in handing a mouse event to the items. Nothing may
+        # leave the scene while that is non-zero, nor while a drag is in
+        # flight — see :meth:`_retire_point`.
+        self._delivery_depth = 0
+        self._retired_meets: list[PointItem] = []
+        # What a press picked up, as (item, position when the press began).
+        # Prism moves these itself; see :meth:`drag_items`.
+        self._drag_items: list = []
         self._seq_counter = 0
 
         # Undo/redo: snapshots of the whole scene, newest last.
@@ -117,6 +152,62 @@ class CanvasScene(QGraphicsScene):
 
     #: Most snapshots kept; older history is discarded.
     UNDO_LIMIT = 100
+
+    def _begin_delivery(self) -> None:
+        """Qt is about to hand a mouse event to the items.
+
+        Paired with :meth:`_end_delivery`. It counts rather than flags, so a
+        delivery that somehow arrives inside another one doesn't declare the
+        outer one over.
+        """
+        self._delivery_depth += 1
+
+    def _end_delivery(self) -> None:
+        """Qt has finished with the event; take away what was waiting to go."""
+        self._delivery_depth = max(0, self._delivery_depth - 1)
+        self._sweep_retired_meets()
+
+    def _mid_gesture(self) -> bool:
+        """Whether Qt is holding on to the items right now.
+
+        True while an event is being delivered, and for the whole of a drag:
+        Qt keeps hold of the item it handed the press to until the release,
+        and of a raw list of what it is moving while each move is delivered.
+        """
+        return self._delivery_depth > 0 or self.mouseGrabberItem() is not None
+
+    def _retire_point(self, point: PointItem) -> None:
+        """Take away a point the geometry no longer puts anywhere.
+
+        A marker whose lines no longer meet there, or a point at infinity whose
+        last line has gone. **Every** such removal goes through here.
+
+        Normally that is simply removing it. Mid-gesture it is not: Qt is
+        holding the items being dragged, and `recompute_intersections` runs
+        from a dragged point's own ``itemChange``. Free a point from in there
+        and the ``setPos`` that called it carries on reading it — a segfault,
+        not an exception, and one that takes the app with it. So the point is
+        hidden now, held as a reference so nothing can free it, and removed
+        once the gesture is over.
+
+        Args:
+            point: The point to take away.
+        """
+        if not self._mid_gesture():
+            self.removeItem(point)
+            return
+        point.setVisible(False)
+        if not any(other is point for other in self._retired_meets):
+            self._retired_meets.append(point)
+
+    def _sweep_retired_meets(self) -> None:
+        """Remove the markers that were only hidden, once that is safe."""
+        if not self._retired_meets or self._mid_gesture():
+            return
+        retired, self._retired_meets = self._retired_meets, []
+        for point in retired:
+            if point.scene() is self:
+                self.removeItem(point)
 
     def init_history(self) -> None:
         """Record the starting state; call once the scene is set up."""
@@ -342,7 +433,11 @@ class CanvasScene(QGraphicsScene):
             event.accept()
             return
 
-        super().mousePressEvent(event)
+        self._begin_delivery()
+        try:
+            super().mousePressEvent(event)
+        finally:
+            self._end_delivery()
 
     def mouseMoveEvent(self, event):
         if self._tool == Tool.LINE:
@@ -369,7 +464,117 @@ class CanvasScene(QGraphicsScene):
                 self.show_snap_indicator(snapped)
             else:
                 self.hide_snap_indicator()
-        super().mouseMoveEvent(event)
+        self._begin_delivery()
+        try:
+            super().mouseMoveEvent(event)
+        finally:
+            self._end_delivery()
+
+    def mouseReleaseEvent(self, event):
+        self._begin_delivery()
+        try:
+            super().mouseReleaseEvent(event)
+        finally:
+            self._end_delivery()
+
+    # -- Dragging the selection --------------------------------------------
+
+    def begin_item_drag(self, item: QGraphicsItem) -> None:
+        """Note what a press picked up, ready to move it.
+
+        Call it once the base class has had the press, by which time the
+        selection has settled.
+
+        Args:
+            item: The item the press went to.
+        """
+        picked = list(self.selectedItems())
+        if not any(other is item for other in picked):
+            picked.append(item)
+        self._drag_items = [
+            (it, it.pos())
+            for it in picked
+            if it.flags() & QGraphicsItem.ItemIsMovable
+            and not _movable_ancestor_selected(it)
+        ]
+
+    def drag_items(self, event: QGraphicsSceneMouseEvent) -> bool:
+        """Move everything the press picked up.
+
+        Qt would do this for us, and that is the trouble: its
+        ``QGraphicsItem.mouseMoveEvent`` walks a **raw pointer list** of the
+        selected items, taken before it hands control to any ``itemChange``.
+        Ours rebuilds the figure from there, which can take a crossing marker
+        off the canvas — and the next pointer in Qt's list then names freed
+        memory. The app dies on the spot, with no traceback to say why.
+
+        So Prism walks the list itself. The items are held as Python
+        references for the whole drag, so nothing can be freed part-way
+        through, and one that has left the canvas is skipped rather than
+        written to.
+
+        Args:
+            event: The mouse-move event, as the item received it.
+
+        Returns:
+            Whether the drag was handled, so Qt should not also move things.
+        """
+        if not self._drag_items or not (event.buttons() & Qt.LeftButton):
+            return False
+        for item, start in self._drag_items:
+            if not shiboken6.isValid(item) or item.scene() is not self:
+                continue  # it went away mid-drag
+            delta = self._drag_delta(item, event)
+            if delta is not None:
+                item.setPos(start + delta)
+        return True
+
+    def end_item_drag(self) -> None:
+        """Forget what was being dragged: the gesture is over."""
+        self._drag_items = []
+
+    @staticmethod
+    def _drag_delta(
+        item: QGraphicsItem, event: QGraphicsSceneMouseEvent
+    ) -> QPointF | None:
+        """How far the cursor has moved, in the terms ``setPos`` wants.
+
+        A position is in the parent's coordinates, which for a point is the
+        scene. A label's parent is the point it belongs to, and a point
+        carries ``ItemIgnoresTransformations`` — its coordinates are screen
+        pixels — so that case has to go through the view, as Qt's own does.
+
+        Args:
+            item: The item being moved.
+            event: The mouse-move event.
+
+        Returns:
+            What to add to where the item was when the press began, or None
+                if the view can't say.
+        """
+        down = event.buttonDownScenePos(Qt.LeftButton)
+        parent = item.parentItem()
+        if parent is None:
+            return event.scenePos() - down
+        widget = event.widget()
+        view = widget.parentWidget() if widget is not None else None
+        if view is not None and hasattr(view, "viewportTransform"):
+            to_parent, invertible = parent.deviceTransform(
+                view.viewportTransform()
+            ).inverted()
+            if invertible:
+                here = to_parent.map(
+                    QPointF(view.mapFromGlobal(event.screenPos()))
+                )
+                began = to_parent.map(
+                    QPointF(
+                        view.mapFromGlobal(
+                            event.buttonDownScreenPos(Qt.LeftButton)
+                        )
+                    )
+                )
+                return here - began
+        return parent.mapFromScene(event.scenePos()) - parent.mapFromScene(down)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -464,6 +669,142 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return point
 
+    # -- Points at infinity ------------------------------------------------
+
+    def ideal_points(self) -> list:
+        """Every point at infinity currently on the canvas."""
+        return [
+            it
+            for it in self.items()
+            if isinstance(it, PointItem) and it.is_at_infinity()
+        ]
+
+    def point_at_infinity_of(self, line: LineItem) -> PointItem | None:
+        """The point at infinity ``line`` runs to, if it is already on canvas.
+
+        Found by *direction*, not by line: a point at infinity already
+        carrying a line parallel to this one **is** this line's point at
+        infinity, whether or not this line has been added to it yet.
+
+        Args:
+            line: The line to look up.
+
+        Returns:
+            The shared point, or None if that direction has none yet.
+        """
+        for point in self.ideal_points():
+            anchor = point.anchor()
+            if anchor.references_line(line):
+                return point
+            if any(line.is_parallel_to(other) for other in anchor.live_lines()):
+                return point
+        return None
+
+    def add_point_at_infinity(self, line: LineItem) -> PointItem | None:
+        """Surface the point at infinity that ``line`` runs to.
+
+        Parallel lines share it. If one of them already has it, ``line`` joins
+        that point rather than a second one appearing for the same direction —
+        which is the whole content of "parallel lines meet at infinity". The
+        point then carries them all, and reports as their meet.
+
+        Args:
+            line: The line whose ideal point is wanted.
+
+        Returns:
+            The point, or None if the line has no direction, or doesn't cross
+                the reference frame and so has no edge to be drawn at.
+        """
+        if line.ideal_direction() is None:
+            return None
+        existing = self.point_at_infinity_of(line)
+        if existing is not None:
+            changed = existing.anchor().add_line(line)
+            if changed:
+                existing.sync_to_anchor()
+            if not existing.label_text():
+                # Nameless: either from a drawing saved before these points
+                # came named, or because the label was taken off. Arrowheads
+                # alone don't say which point they run to, so give it one.
+                existing.set_label(self._next_infinity_label())
+                self._set_label_italic(existing, False)
+                changed = True
+            # Asking for a hidden point is reason enough to draw it again.
+            if existing.set_shown(True) or changed:
+                self.settle_definitions()
+                self.commit_undo()
+            return existing
+        where = line.frame_exit()
+        if where is None:
+            return None
+        point = self.add_point(where)
+        point.set_anchor(InfinityAnchor([line]))
+        point.set_label(self._next_infinity_label())
+        self._set_label_italic(point, False)
+        self.recompute_intersections()
+        self.commit_undo()
+        return point
+
+    def _next_infinity_label(self) -> str:
+        """A free name for a new point at infinity.
+
+        Points at infinity come labelled, because an arrowhead on its own says
+        which way but not which point — and a figure usually has more than one
+        direction in it. Omega is the usual name for an ideal point; further
+        ones are numbered.
+
+        Returns:
+            A label not already in use anywhere on the canvas.
+        """
+        taken = {
+            item.label_text()
+            for item in self.items()
+            if hasattr(item, "label_text") and item.label_text()
+        }
+        if self.INFINITY_LABEL not in taken:
+            return self.INFINITY_LABEL
+        number = 2
+        while f"{self.INFINITY_LABEL}{number}" in taken:
+            number += 1
+        return f"{self.INFINITY_LABEL}{number}"
+
+    def settle_ideal_points(self) -> None:
+        """Re-decide which lines still run to each point at infinity.
+
+        A line rotated out of a pencil of parallels keeps its own ideal point
+        and stops running to the shared one. A point left with no lines at all
+        has no direction to be the ideal point of, so it goes — through
+        :meth:`_retire_point`, since this runs while geometry is moving.
+        """
+        for point in self.ideal_points():
+            anchor = point.anchor()
+            anchor.prune()
+            if anchor.live_lines():
+                point.sync_to_anchor()
+            else:
+                self._retire_point(point)
+
+    def _drop_line_from_ideal_points(self, line: LineItem) -> None:
+        """Take ``line`` off any point at infinity it ran to.
+
+        The point belongs to a direction, not to the one line that happened to
+        surface it, so it stays as long as another parallel line still runs to
+        it. Once the last of them has gone there is no direction left to be the
+        ideal point of, and the point goes too.
+
+        Args:
+            line: The line being removed from the scene.
+        """
+        for point in self.ideal_points():
+            anchor = point.anchor()
+            if not anchor.references_line(line):
+                continue
+            anchor.drop_line(line)
+            if anchor.live_lines():
+                point.sync_to_anchor()
+            else:
+                self._retire_point(point)
+
     def add_free_point(self, scene_pos: QPointF) -> PointItem:
         """Add a point at a position on the canvas, attached to nothing.
 
@@ -527,13 +868,75 @@ class CanvasScene(QGraphicsScene):
         """Add an infinite line through two points, bound to both.
 
         Each endpoint is bound to a point, so the line stays through them as
-        they move. Returns None if the two points coincide.
+        they move.
+
+        Joining a point to a **point at infinity** is the parallel through it:
+        see :meth:`add_parallel_through`. Two points at infinity both lie on
+        the line at infinity, which is not a line that can be drawn.
+
+        Args:
+            a: One point.
+            b: The other.
+
+        Returns:
+            The new line, or None if the two coincide or are both at infinity.
         """
-        if a is b or a.center() == b.center():
+        if a is b:
+            return None
+        if a.is_at_infinity() and b.is_at_infinity():
+            return None
+        if a.is_at_infinity() or b.is_at_infinity():
+            ideal, finite = (a, b) if a.is_at_infinity() else (b, a)
+            return self.add_parallel_through(finite, ideal)
+        if a.center() == b.center():
             return None
         line = self.add_line(a.center(), b.center())
         line.bind_endpoint(1, a)
         line.bind_endpoint(2, b)
+        self.on_line_changed(line)
+        self.commit_undo()
+        return line
+
+    def add_parallel_through(
+        self, point: PointItem, ideal: PointItem
+    ) -> LineItem | None:
+        """Add the line through ``point`` that runs to ``ideal``.
+
+        The join of a point and a point at infinity is the **parallel**: the
+        one line through the point in that direction. Prism builds it as just
+        that — pinned to the point, so it follows it, and orientation-locked
+        (see :meth:`~prism.items.line_item.LineItem.set_orientation_locked`),
+        because a determined line has no freedom left to be dragged out of.
+        Unlock it if you want it to turn.
+
+        The new line joins the ideal point as well, so the whole pencil of
+        parallels is carried there and ``lines_through`` reports it.
+
+        Args:
+            point: The point the line runs through.
+            ideal: The point at infinity giving its direction.
+
+        Returns:
+            The new line, or None if the ideal point has no direction left.
+        """
+        direction = ideal.anchor().direction()
+        if direction is None:
+            return None
+        centre = point.center()
+        half = 60.0  # defining half-length; rendering is infinite
+        line = self.add_line(
+            QPointF(
+                centre.x() - direction.x() * half,
+                centre.y() - direction.y() * half,
+            ),
+            QPointF(
+                centre.x() + direction.x() * half,
+                centre.y() + direction.y() * half,
+            ),
+        )
+        line.set_pivot(point)
+        line.set_orientation_locked(True)
+        ideal.anchor().add_line(line)
         self.on_line_changed(line)
         self.commit_undo()
         return line
@@ -549,7 +952,9 @@ class CanvasScene(QGraphicsScene):
             key=lambda it: getattr(it, "_seq", 0),
         )
 
-    def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
+    def add_line_through(
+        self, point: PointItem, angle_degrees: float
+    ) -> LineItem | None:
         """Add one infinite line through ``point`` at a given angle.
 
         Args:
@@ -557,9 +962,11 @@ class CanvasScene(QGraphicsScene):
             angle_degrees: Direction, in degrees clockwise from horizontal.
 
         Returns:
-            The new line.
+            The new line, or None for a point at infinity, which has no pencil
+                of angles — see :meth:`add_projectivity`.
         """
-        return self.add_projectivity(point, [angle_degrees])[0]
+        created = self.add_projectivity(point, [angle_degrees])
+        return created[0] if created else None
 
     def add_horizon(self, fraction: float) -> LineItem:
         """Add a horizontal, orientation-locked line across the canvas.
@@ -573,6 +980,23 @@ class CanvasScene(QGraphicsScene):
         """
         rect = self.reference_rect()
         return self._add_horizon_at_y(rect.top() + fraction * rect.height())
+
+    def add_vertical(self, fraction: float) -> LineItem:
+        """Add a vertical, orientation-locked line down the canvas.
+
+        The horizon turned a quarter turn, and locked for the same reason:
+        a direction worth settling before the rest of the figure hangs off
+        it.
+
+        Args:
+            fraction: Where to place it across the reference frame, from 0
+                (the left of the canvas) to 1 (the right).
+
+        Returns:
+            The new line.
+        """
+        rect = self.reference_rect()
+        return self._add_vertical_at_x(rect.left() + fraction * rect.width())
 
     def set_command_runner(self, runner: Callable | None) -> None:
         """Let canvas actions go through the console.
@@ -618,6 +1042,21 @@ class CanvasScene(QGraphicsScene):
         rect = self.reference_rect()
         return (y - rect.top()) / rect.height()
 
+    def vertical_fraction_at(self, x: float) -> float:
+        """Where a width sits across the reference frame, as a fraction.
+
+        What :meth:`horizon_fraction_at` does for a height. Values outside
+        0-1 mean left or right of the frame, which is allowed.
+
+        Args:
+            x: A width in scene coordinates.
+
+        Returns:
+            The fraction.
+        """
+        rect = self.reference_rect()
+        return (x - rect.left()) / rect.width()
+
     def add_horizon_at(self, scene_pos: QPointF) -> LineItem:
         """Add a horizon through a position on the canvas.
 
@@ -634,9 +1073,44 @@ class CanvasScene(QGraphicsScene):
         """
         return self._add_horizon_at_y(scene_pos.y())
 
+    def add_vertical_at(self, scene_pos: QPointF) -> LineItem:
+        """Add a vertical through a position on the canvas.
+
+        What :meth:`add_horizon_at` is to :meth:`add_horizon`.
+
+        Args:
+            scene_pos: Where to put it, in scene coordinates; only the
+                width matters, since the line is vertical.
+
+        Returns:
+            The new line.
+        """
+        return self._add_vertical_at_x(scene_pos.x())
+
     def _add_horizon_at_y(self, y: float) -> LineItem:
         rect = self.reference_rect()
-        line = self.add_line(QPointF(rect.left(), y), QPointF(rect.right(), y))
+        return self._add_locked_line(
+            QPointF(rect.left(), y), QPointF(rect.right(), y)
+        )
+
+    def _add_vertical_at_x(self, x: float) -> LineItem:
+        rect = self.reference_rect()
+        return self._add_locked_line(
+            QPointF(x, rect.top()), QPointF(x, rect.bottom())
+        )
+
+    def _add_locked_line(self, start: QPointF, end: QPointF) -> LineItem:
+        """An orientation-locked line spanning the frame, as one undo step.
+
+        Args:
+            start: One end of the span; the line itself is infinite, so
+                the two only fix its direction and its handles.
+            end: The other end.
+
+        Returns:
+            The new line.
+        """
+        line = self.add_line(start, end)
         line.set_orientation_locked(True)
         self.on_line_changed(line)
         self.commit_undo()
@@ -713,6 +1187,7 @@ class CanvasScene(QGraphicsScene):
                 self._replace(item, graph)
         finally:
             self._syncing_anchors = False
+        self.settle_ideal_points()
         self.recompute_intersections()
         self.settle_definitions()
 
@@ -856,7 +1331,14 @@ class CanvasScene(QGraphicsScene):
         """Constrain each point to lie on ``line``. Returns how many anchored."""
         anchored = 0
         skipped = 0
+        ideal = 0
         for point in points:
+            if point.is_at_infinity():
+                # It has no position to slide along a line: it is a direction.
+                # Anchoring would quietly replace it with an ordinary point
+                # parked on the frame edge, which is not what was asked for.
+                ideal += 1
+                continue
             if self.would_cycle(point, line):
                 skipped += 1
                 continue
@@ -867,28 +1349,54 @@ class CanvasScene(QGraphicsScene):
                 f"Skipped {skipped} point(s): that line is computed from them, "
                 "so anchoring them to it would be circular."
             )
+        if ideal:
+            self.statusMessage.emit(
+                f"Skipped {ideal} point(s) at infinity: a point at infinity is "
+                "a direction, so there is nothing to slide along a line."
+            )
         self.recompute_intersections()
         self.settle_definitions()
         self.commit_undo()
         return anchored
 
     def _points_anchored_to(self, line: LineItem):
-        # Line-anchored points only; intersection markers are cleaned up by the
-        # recompute when a line goes away.
+        # Line-anchored points only. Intersection markers are cleaned up by
+        # the recompute when a line goes away, and a point at infinity by
+        # _drop_line_from_ideal_points — it belongs to a direction, not to the
+        # one line that surfaced it, so freeing it here would be wrong.
         return [
             it
             for it in self.items()
             if isinstance(it, PointItem)
             and not it.is_meet()
+            and not it.is_at_infinity()
             and it.anchor_references_line(line)
         ]
 
-    def add_projectivity(self, point: PointItem, angles) -> list:
+    def add_projectivity(self, point: PointItem, angles: list) -> list:
         """Create a pencil of lines through ``point`` at the given angles.
 
         Angles are degrees clockwise from horizontal. Each line is infinite and
         pinned to ``point`` (so the pencil rotates about it).
+
+        A **point at infinity** has no pencil of this kind: every line through
+        it runs in its one direction, so they differ by position rather than
+        angle. Nothing is drawn for one.
+
+        Args:
+            point: The centre of the pencil.
+            angles: The angles to draw, in degrees clockwise from horizontal.
+
+        Returns:
+            The lines created, which is empty for a point at infinity.
         """
+        if point.is_at_infinity():
+            self.statusMessage.emit(
+                "A point at infinity has no pencil of angles: every line "
+                "through it runs the same way. Join it to a point instead, "
+                "for the parallel through that point."
+            )
+            return []
         center = point.center()
         half = 60.0  # defining half-length; rendering is infinite
         created = []
@@ -904,6 +1412,69 @@ class CanvasScene(QGraphicsScene):
         self.recompute_intersections()
         self.commit_undo()
         return created
+
+    def lines_through_both(self, first: PointItem, second: PointItem) -> list:
+        """Every line both points lie on, in creation order.
+
+        Measured with :meth:`~prism.items.line_item.LineItem.passes_through`,
+        so a recorded relation counts outright and anything else has to look
+        like it is on the line.
+
+        Args:
+            first: One point.
+            second: The other.
+
+        Returns:
+            The lines through both, which may be none.
+        """
+        if first is second:
+            return []
+        return [
+            line
+            for line in self.ordered_lines()
+            if line.passes_through(first) and line.passes_through(second)
+        ]
+
+    def segment_between(
+        self, line: LineItem, first: PointItem, second: PointItem
+    ) -> bool:
+        """Draw only the part of ``line`` between two points on it.
+
+        Args:
+            line: The line to cut down.
+            first: One bounding point.
+            second: The other.
+
+        Returns:
+            Whether anything changed.
+        """
+        if first is second:
+            return False
+        line.set_segment_ends(first, second)
+        self.on_line_changed(line)
+        self.recompute_intersections()
+        self.settle_definitions()
+        self.commit_undo()
+        return True
+
+    def show_full_line(self, line: LineItem) -> None:
+        """Draw the whole of ``line`` again, however it was cut down.
+
+        An anchor point that **Define Visible Range…** made to hold the
+        extents goes with it: it was never part of the figure, only of the
+        range. The two points bounding a segment are the figure, and stay.
+
+        Args:
+            line: The line to restore.
+        """
+        anchor = line.range_anchor()
+        line.clear_visible_range()
+        if anchor is not None:
+            self._remove_geometry(anchor)
+        self.on_line_changed(line)
+        self.recompute_intersections()
+        self.settle_definitions()
+        self.commit_undo()
 
     def on_line_changed(self, line: LineItem) -> None:
         """A line's geometry changed: bring everything computed from it up to date."""
@@ -1009,14 +1580,19 @@ class CanvasScene(QGraphicsScene):
                 # not the scene's to manage.
                 self._meets.remove(point)
                 continue
-            if self._is_depended_on(point) or point.label_text() or not point.is_shown():
+            if (
+                self._is_depended_on(point)
+                or self._bounds_a_segment(point)
+                or point.label_text()
+                or not point.is_shown()
+            ):
                 # Something is built on this meet, or you have said something
                 # about it, so it outlives the crossing: undefined, ready to
                 # come back when the lines meet again.
                 point.set_position_undefined(True)
             else:
                 self._meets.remove(point)
-                self.removeItem(point)
+                self._retire_point(point)
 
     @staticmethod
     def _claim_meet(candidates: list, lines: list):
@@ -1080,6 +1656,12 @@ class CanvasScene(QGraphicsScene):
         for point in self._meets:
             if point.position_undefined():
                 continue
+            anchor = point.anchor()
+            if anchor.references_line(a) and anchor.references_line(b):
+                return point
+        # Parallel lines cross nowhere on the canvas, but they do meet — at
+        # their shared point at infinity, once it has been surfaced.
+        for point in self.ideal_points():
             anchor = point.anchor()
             if anchor.references_line(a) and anchor.references_line(b):
                 return point
@@ -1148,9 +1730,10 @@ class CanvasScene(QGraphicsScene):
 
         That is: lines whose crossing it is, lines bound to it at an endpoint,
         lines pinned to pivot on it, lines anchoring their visible range to
-        it, and the line it slides along. A line that merely happens to pass
-        through the point, with no relation recorded, is **not** included —
-        the relations are what the figure is built from.
+        it, lines drawn only as far as it, and the line it slides along. A
+        line that merely happens to pass through the point, with no relation
+        recorded, is **not** included — the relations are what the figure is
+        built from.
 
         Args:
             point: The point to look from.
@@ -1166,6 +1749,7 @@ class CanvasScene(QGraphicsScene):
             or line.bound_point(2) is point
             or line.pivot() is point
             or line.range_anchor() is point
+            or line.bounded_by(point)
             or (anchor is not None and anchor.references_line(line))
         ]
         return sorted(found, key=lambda line: getattr(line, "_seq", 0))
@@ -1196,6 +1780,17 @@ class CanvasScene(QGraphicsScene):
             self.commit_undo()
         return len(hidden)
 
+    def _bounds_a_segment(self, point) -> bool:
+        """Whether some line is drawn only as far as ``point``.
+
+        Nothing is *computed* from a segment end — the line lies where it lies
+        either way — so this is asked separately from
+        :meth:`_is_depended_on`. It is still a reason for a crossing to
+        outlive its lines meeting: the segment it bounds is the user's, and
+        losing the point would quietly undo it.
+        """
+        return any(line.bounded_by(point) for line in self._lines())
+
     def _is_depended_on(self, item) -> bool:
         """Whether any geometry in the scene is computed from ``item``."""
         for other in self.items():
@@ -1206,8 +1801,10 @@ class CanvasScene(QGraphicsScene):
         return False
 
     def _intersection_of(self, a: LineItem, b: LineItem) -> QPointF | None:
-        # Use the visible (drawn) segment so markers appear where lines cross.
-        kind, point = a.display_line().intersects(b.display_line())
+        # Use the visible (drawn) segment so markers appear where lines cross
+        # — grown by a hair, so a segment bounded by two points keeps the
+        # crossings that bound it (LineItem.meeting_line).
+        kind, point = a.meeting_line(b).intersects(b.meeting_line(a))
         if kind != QLineF.IntersectionType.BoundedIntersection:
             return None
         # One point per place: if something is already there, that point *is*
@@ -1246,8 +1843,16 @@ class CanvasScene(QGraphicsScene):
         line_point_action = (
             menu.addAction("Add Point to Line") if near_line is not None else None
         )
+        # The selected line's ideal point, offered out here for the same
+        # reason: a click near a line you have selected means that line.
+        infinity_action = (
+            menu.addAction("Add Point at Infinity")
+            if near_line is not None and near_line.ideal_direction() is not None
+            else None
+        )
         free_point_action = menu.addAction("Add Free Point")
         horizon_action = menu.addAction("Add Horizon")
+        vertical_action = menu.addAction("Add Vertical")
         menu.addSeparator()
         hidden = self.hidden_points()
         show_action = (
@@ -1258,6 +1863,11 @@ class CanvasScene(QGraphicsScene):
         chosen = menu.exec(event.screenPos())
         if line_point_action is not None and chosen is line_point_action:
             self.point_on_line_command(near_line, event.scenePos())
+        elif infinity_action is not None and chosen is infinity_action:
+            if not self.run_as_command(
+                f"(point {self.line_id(near_line)} infinity)"
+            ):
+                self.add_point_at_infinity(near_line)
         elif chosen is free_point_action:
             across, down = self.canvas_fractions(event.scenePos())
             if not self.run_as_command(
@@ -1268,6 +1878,10 @@ class CanvasScene(QGraphicsScene):
             fraction = self.horizon_fraction_at(event.scenePos().y())
             if not self.run_as_command(f"(add horizon {_number(fraction)})"):
                 self.add_horizon_at(event.scenePos())
+        elif chosen is vertical_action:
+            fraction = self.vertical_fraction_at(event.scenePos().x())
+            if not self.run_as_command(f"(add vertical {_number(fraction)})"):
+                self.add_vertical_at(event.scenePos())
         elif show_action is not None and chosen is show_action:
             if not self.run_as_command("(show -all)"):
                 self.show_all_points()
@@ -1303,11 +1917,20 @@ class CanvasScene(QGraphicsScene):
         intersection marker keeps the same identity as its lines move, so its
         label stays with it.
 
+        Points at infinity are left alone. They arrive named — Omega, and so
+        on — and that name says what the point is, which a letter from the
+        sequence would only take away. The lettering skips them, so the finite
+        points still read A, B, C in order.
+
         Returns:
             How many points and lines were labelled.
         """
         points = sorted(
-            (it for it in self.items() if isinstance(it, PointItem)),
+            (
+                it
+                for it in self.items()
+                if isinstance(it, PointItem) and not it.is_at_infinity()
+            ),
             key=lambda it: getattr(it, "_seq", 0),
         )
         lines = sorted(
@@ -1438,6 +2061,7 @@ class CanvasScene(QGraphicsScene):
             # Release any line-anchored points (they become free).
             for point in self._points_anchored_to(item):
                 point.clear_anchor()
+            self._drop_line_from_ideal_points(item)
         self.removeItem(item)
 
     def _detach_point_references(self, point) -> None:
@@ -1450,12 +2074,16 @@ class CanvasScene(QGraphicsScene):
                     line.unbind_endpoint(end)
             if line.pivot() is point:
                 line.clear_pivot()
-            if line.range_anchor() is point:
+            if line.range_anchor() is point or line.bounded_by(point):
                 line.clear_visible_range()
 
     def clear_all(self) -> None:
         self._cancel_line()
         self.clear()
         self._meets.clear()
+        # clear() destroyed them; keeping the wrappers would mean touching
+        # freed objects on the next sweep, or on the next move of a drag.
+        self._retired_meets.clear()
+        self._drag_items.clear()
         self._snap_indicator = None
         self.commit_undo()

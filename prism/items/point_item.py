@@ -44,6 +44,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: small to aim at; this is the target you actually get.
     HIT_PX = 6.0
 
+    #: The arrowhead drawn for a point at infinity, in screen pixels: how far
+    #: its tip reaches past the point, how far its base sits behind, and half
+    #: its width. An arrow rather than a dot because the point has no
+    #: location — what there is to show is the *direction* its lines run.
+    #: :class:`~prism.items.line_item.LineItem` does the drawing, once for
+    #: each line running to the point; the sizes live here because they
+    #: describe the point's marker, and its halo and label measure from them.
+    INFINITY_TIP = 9.0
+    INFINITY_BACK = 3.0
+    INFINITY_HALF_WIDTH = 4.5
+
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
         # trigger boundingRect()/itemChange() (which read these attributes).
@@ -101,7 +112,14 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     # -- Geometry ----------------------------------------------------------
 
     def boundingRect(self) -> QRectF:
-        r = max(self._radius + 4.0, self._glow_radius, self.HIT_PX) + 2.0
+        r = (
+            max(
+                self._drawn_radius() + 4.0,
+                self._glow_radius,
+                self.HIT_PX,
+            )
+            + 2.0
+        )
         return QRectF(-r, -r, 2 * r, 2 * r)
 
     def shape(self) -> QPainterPath:
@@ -119,6 +137,64 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         """Return the point's center in scene coordinates."""
         return self.scenePos()
 
+    def _drawn_radius(self) -> float:
+        """How far the marker reaches from the point, in screen pixels.
+
+        A point at infinity is an arrowhead rather than a dot, and a longer
+        one, so the selection halo and the label are measured from that.
+        """
+        return self.INFINITY_TIP if self.is_at_infinity() else self._radius
+
+    def infinity_direction(self, view: object = None) -> QPointF | None:
+        """Which way the arrowhead points, as a unit vector in screen pixels.
+
+        The point ignores the view's transformations, so it is drawn in screen
+        pixels while its direction is a fact about the scene. The direction is
+        mapped through the view to bridge the two; without a view to ask, the
+        scene direction stands in, which is exact whenever the view only
+        scales.
+
+        Args:
+            view: The view to map through; the scene's first, if not given.
+
+        Returns:
+            A unit vector in screen pixels, or None if it has no direction (or
+                this is not a point at infinity).
+        """
+        if not self.is_at_infinity():
+            return None
+        direction = self._anchor.direction()
+        if direction is None:
+            return None
+        if view is None:
+            scene = self.scene()
+            views = scene.views() if scene is not None else []
+            view = views[0] if views else None
+        if view is not None and hasattr(view, "viewportTransform"):
+            transform = view.viewportTransform()
+            direction = QPointF(
+                transform.m11() * direction.x() + transform.m21() * direction.y(),
+                transform.m12() * direction.x() + transform.m22() * direction.y(),
+            )
+        length = (direction.x() ** 2 + direction.y() ** 2) ** 0.5
+        if length < 1e-12:
+            return None
+        return QPointF(direction.x() / length, direction.y() / length)
+
+    def _label_anchor(self) -> QPointF:
+        """Where a label hangs off this point, in item-local pixels.
+
+        Clear of what is actually drawn, so a label sits off the marker rather
+        than against it — and, for a point at infinity, out past the arrow's
+        tip rather than on top of it.
+        """
+        if self.is_at_infinity():
+            direction = self.infinity_direction()
+            if direction is not None:
+                reach = self.INFINITY_TIP + 1.0
+                return QPointF(direction.x() * reach, direction.y() * reach)
+        return QPointF(self._drawn_radius() - self.RADIUS, 0)
+
     def contextMenuEvent(self, event):
         scene = self.scene()
         menu = QMenu()
@@ -130,6 +206,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # a stray selected point (a crossing caught by a rubber band, say)
         # used to make the command vanish with no explanation.
         line_action = one_line_action = pencil_action = None
+        segment_action = segment_line = None
         two_points = (
             scene.selected_points()
             if scene is not None and hasattr(scene, "selected_points")
@@ -141,6 +218,25 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             # single-point commands below would be three ways to draw a line
             # in one menu, so they stand down.
             line_action = menu.addAction("Add Line Through Points")
+            # Both points on one line: draw only the part between them. Which
+            # line is a real question out here — several may pass through both
+            # — so the entry says what it needs rather than vanishing.
+            through = scene.lines_through_both(*two_points)
+            selected = [line for line in through if line.isSelected()]
+            if len(selected) == 1:
+                segment_line = selected[0]
+            elif len(through) == 1:
+                segment_line = through[0]
+            if segment_line is not None:
+                segment_action = menu.addAction(
+                    "Show Segment Between Points Only"
+                )
+            elif through:
+                unavailable = menu.addAction(
+                    "Show Segment Between Points Only — "
+                    f"{len(through)} lines through both, select one"
+                )
+                unavailable.setEnabled(False)
             menu.addSeparator()
         elif scene is not None:
             reason = self._join_unavailable_reason(two_points)
@@ -153,8 +249,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # depend on them yet and no cycle is possible — a crossing is as good a
         # centre for a pencil as any other point.
         if scene is not None and not joining:
-            one_line_action = menu.addAction("Add Line Through Point")
-            pencil_action = menu.addAction("Add Lines Through Point…")
+            if self.is_at_infinity():
+                # Every line through it runs its one way, so they differ by
+                # position rather than angle: an angle fan means nothing here.
+                unavailable = menu.addAction(
+                    "Add Line Through Point — a point at infinity has no "
+                    "pencil of angles"
+                )
+                unavailable.setEnabled(False)
+            else:
+                one_line_action = menu.addAction("Add Line Through Point")
+                pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()
 
         # Anchor a point to a line when the selection is one line + point(s).
@@ -209,6 +314,8 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             first, second = (scene.point_id(p) for p in two_points)
             if not scene.run_as_command(f"(add-line (list {first}) (list {second}))"):
                 scene.add_line_between(two_points[0], two_points[1])
+        elif segment_action is not None and chosen is segment_action:
+            segment_line.show_segment_between(two_points)
         elif one_line_action is not None and chosen is one_line_action:
             angle = self.NEW_LINE_ANGLE
             if not scene.run_as_command(
@@ -358,6 +465,19 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         """
         return self._anchor is not None and self._anchor.kind == "meet"
 
+    def is_at_infinity(self) -> bool:
+        """Whether this is the point at infinity of a direction.
+
+        Like :meth:`is_meet`, a statement about what determines the point
+        rather than a kind of point. Ask :meth:`infinity_lines` for the
+        parallel lines that run to it.
+        """
+        return self._anchor is not None and self._anchor.kind == "infinity"
+
+    def infinity_lines(self) -> list:
+        """The parallel lines running to this ideal point, or an empty list."""
+        return list(self._anchor.lines) if self.is_at_infinity() else []
+
     def is_locked_to_line(self) -> bool:
         """Whether this point is held at a fixed place on its line."""
         anchor = self._anchor
@@ -423,7 +543,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         anchor = self._anchor
         if anchor is None:
             return False
-        if anchor.kind == "meet":
+        if anchor.kind in ("meet", "infinity"):
             return True
         # A point locked to its line has no freedom left either.
         return anchor.kind == "line" and getattr(anchor, "locked", False)
@@ -469,11 +589,32 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         scene.hide_snap_indicator()
         return value
 
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "begin_item_drag"):
+            scene.begin_item_drag(self)
+
+    def mouseMoveEvent(self, event):
+        # Prism moves the selection itself, rather than letting Qt walk a raw
+        # pointer list across our itemChange; see CanvasScene.drag_items.
+        scene = self.scene()
+        if (
+            scene is not None
+            and hasattr(scene, "drag_items")
+            and scene.drag_items(event)
+        ):
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event):
         scene = self.scene()
         if scene is not None:
             scene.hide_snap_indicator()
         super().mouseReleaseEvent(event)
+        if scene is not None and hasattr(scene, "end_item_drag"):
+            scene.end_item_drag()
         if scene is not None and hasattr(scene, "commit_undo"):
             scene.commit_undo()
 
@@ -482,8 +623,9 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         painter.save()
 
         # Glow: a filled disc behind the dot but over the lines, so geometry
-        # is cut away around the point.
-        if self._glow_radius > 0:
+        # is cut away around the point. Not for an arrowhead, which the line
+        # should run cleanly into rather than stop short of.
+        if self._glow_radius > 0 and not self.is_at_infinity():
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(self._glow_color))
             painter.drawEllipse(origin, self._glow_radius, self._glow_radius)
@@ -492,8 +634,16 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if self.isSelected():
             painter.setPen(QPen(QColor("#ff7f0e"), 2))
             painter.setBrush(Qt.NoBrush)
-            halo = self._radius + 3
+            halo = self._drawn_radius() + 3
             painter.drawEllipse(origin, halo, halo)
+
+        if self.is_at_infinity():
+            # Nothing of its own: the arrowhead belongs to each line running
+            # to this point, and LineItem draws it there — on every one of
+            # them, not just the one this marker happens to sit on. What is
+            # left here is the selection halo above, and the label.
+            painter.restore()
+            return
 
         painter.setBrush(self.brush())
         painter.setPen(self.pen())

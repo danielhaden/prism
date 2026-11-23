@@ -26,6 +26,33 @@ extends across the canvas. The [visible range](../guide/points-and-lines.md#visi
 feature only controls how much of a line is *drawn* — the underlying line is
 still infinite for the purpose of intersections.
 
+## Points at infinity
+
+That last point in brackets above is not a figure of speech: the point where
+parallel lines meet is a point of the projective plane like any other, and
+Prism will draw it. Ask a line for it —
+[**Add Point at Infinity**](../guide/points-and-lines.md#the-point-at-infinity) —
+and an arrowhead appears where the line leaves the frame, marking the
+direction it runs in.
+
+There is **one such point per direction**, not one per line, so every line
+parallel to the first runs to the same one. That is why asking a second,
+parallel line for its ideal point hands back the point that is already there,
+now carrying both lines. Parallelism is not a projective notion, but
+*concurrence* is: in Prism, two parallel lines are simply two lines that happen
+to be concurrent at an ideal point.
+
+The arrows are a depiction, not a location. The point has no position — it is
+its direction — so it cannot be dragged, and each arrow sits where one of its
+lines leaves the reference frame purely so that there is something to point at
+and name.
+
+What makes the ideal point worth having is that you can **build on it**.
+Joining an ordinary point to one is how a parallel gets drawn: the line through
+that point in that direction, which is exactly what "the line through P and the
+ideal point of a" means. A construction that would classically say *draw the
+parallel to a through P* is, here, just another join.
+
 ## Pencils (projectivities)
 
 A **pencil of lines** is the set of all lines through a common point — the dual

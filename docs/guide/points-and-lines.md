@@ -168,9 +168,12 @@ the point so it reads cleanly instead of dissolving into a knot of ink.
 ## Lines
 
 Right-click blank canvas → **Add Horizon** drops a horizontal,
-[orientation-locked](#locked-orientation) line at the height you clicked. It
-runs the [`(add horizon …)`](console.md#add-horizon-fraction) console command
-to do it, so the command is echoed and recorded like any other.
+[orientation-locked](#locked-orientation) line at the height you clicked, and
+**Add Vertical** the same thing a quarter turn round, at the width you
+clicked. Each runs its console command —
+[`(add horizon …)`](console.md#add-horizon-fraction) or
+[`(add vertical …)`](console.md#add-vertical-fraction) — so it is echoed and
+recorded like any other.
 
 Lines are **infinite projective entities**. When you draw a line through two
 points, it extends across the whole canvas; the two points you clicked become
@@ -182,10 +185,117 @@ its **defining handles**.
   endpoint then follows that point when it moves.
 - **Select it, then right-click → Add Point to Line** puts a new point on the
   line where you clicked, [anchored](#anchoring-a-point-to-a-line) to it.
+- **Right-click → Add Point at Infinity** surfaces the
+  [ideal point](#the-point-at-infinity) the line runs to.
+
+### The point at infinity
+
+In the projective plane every line has one more point on it than you can draw:
+its **point at infinity**, or *ideal point*. Parallel lines meet there, and
+nowhere else.
+
+**Right-click a line → Add Point at Infinity**, or run
+[`(point L1 infinity)`](console.md#point-line-infinity). Select a line and the
+item appears on the canvas menu too, beside **Add Point to Line**.
+
+**Parallel lines share one point.** Ask a second line in the same direction and
+you get the point that is already there, now carrying both lines — not a second
+point for the same direction. The menu item says as much before you pick it:
+it reads **Add Point at Infinity — shared with L1** when another line already
+has it, and **Show Point at Infinity** on a line that has it already.
+
+Once the point is there, those parallels genuinely **meet** at it:
+`(point L1 L2)` finds it, the
+[Elements panel](tools.md) lists it as `at infinity of L1, L2`, and it takes a
+[label](#labels) like any other point.
+
+It is drawn as an **arrowhead** where the line leaves the reference frame,
+pointing the way the line runs — one on **each** line that runs to the point,
+since the arrow says where that line goes. The point itself is named once:
+
+- **An arrow, not a dot**, because the point has no location. A dot at the
+  frame edge would claim it had one; the arrow marks the *direction* instead.
+- **It arrives labelled.** A new point at infinity is called `Ω`, the next
+  `Ω2`, and so on — an arrow alone says which way but not which point, and a
+  figure usually has more than one direction in it. Rename it like any other
+  point. [Auto-label](#labels) leaves these names alone and letters the finite
+  points around them.
+- **It can't be dragged.** A point at infinity *is* its direction; there is
+  nowhere to drag it to.
+- **It follows its lines.** Move or rotate a line and its arrow moves with it.
+
+Removing one of the parallels leaves the point where it is, carried by the
+others. Removing the **last** of them takes the point away too: there is no
+direction left for it to be the ideal point of. Rotate a line out of the
+pencil and it simply stops running to that point — it has a direction, and an
+ideal point, of its own now.
+
+### Drawing a parallel
+
+Joining a point to a point at infinity is how you draw a **parallel**: the
+line through that point in that direction.
+
+Select a point and a point at infinity, right-click either → **Add Line
+Through Points**, or run
+[`(add-line (list A) (list Ω))`](console.md#add-line-points-points). The new
+line is pinned to the point and
+[orientation-locked](#locked-orientation) — the join of two points is a
+determined line, with no freedom left to be dragged out of — so dragging it
+slides it rather than tilting it. [Unlock](#locked-orientation) it if you want
+it to turn; it then leaves the pencil as soon as it does.
+
+It joins the ideal point too, so it draws its own arrowhead and shows up in
+`(ls)` alongside the parallels it belongs with.
+
+Two points at infinity can't be joined: they both lie on the line at infinity,
+which isn't a line Prism can draw. Nor does a point at infinity have a
+[pencil of angles](projectivities.md) — every line through it runs the same
+way, so **Add Line Through Point** stands down on one.
+
+!!! tip "Parallels on purpose"
+    Two [horizons](#lines), two [verticals](#lines), or any two
+    [orientation-locked](#locked-orientation) lines of the same kind are
+    parallel to the bit, so they always share their ideal point. Lines that
+    merely *look* parallel do cross somewhere off the canvas, and Prism treats
+    them as the distinct lines they are.
 
 ### Visible range
 
-Although a line is infinite, you can restrict the **visible** portion:
+Although a line is infinite, you can restrict the **visible** portion. There are
+two ways, and a line uses one or the other — setting either replaces the other.
+
+#### Between two points
+
+The usual one. Pick two points that lie on the line, right-click either of them
+(or the line itself) → **Show Segment Between Points Only**. The line is then
+drawn only from one to the other.
+
+The two points are what is remembered, not where they happen to be, so the
+segment **follows them**: slide a point along the line and the segment ends
+where it now is; move a line whose crossing bounds the segment and the end goes
+with the crossing. The console form is
+[`(segment <line> <point> <point>)`](console.md#segment-line-point-point), which
+is what clicking the menu entry writes.
+
+Both points have to be on the line. A point anchored to it, or a crossing the
+line helps make, counts outright; anything else has to look like it is on the
+line, judged by the same band a click gets. Right-clicking the line says which
+line you mean; right-clicking a point works when only one line passes through
+both, which — two distinct points determining one line — is the ordinary case.
+
+!!! note "What happens to the crossings beyond the ends"
+
+    A crossing exists where the **drawn** parts of two lines meet, so the
+    crossings out past the ends of a segment go away, and come back when the
+    whole line does. They are not deleted in any deeper sense: a crossing that
+    something is built on, or that you have labelled or hidden, stays as an
+    undefined point and returns with its line.
+
+    The crossings that **bound** the segment are the exception, and are found
+    along the whole line. They have to be: measure them against the drawn part
+    and a segment would be deciding where its own ends are.
+
+#### Anchor and extents
 
 1. Right-click the line → **Define Visible Range…**
 2. A small **anchor point** is placed on the line, and you enter a **negative**
@@ -193,9 +303,15 @@ Although a line is infinite, you can restrict the **visible** portion:
 3. The line is now drawn only from `anchor − negative` to `anchor + positive`
    along its direction.
 
-Drag the anchor to slide the visible window along the line. Right-click →
-**Show Full Line** restores the infinite line (and removes the anchor). Deleting
-the anchor also reverts the line.
+Drag the anchor to slide the visible window along the line.
+
+#### Going back to the whole line
+
+Right-click → **Show Full Line**, or
+[`(segment <line> -full)`](console.md#segment-line-point-point). An anchor point
+that **Define Visible Range…** made goes with the range — it was never part of
+the figure. The two points bounding a segment are the figure, and stay. Deleting
+either of them also puts the whole line back.
 
 ### Locked orientation
 
@@ -210,6 +326,18 @@ Horizon**, which puts it at the height you clicked, or with the
 which measures a fraction down the reference frame instead. The menu is the one
 to reach for when the height should sit against geometry already on the canvas;
 the console form when you want it measured.
+
+A **vertical** is the same line a quarter turn round — **Add Vertical** on the
+same menu, or [`(add vertical <fraction>)`](console.md#add-vertical-fraction),
+which measures across the frame rather than down it. Nothing else about it
+differs.
+
+A **parallel** drawn through a [point at infinity](#drawing-a-parallel) is
+locked for a different reason: its direction is what defines it.
+
+Those are the locked lines you can make. The lock itself doesn't care about
+direction — it freezes whatever angle the line already has — but there is no
+way yet to freeze a line you drew at some other angle by hand.
 
 ### Line properties
 

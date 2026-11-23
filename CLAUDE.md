@@ -144,16 +144,61 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   menu. Keep hit tolerances in screen pixels.
 - **Endpoint binding**: an endpoint can bind to a `PointItem` and follow it.
 - **Pivot**: pinned through a point → rotates about it (pencils/projectivities).
-- **Visible range**: right-click → "Define Visible Range…" adds an anchor point
-  + neg/pos extents; only that segment is drawn.
+- **Visible range**, two forms, never both at once (each setter clears the
+  other): an **anchor point + neg/pos extents** ("Define Visible Range…"), or
+  **two points on the line** that the drawn part runs between
+  (`set_segment_ends`, "Show Segment Between Points Only", `(segment L1 P2
+  P3)`). The two-point form keeps the *points*, not their positions, so the
+  segment follows them; `_live_segment_ends()` returns None when an end is
+  deleted or undefined, and the line then draws in full rather than guessing.
+  `has_visible_range()` covers both; `has_segment_ends()`/`segment_ends()`/
+  `bounded_by()` are the two-point form alone. `scene.show_full_line()` undoes
+  either, and removes an anchor point the dialog made (it was never part of the
+  figure) while leaving two bounding points alone.
+- **A segment must not decide where its own ends are.** `_intersection_of` and
+  `MeetAnchor.position` ask `meeting_line(other)`, not `display_line()`. Two
+  things it does: (1) grows the segment by `MEET_EPS` (1e-6) at each end, since
+  a crossing *at* an end is the ordinary case and a zero-tolerance bounded test
+  loses it to rounding — **measured, 1911 of 4000** random configurations; and
+  (2) where `other` is a line that *makes* one of the bounding points, uses
+  `unbounded_line()` instead. Without (2) there is a feedback loop, seen before
+  it was fixed: drag the line outward, its crossing lands past the segment's
+  end, the crossing is lost, the segment reopens, the crossing returns — the
+  drawing a pass behind the drag. Crossings *not* bounding the segment do go
+  away beyond the ends, which is the pre-existing "a crossing lives where the
+  drawn parts meet" rule.
+- **Segment ends are not dependencies.** `dependencies_of()` deliberately does
+  not list them, though it does list the range *anchor*: a segment end is
+  normally a point on the line (anchored to it, or a crossing of it), so the
+  edge would close a cycle every time. The line's *position* isn't computed
+  from them — only its drawing. The two consequences are handled by hand:
+  `_detach_point_references` clears the segment when an end is deleted, and
+  `_apply_meets` keeps a crossing that `_bounds_a_segment()`, alongside the
+  labelled/hidden/depended-on cases.
 - **Orientation lock**: `set_orientation_locked(True)` freezes direction (can
-  move, can't rotate). The horizon uses this.
+  move, can't rotate). The horizon and the vertical use this, and nothing
+  else does — the mechanism is direction-agnostic, but there is no UI for
+  locking a line at an arbitrary angle. Both are built by
+  `_add_locked_line(start, end)`, which they share.
 - Line properties dialog: color, thickness (cosmetic), dash style. The same
-  thing from the console is `(format <line> <thickness> [<colour>] [<style>])`
-  → `LineItem.set_style()`, which the dialog now shares. Trailing arguments
-  may be omitted, a **list** of lines works, colours are hex or Qt names, and
+  thing from the console is `(format <element> <size> [<colour>] [<style or
+  glow>])` → `LineItem.set_style()`, which the dialog now shares. Trailing
+  arguments may be omitted, a **list** works, colours are hex or Qt names, and
   styles are `solid`/`dashed`/`dotted`/`dash-dot`/`dash-dot-dot`. The pen
   stays **cosmetic**, so thickness is screen pixels at any zoom.
+- `(format …)` takes **points too** → `PointItem.set_display()`: size is the
+  radius, and the fourth argument is the glow radius rather than a dash style.
+  Which one it is is read off the argument — a number is a glow, anything else
+  a style name — and a style with no line in the list (or a glow with no
+  point) is refused rather than ignored. `(format (points) 3 red)` is the
+  whole reason the form exists in that shape.
+- **A crossing's formatting does not persist.** `scene_state.capture()` saves
+  only points with no anchor; meets are recomputed on restore and come back
+  in the default style. Formatting a free point survives, so the two behave
+  differently through a reload. Pre-existing — the point dialog has always
+  had it — but `(format (points) …)` makes it easy to hit. Fixing it means
+  capturing each meet's style against its defining lines and reapplying after
+  `recompute_intersections()`.
 - Right-click a line → **Add Point to Line** adds a line-anchored point where
   you clicked (`CanvasScene.add_point_on_line_at`, which projects the click
   with `LineItem.closest_scene_point`). Unlike `add_point_on_line` it takes a
@@ -180,8 +225,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   lines cross — and shows it if hidden. Disabled with a reason when more than
   two lines are selected. Fires the console command, like Add Horizon.
 - Right-click blank canvas → **Add Free Point** (`CanvasScene.add_free_point`)
-  adds an unattached point there, and **Add Horizon** a horizontal
-  orientation-locked line at the clicked height.
+  adds an unattached point there, **Add Horizon** a horizontal
+  orientation-locked line at the clicked height, and **Add Vertical** the
+  same a quarter turn round at the clicked width (`add_vertical_at`).
 - **Canvas actions should run as console commands.** `MainWindow` hands the
   scene `console.run_command` via `set_command_runner()`; an action calls
   `scene.run_as_command("(…)")`, which returns False when no runner is set so
@@ -189,20 +235,51 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   headless). **Every canvas action with a console equivalent now does this**
   — a figure built by clicking replays as one built by typing. Conversions
   live on the scene: `canvas_fractions()`, `horizon_fraction_at()`,
+  `vertical_fraction_at()`,
   `fraction_along_line()`, `point_id()`/`line_id()`/`element_id()`. Deleting
   several points writes `(rm …)` **highest id first**, since removing one
   renumbers those after it. A label containing `"` is applied directly — the
   s-expression reader has no escapes. Still with no console form, so they
-  write nothing: display/line properties, visible range, Show Full Line, Snap
-  Point to Line, Lock to Line, Pin Lines Through Point.
+  write nothing: visible range, Snap Point to Line, Lock to Line, Pin Lines
+  Through Point. (Show Full Line now writes `(segment <line> -full)`.) (Display properties now have one —
+  `(format …)` — though the dialogs themselves still don't route through it.)
 - `(add point …)` and `(point <line> <fraction>)` take fractions **outside
   0-1** too (`_as_canvas_fraction`), for the same reason `(add horizon …)`
   does: a click outside the frame is ordinary and the menu must be able to
   express it.
-- `(add horizon …)` accepts fractions **outside 0-1** (above/below the frame)
-  via `_as_canvas_fraction`; `_as_fraction` stays strict for the other forms.
+- `(add horizon …)` and `(add vertical …)` accept fractions **outside 0-1**
+  (beyond the frame) via `_as_canvas_fraction`; `_as_fraction` stays strict
+  for the other forms.
   Clicking outside the frame is ordinary, so the command had to allow it. The scene's `contextMenuEvent` routes to the
   topmost label/point/line first, so this is only reached on empty space.
+- **Nothing may leave the scene while a mouse gesture is in flight, and Prism
+  moves the selection itself.** A drag ran `PointItem.itemChange` →
+  `recompute_intersections` → `_apply_meets`, which `removeItem()`d a marker
+  whose lines had stopped meeting — freeing it while Qt was still working on
+  it. The crash reports say exactly where: in `QGraphicsItem::setPos`, at the
+  instruction after `itemChange(ItemPositionChange)` returns, reloading
+  `this->d_ptr` to compare the new position with the old. `x0` is 0 there: the
+  item was freed inside its own `itemChange` and its memory had been recycled.
+  `EXC_BAD_ACCESS`, no traceback, the app simply dies. Two things keep that
+  shut, and both are needed:
+    * `drag_items` does the moving. Qt's own `QGraphicsItem::mouseMoveEvent`
+      walks a **raw** `QList<QGraphicsItem*>` of the selected items, taken
+      before it hands control to any `itemChange`. Prism walks its own list
+      instead, holding the items as Python references — which is also what
+      keeps a `removeItem`'d item alive, since that hands ownership back to
+      Python — and skipping anything that has left the canvas. `PointItem`,
+      `GroupItem` and `LabelItem` route their `mouseMoveEvent` through it;
+      lines were never in that loop (`ItemIsMovable` is off) and handle their
+      own drags.
+    * `_retire_point` only *hides* a point while `_mid_gesture()` — any event
+      being delivered, or a drag between press and release — and keeps a
+      reference to it. `_sweep_retired_meets` removes them once the gesture
+      is over. Before this, a drag over a busy figure destroyed markers
+      between one move event and the next, dozens of times a gesture. Every
+      removal of computed geometry goes through it: intersection markers, and
+      a point at infinity whose last line has gone.
+  Adding items mid-gesture is fine; freeing them is not. Anything new that
+  deletes geometry from a signal or an `itemChange` has to go the same way.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —
   the real modal menu opens and the test hangs). Patch the module's name
   instead: `prism.items.line_item.QMenu = FakeMenu`. And re-fetch items after
@@ -240,11 +317,32 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   is ordinary text, since the quote branch is tried first. Interpreter:
   `prism/commands.py` (`run()` returns `(output, ok)`; `is_recordable`).
 - Commands so far: `(add point <across> <down>)`, `(add horizon <fraction>)`,
+  `(add vertical <fraction>)`,
   `(add-line <angle> <points>)`, `(add-line <points> <points>)`,
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
-  `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(help)`.
+  `(segment <line> <point> <point>)`, `(segment <line> -full)`,
+  `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>
+  <to> <step>)`, `(help)`.
+- **Numbers are values**, not only element names: `(list …)` gathers them,
+  `(define tilt 30)` names one, and `(range <from> <to> <step>)` builds a
+  list of them — which is what `(map …)` had no way to walk when the thing
+  varying is a *position* rather than a point
+  (`(map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))`). Three
+  things this touched: `_as_number()` reads fractions where `_as_float()`
+  can't (`float("1/10")` raises); `_surviving()` must not prune numbers out
+  of a named list, since `_on_canvas()` calls `.scene()` on them; and
+  `_number_text()` (`:g`) keeps 0.30000000000000004 out of the echo.
+  `(range …)` includes **both ends** (tolerance 1e-9 on the count, or 9/10
+  by tenths from 2/10 stops one short), ignores the step's sign, walks
+  either direction, and caps at `RANGE_LIMIT` (200).
+- **`_angle_or_none()` must not evaluate its argument.** `(add-line …)`
+  picks its form from the first argument, and the points branch evaluates
+  that argument again — so evaluating it to test for a number would place
+  two points for `(add-line (add point 1/2 1/2) …)`. It therefore only
+  reads a literal number or a `_lookup()` of a bare word; a nested form
+  yielding a number is deliberately not an angle.
 - **Lists and names** (first step of triangle support): `(list …)` gathers
   elements into a Python list and **flattens** nested lists so they compose;
   `(define <name> <value>)` binds it in `CommandInterpreter._variables`.
@@ -382,16 +480,38 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   the display name would send a hand-named script like `net(1).prism` to
   `net1.prism` and leave the original behind.
 - **Book** (`prism/book_panel.py`; right, tabbed with Library/Scripts): a
-  `QPdfView` reader for *one* PDF — Olive Whicher's *Projective Geometry* —
-  pointed at from **Settings → Book (PDF)…** (`PRISM_BOOK_PATH` overrides).
-  Continuous pages, fit-to-width by default, and the last page read is
-  remembered (reset when the book is re-pointed). Uses PySide6's **QtPdf /
+  `QPdfView` reader over a **shelf** of PDFs — Whicher's *Projective
+  Geometry*, Coxeter's — with a dropdown at the top to pick between them and
+  a **…** button for Add / Rename / Remove. Added from **Settings → Add
+  Book…**; `PRISM_BOOK_PATH` stands in for the whole shelf (one book, nothing
+  to add or remove — `settings.shelf_is_fixed()` greys the menu out).
+  Continuous pages, fit-to-width by default. Uses PySide6's **QtPdf /
   QtPdfWidgets** — part of PySide6, so no new dependency.
+  The shelf lives in `settings.books()` as JSON under `books/shelf`, each
+  entry `{name, path, page}`, with `books/current` the index. **Each book
+  keeps its own page**, so turning to the other and back returns to where you
+  were. A shelf that was never written is built from the old single
+  `paths/book_path` + `book/last_page`, so an upgrade opens where it left off.
+  Display names come off the filename (`book_name_for`): drop `.pdf`, cut at
+  the first ` -- ` (which is what tames an Anna's-Archive download), truncate
+  to `BOOK_NAME_LIMIT`. The full path is the dropdown's tooltip.
   Gotchas: `QPdfView.zoomFactor()` stays at its last *custom* value while
   fit-to-width is on, so a zoom step reconstructs the fitted scale from the page
   width (`_fitted_zoom`); `QPdfPageNavigator.jump()` to the page it's already on
-  emits nothing, so the controls are synced by hand after a load; page rendering
-  is **asynchronous**, so a pixel check needs an event-pumping wait.
+  emits nothing, so the controls are synced by hand after a load; closing a
+  document **re-emits a page change**, which would record the outgoing page
+  against the incoming book — hence `_loading`, and reading the target page
+  before the close. The combo uses `activated`, not `currentIndexChanged`, so
+  only a choice the user made turns a page. The shelf row lives *outside* the
+  placeholder/reader stack, so a book that has gone missing still leaves the
+  dropdown there to switch away from it.
+  Testing gotcha: **`QPdfView`'s viewport does not paint into an offscreen
+  `QWidget.render()`** — only the chrome does, so a pixel count over the
+  panel measures buttons and borders and passes on a blank page. Check the
+  page at the document instead (`QPdfDocument.render(page, size)`), which
+  also distinguishes two books by their content rather than their page count.
+  Page rendering is **asynchronous**, so either way needs an event-pumping
+  wait.
 
 ## The drawing, between sessions
 
@@ -574,7 +694,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    n(n-1)/2 and their crossings multiply again; `repeat` caps at
    `REPEAT_LIMIT` (100).
    `lines_through` reports **recorded relations** (meet, binding, pivot,
-   range anchor, line anchor), not geometry — the user's call. Consequence
+   range anchor, segment end, line anchor), not geometry — the user's call. Consequence
    worth knowing: two lines crossing exactly at a *placed* point report
    nothing, because `_intersection_of` skips making a meet where a point
    already sits, so no relation exists to find. Building *through* a point

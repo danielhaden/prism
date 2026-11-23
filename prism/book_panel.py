@@ -1,10 +1,12 @@
-"""The dockable Book panel: read the reference book beside the canvas.
+"""The dockable Book panel: read a reference book beside the canvas.
 
-Prism's constructions come out of one book — Olive Whicher's *Projective
-Geometry: Creative Polarities in Space and Time* — so the panel reads exactly
-one PDF, whichever one **Settings > Book (PDF)…** points at
-(:func:`prism.settings.book_path`). It opens where it was last left and keeps
-the page in settings, so the book behaves like a book rather than a file.
+Prism's constructions come out of the books — Olive Whicher's *Projective
+Geometry: Creative Polarities in Space and Time*, Coxeter's *Projective
+Geometry* — so the panel keeps a **shelf** of PDFs and a dropdown to pick
+between them (:func:`prism.settings.books`). Each book remembers its own
+page, so turning to the other one and back returns to where you were rather
+than to wherever the other book happens to be open: a shelf of books rather
+than a file viewer.
 """
 
 import html
@@ -14,18 +16,23 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
+    QComboBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from prism.settings import book_page, book_path, set_book_page, set_book_path
+from prism import settings
 
 #: How far one zoom step moves, as a multiple of the current zoom.
 ZOOM_STEP = 1.25
@@ -45,7 +52,7 @@ _ERRORS = {
 
 
 class BookPanel(QDockWidget):
-    """A PDF reader docked beside the canvas, showing one book."""
+    """A PDF reader docked beside the canvas, showing one book off a shelf."""
 
     def __init__(self, parent=None):
         super().__init__("Book", parent)
@@ -53,13 +60,107 @@ class BookPanel(QDockWidget):
 
         self._document = QPdfDocument(self)
         self._syncing = False
+        self._syncing_shelf = False
+        #: True while a book is being swapped in, when the navigator reports
+        #: pages belonging to neither book.
+        self._loading = False
 
         self._stack = QStackedWidget()
         self._stack.addWidget(self._build_placeholder())
         self._stack.addWidget(self._build_reader())
-        self.setWidget(self._stack)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(6, 6, 6, 0)
+        layout.setSpacing(4)
+        layout.addWidget(self._build_shelf_row())
+        layout.addWidget(self._stack)
+        self.setWidget(container)
 
         self.reload()
+
+    # -- The shelf ---------------------------------------------------------
+
+    def _build_shelf_row(self) -> QWidget:
+        self._shelf_box = QComboBox()
+        self._shelf_box.setToolTip("Which book to read")
+        # activated, not currentIndexChanged: only a choice *you* made should
+        # turn a page, and the box is reset from settings on every reload.
+        self._shelf_box.activated.connect(self._on_book_chosen)
+
+        menu = QMenu(self)
+        self._add_action = menu.addAction("Add Book…", self.add_book)
+        self._rename_action = menu.addAction("Rename…", self.rename_book)
+        self._remove_action = menu.addAction("Remove from Shelf", self.remove_book)
+
+        self._shelf_button = QToolButton()
+        self._shelf_button.setText("\u2026")
+        self._shelf_button.setToolTip("Add, rename or remove a book")
+        self._shelf_button.setPopupMode(QToolButton.InstantPopup)
+        # Match the page and zoom buttons below it, which are all 32 wide.
+        self._shelf_button.setFixedWidth(32)
+        self._shelf_button.setMenu(menu)
+
+        self._shelf_row = QWidget()
+        row = QHBoxLayout(self._shelf_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(self._shelf_box, 1)
+        row.addWidget(self._shelf_button)
+        return self._shelf_row
+
+    def _refresh_shelf(self) -> None:
+        """Bring the dropdown into line with the shelf in settings."""
+        shelf = settings.books()
+        self._syncing_shelf = True
+        self._shelf_box.clear()
+        for position, entry in enumerate(shelf):
+            self._shelf_box.addItem(entry["name"])
+            # The whole path is the tooltip: names are cut short to fit.
+            self._shelf_box.setItemData(position, entry["path"], Qt.ToolTipRole)
+        current = settings.current_book()
+        if 0 <= current < len(shelf):
+            self._shelf_box.setCurrentIndex(current)
+        self._syncing_shelf = False
+
+        fixed = settings.shelf_is_fixed()
+        self._shelf_row.setVisible(bool(shelf))
+        self._add_action.setEnabled(not fixed)
+        self._rename_action.setEnabled(bool(shelf) and not fixed)
+        self._remove_action.setEnabled(bool(shelf) and not fixed)
+
+    def _on_book_chosen(self, index: int) -> None:
+        if self._syncing_shelf or index < 0:
+            return
+        settings.set_current_book(index)
+        self.reload()
+
+    def rename_book(self) -> None:
+        """Give the current book a shorter or clearer name on the shelf."""
+        shelf, index = settings.books(), settings.current_book()
+        if not 0 <= index < len(shelf):
+            return
+        name, confirmed = QInputDialog.getText(
+            self, "Rename Book", "Name:", text=shelf[index]["name"]
+        )
+        if confirmed:
+            settings.rename_book(index, name)
+            self._refresh_shelf()
+
+    def remove_book(self) -> None:
+        """Take the current book off the shelf. The PDF is left alone."""
+        shelf, index = settings.books(), settings.current_book()
+        if not 0 <= index < len(shelf):
+            return
+        answer = QMessageBox.question(
+            self,
+            "Remove Book",
+            f"Take \u201c{shelf[index]['name']}\u201d off the shelf?\n\n"
+            "The PDF itself stays where it is.",
+        )
+        if answer == QMessageBox.Yes:
+            settings.remove_book(index)
+            self.reload()
 
     # -- UI construction ---------------------------------------------------
 
@@ -70,8 +171,8 @@ class BookPanel(QDockWidget):
         self._placeholder_label.setAlignment(Qt.AlignCenter)
         self._placeholder_label.setStyleSheet("color: gray;")
 
-        choose = QPushButton("Choose Book…")
-        choose.clicked.connect(self.choose_book)
+        choose = QPushButton("Add Book…")
+        choose.clicked.connect(self.add_book)
 
         button_row = QHBoxLayout()
         button_row.addStretch()
@@ -144,7 +245,7 @@ class BookPanel(QDockWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(0, 0, 0, 6)
         layout.addLayout(controls)
         layout.addWidget(self._view)
         return container
@@ -152,18 +253,28 @@ class BookPanel(QDockWidget):
     # -- Loading -----------------------------------------------------------
 
     def reload(self) -> None:
-        """Re-read the configured book, or show the placeholder if there is none."""
-        path = book_path()
+        """Re-read the selected book, or show the placeholder on an empty shelf."""
+        self._refresh_shelf()
+        path = settings.book_path()
         if not path:
             self._show_placeholder(
-                "No book yet.<br><br>Point Prism at a PDF of Olive Whicher's "
-                "<i>Projective Geometry</i> — here, or from "
-                "<b>Settings → Book (PDF)…</b>."
+                "No books yet.<br><br>Add a PDF to read beside the canvas — "
+                "Olive Whicher's <i>Projective Geometry</i>, Coxeter's, "
+                "whatever you are working from — here, or from "
+                "<b>Settings → Add Book…</b>."
             )
             return
 
-        self._document.close()
-        error = self._document.load(path)
+        # Read the page *before* closing: closing the document reports a page
+        # change, which would otherwise record the old book's last page — or
+        # page one — against the book about to be opened.
+        page = settings.book_page()
+        self._loading = True
+        try:
+            self._document.close()
+            error = self._document.load(path)
+        finally:
+            self._loading = False
         if error != QPdfDocument.Error.None_:
             reason = _ERRORS.get(error, "it couldn't be opened")
             name = html.escape(os.path.basename(path))
@@ -177,7 +288,7 @@ class BookPanel(QDockWidget):
         # let the tooltip carry which file is open.
         self.setToolTip(path)
         self._stack.setCurrentIndex(_READER)
-        self.go_to_page(min(book_page(), max(0, pages - 1)))
+        self.go_to_page(min(page, max(0, pages - 1)))
         # Jumping to a page the navigator is already on emits nothing, so sync
         # the controls by hand rather than leaving them at their defaults.
         self._on_page_changed(self._navigator.currentPage())
@@ -188,16 +299,17 @@ class BookPanel(QDockWidget):
         self.setToolTip("")
         self._stack.setCurrentIndex(_PLACEHOLDER)
 
-    def choose_book(self) -> None:
-        """Ask for the book's PDF and open it."""
-        start = book_path() or os.path.expanduser("~")
+    def add_book(self) -> None:
+        """Ask for a PDF, put it on the shelf, and turn to it."""
+        current = settings.book_path()
+        start = os.path.dirname(current) if current else os.path.expanduser("~")
         # All files first: QtPdf sniffs the content rather than the name, and a
         # book filed away by hand may well have no ".pdf" on the end.
         chosen, _ = QFileDialog.getOpenFileName(
-            self, "Choose Book", start, "All files (*);;PDF files (*.pdf)"
+            self, "Add Book", start, "All files (*);;PDF files (*.pdf)"
         )
         if chosen:
-            set_book_path(chosen)
+            settings.add_book(chosen)
             self.reload()
 
     # -- Navigation --------------------------------------------------------
@@ -217,12 +329,14 @@ class BookPanel(QDockWidget):
             self.go_to_page(value - 1)
 
     def _on_page_changed(self, page: int) -> None:
+        if self._loading:
+            return  # between books: this page belongs to neither
         self._syncing = True
         self._page_box.setValue(page + 1)
         self._syncing = False
         self._prev_button.setEnabled(page > 0)
         self._next_button.setEnabled(page < self._document.pageCount() - 1)
-        set_book_page(page)
+        settings.set_book_page(page)
 
     # -- Zoom --------------------------------------------------------------
 

@@ -97,6 +97,7 @@ class CommandInterpreter:
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
+            "segment": self._form_segment,
             "label": self._form_label,
             "format": self._form_format,
             "list": self._form_list,
@@ -119,6 +120,7 @@ class CommandInterpreter:
             "take": self._form_take,
             "last": self._form_last,
             "repeat": self._form_repeat,
+            "range": self._form_range,
             "help": self._form_help,
         }
 
@@ -128,6 +130,7 @@ class CommandInterpreter:
     NON_RECORDING = {
         "ls", "help", "points", "lines", "meets", "lines-through", "points-on",
         "points-off", "diff", "without", "intersect", "take", "last", "lambda",
+        "range",
     }
 
     def execute(self, text: str) -> str:
@@ -252,8 +255,16 @@ class CommandInterpreter:
         value = self._variables[name]
         if isinstance(value, Lambda):
             return value
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value  # a number has nothing on the canvas to outlive
         if isinstance(value, list):
-            kept = [item for item in value if _on_canvas(item)]
+            kept = [
+                item
+                for item in value
+                # Numbers are not on the canvas and never were, so they
+                # are not what this prunes.
+                if isinstance(item, (int, float)) or _on_canvas(item)
+            ]
             if len(kept) != len(value):
                 self._variables[name] = kept
             if not kept:
@@ -274,6 +285,29 @@ class CommandInterpreter:
             return float(value)
         except (TypeError, ValueError):
             raise CommandError(f"Couldn't read {value!r} as {what}.")
+
+    def _as_number(self, argument, what: str) -> float:
+        """A number written as a fraction or a decimal, over any range.
+
+        :meth:`_as_float` reads what Python reads, so ``1/10`` is not a
+        number to it; everywhere the console takes a quantity, a fraction
+        is how it tends to be written.
+
+        Args:
+            argument: A fraction, a decimal, or a form yielding one.
+            what: What the number is, for the message if it cannot be read.
+
+        Returns:
+            The value.
+        """
+        value = self._value(argument)
+        number = parse_fraction(value)
+        if number is None:
+            raise CommandError(
+                f"Couldn't read {value!r} as {what}. Use a fraction like "
+                "1/10 or a decimal like 0.1."
+            )
+        return number
 
     def _as_fraction(self, argument) -> float:
         value = self._value(argument)
@@ -337,6 +371,8 @@ class CommandInterpreter:
             return self._element_name(value)
         if isinstance(value, list):
             return self._render(value)
+        if isinstance(value, float):
+            return _number_text(value)
         return repr(value)
 
     def _as_point(self, argument) -> PointItem:
@@ -435,6 +471,8 @@ class CommandInterpreter:
             "  (add horizon <fraction>)    horizontal, orientation-locked line;\n"
             "                              0 = top of canvas, 1 = bottom;\n"
             "                              outside that is beyond the frame\n"
+            "  (add vertical <fraction>)   the same line a quarter turn round;\n"
+            "                              0 = left of canvas, 1 = right\n"
             "  (add-line <pts> <pts>)      a line from each of the first points\n"
             "                              to each of the second, bound to both;\n"
             "                              one of each is the plain case, as in\n"
@@ -445,18 +483,26 @@ class CommandInterpreter:
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
             "  (point <line> <line>)       the point where two lines meet\n"
+            "  (point <line> infinity)     the point at infinity it runs to;\n"
+            "                              parallel lines all share one\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
             "  (clear)                     empty the canvas; defined names and\n"
             "                              functions are kept\n"
             "  (label <element> <text>)    name a point or line; quote text\n"
             "                              with spaces, \"\" removes the label\n"
-            "  (format <line> <w> <c> <s>) thickness, colour, dash style\n"
+            "  (format <elem> <size> …)    thickness (a line) or radius (a\n"
+            "                              point), colour, then a dash style or\n"
+            "                              a glow; a list works\n"
             "  (label -auto)               label everything: points A, B, C…\n"
             "                              and lines a, b, c…\n"
             "  (label -clear)              remove every label\n"
             "  (hide <element>)            stop drawing it; nothing is lost\n"
             "  (show <element> | -all)     draw it again\n"
+            "  (segment <line> <p> <p>)    draw only the part of the line\n"
+            "                              between two points on it, and\n"
+            "                              follow them as they move\n"
+            "  (segment <line> -full)      draw the whole line again\n"
             "  (draw-triangle <p> <p> <p>) the three sides joining three\n"
             "                              points (or a list of three)\n"
             "  (draw-cevians <tri> <line>) from each crossing on the line,\n"
@@ -473,7 +519,11 @@ class CommandInterpreter:
             "  (take <n> <list>)           the first n of a list\n"
             "  (last <n> <list>)           the last n — what was just made\n"
             "  (repeat <n> <form>)         run a form n times\n"
-            "  (list <element> …)          gather elements into a list\n"
+            "  (range <from> <to> <step>)  the numbers from one to the other,\n"
+            "                              both ends included; map over it to\n"
+            "                              run a form at each in turn\n"
+            "  (list <item> …)             gather elements or numbers into\n"
+            "                              a list\n"
             "  (define <name> <value>)     give a value a name\n"
             "  (lambda (<name> …) <body>)  a function, as a value; the names\n"
             "                              are its parameters\n"
@@ -489,18 +539,21 @@ class CommandInterpreter:
     def _form_add(self, args):
         if not args:
             raise CommandError(
-                "Usage: (add point <across> <down>) or (add horizon "
-                "<fraction>); a line is (add-line …)"
+                "Usage: (add point <across> <down>), (add horizon "
+                "<fraction>)\n"
+                "   or: (add vertical <fraction>); a line is (add-line …)"
             )
         what = args[0]
         if not isinstance(what, str):
             raise CommandError(
-                "Usage: (add point ...) or (add horizon ...); a line is "
-                "(add-line ...)"
+                "Usage: (add point ...), (add horizon ...) or (add vertical "
+                "...); a line is (add-line ...)"
             )
         what = what.lower()
         if what == "horizon":
             return self._add_horizon(args[1:])
+        if what == "vertical":
+            return self._add_vertical(args[1:])
         if what == "point":
             return self._add_point(args[1:])
         if what == "line":
@@ -511,7 +564,8 @@ class CommandInterpreter:
             )
         raise CommandError(
             f"Don't know how to add {args[0]!r}. Try (add point <across> "
-            "<down>) or (add horizon <fraction>); a line is (add-line …)."
+            "<down>), (add horizon <fraction>) or (add vertical <fraction>);\n"
+            "a line is (add-line …)."
         )
 
     def _add_point(self, args) -> PointItem:
@@ -534,6 +588,15 @@ class CommandInterpreter:
                 "  below the frame. e.g. (add horizon 1/3)"
             )
         return self.scene.add_horizon(self._as_canvas_fraction(args[0]))
+
+    def _add_vertical(self, args) -> LineItem:
+        if not args:
+            raise CommandError(
+                "Usage: (add vertical <fraction>)\n"
+                "  0 = left of canvas, 1 = right; outside that is left or\n"
+                "  right of the frame. e.g. (add vertical 1/3)"
+            )
+        return self.scene.add_vertical(self._as_canvas_fraction(args[0]))
 
     #: How the form describes itself when it is called wrongly.
     _ADD_LINE_USAGE = (
@@ -562,13 +625,22 @@ class CommandInterpreter:
         """
         if len(args) != 2:
             raise CommandError(self._ADD_LINE_USAGE)
-        first = args[0]
-        if isinstance(first, str) and _is_number(first):
+        angle = self._angle_or_none(args[0])
+        if angle is not None:
             # (add-line <angle> <points>)
-            angle = float(first)
             points = self._flatten(args[1:], PointItem, "point")
             if not points:
                 raise CommandError("No points to draw a line through.")
+            ideal = [point for point in points if point.is_at_infinity()]
+            if ideal:
+                raise CommandError(
+                    f"{self._point_name(ideal[0])} is a point at infinity: "
+                    "every line through it runs the same way, so an angle "
+                    "means nothing there. Join it to a point instead — "
+                    "(add-line (list <point>) (list "
+                    f"{self._point_name(ideal[0])})) — for the parallel "
+                    "through that point."
+                )
             return self._only(
                 [self.scene.add_line_through(point, angle) for point in points]
             )
@@ -599,6 +671,40 @@ class CommandInterpreter:
                 "the same place."
             )
         return self._only(drawn)
+
+    def _angle_or_none(self, argument) -> float | None:
+        """The argument as an angle, if an angle is what it is.
+
+        Which of the two ``add-line`` forms was meant is read off the first
+        argument: a number means the angle form. A bare *name* holding a
+        number counts too, which is how a pencil falls out of a range::
+
+            (map (lambda (a) (add-line a (list P1))) (range 0 150 30))
+
+        Deliberately **nothing is evaluated** here. The argument is looked up
+        where a name is looked up and left alone otherwise, because the points
+        branch evaluates it again — and a first argument like
+        ``(add point 1/2 1/2)`` evaluated twice would quietly place two
+        points. A nested form yielding a number is therefore still not an
+        angle; write the number, or give it a name.
+
+        A name shadows a label, as everywhere else in the language, so
+        ``(define a 30)`` makes ``a`` an angle even if a line is labelled a.
+
+        Args:
+            argument: The first argument, raw and unevaluated.
+
+        Returns:
+            The angle in degrees, or None if that argument means points.
+        """
+        if not isinstance(argument, str):
+            return None
+        if _is_number(argument):
+            return float(argument)
+        bound = self._lookup(argument)
+        if isinstance(bound, bool) or not isinstance(bound, (int, float)):
+            return None
+        return float(bound)
 
     @staticmethod
     def _only(lines: list):
@@ -635,10 +741,13 @@ class CommandInterpreter:
             raise CommandError(
                 "Usage: (point <line> <fraction>)  a point along a line\n"
                 "   or: (point <line> <line>)      where two lines meet\n"
+                "   or: (point <line> infinity)    the point it runs to\n"
                 "  0 = the line's left-hand end, 1 = its right-hand end"
             )
         line = self._as_line(args[0])
         second = self._value(args[1])
+        if isinstance(second, str) and second.lower() in ("infinity", "inf"):
+            return self._point_at_infinity(line)
         if isinstance(second, LineItem) or (
             isinstance(second, str) and parse_fraction(second) is None
         ):
@@ -647,6 +756,31 @@ class CommandInterpreter:
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
+        return point
+
+    def _point_at_infinity(self, line: LineItem) -> PointItem:
+        """``(point L1 infinity)`` — the ideal point a line runs to.
+
+        Parallel lines share one, so asking a second line in the same
+        direction gives back the same point, now carrying both. Shown again if
+        it had been hidden.
+
+        Args:
+            line: The line to read the direction from.
+
+        Returns:
+            The point at infinity.
+        """
+        if line.ideal_direction() is None:
+            raise CommandError(
+                f"{self._line_name(line)} has no direction to run in."
+            )
+        point = self.scene.add_point_at_infinity(line)
+        if point is None:
+            raise CommandError(
+                f"{self._line_name(line)} doesn't cross the canvas, so there "
+                "is no edge to draw its point at infinity on."
+            )
         return point
 
     def _meet_of(self, a: LineItem, b: LineItem) -> PointItem:
@@ -659,9 +793,15 @@ class CommandInterpreter:
             raise CommandError("A line meets itself everywhere.")
         point = self.scene.meet_of(a, b)
         if point is None:
+            if a.is_parallel_to(b):
+                raise CommandError(
+                    f"{self._line_name(a)} and {self._line_name(b)} are "
+                    "parallel: they meet at infinity. Try "
+                    f"(point {self._line_name(a)} infinity)."
+                )
             raise CommandError(
                 f"{self._line_name(a)} and {self._line_name(b)} don't meet on "
-                "the canvas — they may be parallel, or cross off it."
+                "the canvas — they cross off it."
             )
         if point.set_shown(True):
             self.scene.commit_undo()
@@ -815,6 +955,12 @@ class CommandInterpreter:
             return existing
         line = self.scene.add_line_between(a, b)
         if line is None:
+            if a.is_at_infinity() and b.is_at_infinity():
+                raise CommandError(
+                    "Those are both points at infinity. They do lie on one "
+                    "line together — the line at infinity — but it is not a "
+                    "line that can be drawn."
+                )
             raise CommandError(
                 "Can't draw a side: two of those points are in the same place."
             )
@@ -1019,6 +1165,60 @@ class CommandInterpreter:
             result = self._value(args[1])
         return result
 
+    #: Most numbers one ``(range …)`` may give.
+    RANGE_LIMIT = 200
+
+    def _form_range(self, args) -> list:
+        """``(range 2/10 9/10 1/10)`` — the numbers from one to another.
+
+        The numeric list the rest of the language had no way to write.
+        :meth:`_form_list` gathers *elements*, so when the thing that
+        varies is a position rather than a point there was nothing for
+        :meth:`_form_map` to walk::
+
+            (map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))
+
+        **Both ends are included** when the step divides the span, which
+        is what "2/10 to 9/10 by tenths" means read aloud. The walk runs
+        from the first number toward the second whichever way round they
+        are, so the step is taken as a distance and its sign ignored.
+
+        Numbers, not positions: angles work as readily as fractions, as in
+        ``(range 0 150 30)`` for a pencil.
+
+        Args:
+            args: From, to, and the step between.
+
+        Returns:
+            The numbers.
+        """
+        if len(args) != 3:
+            raise CommandError(
+                "Usage: (range <from> <to> <step>)\n"
+                "  e.g. (range 2/10 9/10 1/10) - 2/10, 3/10, … 9/10\n"
+                "  Both ends are included; fractions and decimals both\n"
+                "  work, and so do plain numbers like angles."
+            )
+        start = self._as_number(args[0], "a number")
+        stop = self._as_number(args[1], "a number")
+        step = abs(self._as_number(args[2], "a step"))
+        if step == 0:
+            raise CommandError(
+                "A step of 0 never arrives. Give the distance between one\n"
+                "number and the next, e.g. (range 2/10 9/10 1/10)."
+            )
+        # The tolerance is what makes the far end land: 9/10 reached by
+        # tenths from 2/10 is 0.8999999999999999 in binary, which would
+        # otherwise stop one number short.
+        count = int(abs(stop - start) / step + 1e-9) + 1
+        if count > self.RANGE_LIMIT:
+            raise CommandError(
+                f"That is {count} numbers, and (range …) gives at most "
+                f"{self.RANGE_LIMIT}.\nUse a larger step."
+            )
+        way = 1.0 if stop >= start else -1.0
+        return [start + way * step * index for index in range(count)]
+
     def _as_list(self, argument) -> list:
         """An argument as a list, whether it is one or a single element."""
         value = self._value(argument)
@@ -1119,24 +1319,61 @@ class CommandInterpreter:
     }
 
     def _form_format(self, args) -> str:
-        """``(format L1 0.5 #d3d3d3 "dashed")`` — how a line is drawn.
+        """``(format L1 0.5 #d3d3d3 "dashed")`` — how an element is drawn.
 
-        Thickness, colour and style, in that order; any of them may be left
-        off, and a list of lines may be given instead of one.
+        Size, then colour, then whatever is left: a **dash style** for lines,
+        a **glow radius** for points. Any may be left off, and a list stands
+        in for one element, so ``(format (lines) 2 red)`` restyles the canvas
+        in a breath.
+
+        Size means a line's thickness or a point's radius — the one measure
+        each kind has, both in screen pixels, so neither changes with zoom.
+
+        The last argument is read as a number if it is one and as a style
+        name otherwise, which is how the two kinds share the slot. A style
+        given where nothing is a line, or a glow where nothing is a point,
+        says so rather than passing silently.
+
+        Returns:
+            What was formatted.
         """
         if not 2 <= len(args) <= 4:
             raise CommandError(_FORMAT_USAGE)
-        width = self._as_float(args[1], "a thickness") if len(args) > 1 else None
+        size = self._as_number(args[1], "a thickness or radius")
+        if size < 0:
+            raise CommandError("A size below 0 draws nothing. Give 0 or more.")
         color = self._as_color(args[2]) if len(args) > 2 else None
-        style = self._as_line_style(args[3]) if len(args) > 3 else None
+        style = glow = None
+        if len(args) > 3:
+            glow = parse_fraction(self._value(args[3]))
+            if glow is None:
+                style = self._as_line_style(args[3])
+            elif glow < 0:
+                raise CommandError("A glow below 0 draws nothing. Give 0 or more.")
 
-        lines = self._flatten([args[0]], LineItem, "line")
-        if not lines:
-            raise CommandError("(format …) needs a line to work on.")
+        elements = self._flatten(
+            [args[0]], (PointItem, LineItem), "point or line"
+        )
+        if not elements:
+            raise CommandError("(format …) needs a point or a line to work on.")
+        lines = [item for item in elements if isinstance(item, LineItem)]
+        points = [item for item in elements if isinstance(item, PointItem)]
+        if style is not None and not lines:
+            raise CommandError(
+                "A dash style belongs to a line, and none of those are lines.\n"
+                "A point takes (format <point> <radius> [<colour>] [<glow>])."
+            )
+        if glow is not None and not points:
+            raise CommandError(
+                "A glow is a point's surround, and none of those are points.\n"
+                'A line takes a dash style there, e.g. "dashed".'
+            )
         for line in lines:
-            line.set_style(color=color, width=width, style=style)
+            line.set_style(color=color, width=size, style=style)
+        for point in points:
+            point.set_display(radius=size, color=color, glow_radius=glow)
         self.scene.commit_undo()
-        described = ", ".join(self._line_name(line) for line in lines)
+        described = ", ".join(self._element_name(item) for item in elements)
         return f"Formatted {described}"
 
     def _as_color(self, argument) -> QColor:
@@ -1189,11 +1426,51 @@ class CommandInterpreter:
         self.scene.commit_undo()
         return f"Showing {self._render(element)}"  # described as it now is
 
+    def _form_segment(self, args) -> LineItem:
+        """``(segment L1 P2 P3)`` — draw only the part between two points.
+
+        The line itself is unchanged: it still lies where it lay, still meets
+        what it meets along the drawn part, and the two points still slide
+        along the whole of it. Only the drawing stops at them — and follows
+        them, so moving either end moves where the segment stops.
+
+        ``(segment L1 -full)`` puts the whole line back, which is the one
+        thing the ``-full`` flag is for.
+        """
+        if not args:
+            raise CommandError(_SEGMENT_USAGE)
+        line = self._as_line(args[0])
+        if len(args) == 2:
+            flag = self._value(args[1])
+            if isinstance(flag, str) and flag.lstrip("-").lower() == "full":
+                if not line.has_visible_range():
+                    return line  # already whole; nothing to say about it
+                self.scene.show_full_line(line)
+                return line
+        points = self._flatten(args[1:], PointItem, "point")
+        if len(points) != 2:
+            raise CommandError(
+                f"A segment runs between two points, and that gave "
+                f"{_count(len(points), 'point')}.\n" + _SEGMENT_USAGE
+            )
+        for point in points:
+            if not line.passes_through(point):
+                raise CommandError(
+                    f"{self._point_name(point)} isn't on "
+                    f"{self._line_name(line)}, so there is no part of the "
+                    "line it could bound. Put it on the line first — "
+                    f"(point {self._line_name(line)} <fraction>) places one "
+                    "there, and a crossing is already on both its lines."
+                )
+        self.scene.segment_between(line, points[0], points[1])
+        return line
+
     def _form_list(self, args) -> list:
-        """``(list P1 P2 L1)`` — gather elements into a list value."""
+        """``(list P1 P2 L1)`` — gather elements, or numbers, into a list."""
         if not args:
             raise CommandError(
-                "(list …) gathers elements, e.g. (list P1 P2 P3).\n"
+                "(list …) gathers elements or numbers, e.g. (list P1 P2 P3)\n"
+                "or (list 2/10 5/10).\n"
                 "  To see what's on the canvas, use (ls)."
             )
         gathered = []
@@ -1208,12 +1485,19 @@ class CommandInterpreter:
                 )
             if isinstance(value, list):
                 gathered.extend(value)  # lists flatten, so they compose
+            elif parse_fraction(value) is not None:
+                # Numbers are values too: a list of positions is what
+                # (map …) walks when the thing varying is a place rather
+                # than a point.
+                gathered.append(parse_fraction(value))
             else:
                 gathered.append(self._as_element(argument))
         return gathered
 
     def _form_define(self, args) -> str:
         """``(define tri (list P1 P2 P3))`` — give a value a name.
+
+        An element, a list, a number (``(define tilt 30)``) or a function.
 
         A function may be written the short way, with the name and its
         parameters together::
@@ -1239,7 +1523,10 @@ class CommandInterpreter:
         if isinstance(value, Lambda):
             value.name = name
         elif isinstance(value, str):
-            value = self._as_element(args[1])
+            # A number is a value like any other now that (list …) and
+            # (range …) carry them, so (define tilt 30) names an angle.
+            number = parse_fraction(value)
+            value = number if number is not None else self._as_element(args[1])
         self._variables[name] = value
         return f"{name} = {self._render(value)}"
 
@@ -1425,6 +1712,8 @@ class CommandInterpreter:
             return value
         if isinstance(value, Lambda):
             return value.described()
+        if isinstance(value, float):
+            return _number_text(value)
         if isinstance(value, PointItem):
             return f"{self._point_name(value)}  {self._describe_point(value)}"
         if isinstance(value, LineItem):
@@ -1435,6 +1724,8 @@ class CommandInterpreter:
         """``P1``/``L1`` for an element, or the rendering of anything else."""
         if isinstance(item, PointItem):
             return self._point_name(item)
+        if isinstance(item, float):
+            return _number_text(item)
         if isinstance(item, LineItem):
             return self._line_name(item)
         if isinstance(item, Lambda):
@@ -1457,6 +1748,11 @@ class CommandInterpreter:
                 sorted(self._line_name(ln) for ln in point.meeting_lines())
             )
             tag = f"  [meet of {names}]"
+        elif point.is_at_infinity():
+            names = ", ".join(
+                sorted(self._line_name(ln) for ln in point.infinity_lines())
+            )
+            tag = f"  [at infinity of {names}]"
         elif point.has_anchor():
             tag = "  [on-line]"
         else:
@@ -1487,7 +1783,11 @@ class CommandInterpreter:
         seg = ln.scene_line()
         p1, p2 = seg.p1(), seg.p2()
         base = f"({p1.x():.1f}, {p1.y():.1f})->({p2.x():.1f}, {p2.y():.1f})"
-        if ln.has_visible_range():
+        ends = ln.segment_ends()
+        if ends is not None:
+            between = " to ".join(self._point_name(end) for end in ends)
+            extent = f"segment[{between}]"
+        elif ln.has_visible_range():
             extent = f"range[-{ln._range_neg:.0f}, +{ln._range_pos:.0f}]"
         else:
             extent = "infinite"
@@ -1500,6 +1800,13 @@ class CommandInterpreter:
             parts.append(f'"{ln.label_text()}"')
         return "  ".join(parts)
 
+
+#: Shown whenever (segment ...) is called with arguments it can't read.
+_SEGMENT_USAGE = (
+    "Usage: (segment <line> <point> <point>)  draw only the part between\n"
+    "   or: (segment <line> -full)            draw the whole line again\n"
+    "  e.g. (segment L1 P2 P3), or (segment L1 (meets L1 (list L2 L3)))"
+)
 
 #: Shown whenever (label ...) is called with arguments it can't read.
 _LABEL_USAGE = (
@@ -1519,10 +1826,14 @@ def _count(n: int, noun: str) -> str:
 
 #: Shown when (format …) can't read its arguments.
 _FORMAT_USAGE = (
-    "Usage: (format <line> <thickness> [<colour>] [<style>])\n"
-    '  e.g. (format L14 0.5 #d3d3d3 "dashed")\n'
-    "  colour: a hex code or a name; style: solid, dashed, dotted,\n"
-    "  dash-dot, dash-dot-dot. A list of lines works too."
+    "Usage: (format <element> <size> [<colour>] [<style or glow>])\n"
+    '  e.g. (format L14 0.5 #d3d3d3 "dashed")   one line\n'
+    "   or: (format (points) 3 red 9)            every point\n"
+    "  size:   a line's thickness or a point's radius, in screen pixels\n"
+    "  colour: a hex code like #d3d3d3, or a name like grey\n"
+    "  last:   a dash style for lines - solid, dashed, dotted, dash-dot,\n"
+    "          dash-dot-dot - or a glow radius for points\n"
+    "  A list works wherever one element does."
 )
 
 
@@ -1550,9 +1861,19 @@ def _match_by_label(items, name: str):
     return None
 
 
-def _count(number: int, noun: str) -> str:
-    """``3 points``, but ``1 point``."""
-    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
+def _number_text(value: float) -> str:
+    """A number as it was written, not as a binary float reads.
+
+    ``2/10`` stepped by tenths lands on 0.30000000000000004; the console
+    should say 0.3, which is the number that was meant.
+
+    Args:
+        value: The number.
+
+    Returns:
+        Its text.
+    """
+    return f"{value:g}"
 
 
 def _is_number(text: str) -> bool:

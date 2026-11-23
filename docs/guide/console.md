@@ -54,7 +54,7 @@ so labels can contain one.
 ## Naming elements
 
 Elements are referred to either by their **label** (`A`, `a` — matched
-case-insensitively) or by the **id shown by [`list`](#list)** (`P1`, `L1`).
+case-insensitively) or by the **id shown by [`ls`](#ls-points-lines)** (`P1`, `L1`).
 
 !!! note "Ids are positional"
     `P1` / `L1` are the numbers `list` prints *right now*; they shift as you
@@ -108,6 +108,29 @@ Otherwise it's an ordinary infinite line — style it, label it, hang pencils of
 it, drag it up and down. Dragging an endpoint handle slides the whole line
 rather than tilting it.
 
+### `(add vertical <fraction>)`
+
+The horizon a quarter turn round: a **vertical** line down the canvas, its
+orientation **locked** in the same way.
+
+```
+(add vertical 1/2)     # down the middle
+(add vertical 1/3)     # a third of the way across
+(add vertical 0.75)    # decimals work too
+```
+
+The position is a fraction of the way **across** the reference frame: **0 is
+the left edge, 1 is the right**. As with the horizon, values outside that are
+allowed and mean left or right of the frame.
+
+!!! tip "The canvas runs this one too"
+    **Right-click blank canvas → Add Vertical** works out the fraction you
+    clicked at and runs `(add vertical …)` for you.
+
+A horizon and a vertical give you two fixed directions to build against, and
+where they cross the canvas records a point for itself — so the pair is also a
+way to put a point somewhere exactly, without measuring it out.
+
 ### `(add-line <points> <points>)`
 
 Add infinite lines, in one of two forms. Both take **lists**, and a one-element
@@ -136,7 +159,7 @@ A pair the figure **already has a line through** is never drawn over — that
 line comes back instead. Two distinct points determine one line, so if the
 figure says both of them lie on one, that line *is* their join and there is
 nothing to add. "Says" means the same recorded relation
-[`(lines-through …)`](#lines-through-point) reads: bound, anchored, pinned, or
+[`(lines-through …)`](#enumerators-building-without-naming-every-step) reads: bound, anchored, pinned, or
 a crossing.
 
 That is what makes the cross product do real work. Given a triangle and a
@@ -153,7 +176,7 @@ two vertices — leaving exactly the third. Those are the
 rather than being drawn twice.
 
 The value is the line when only one came of it, and the list of lines
-otherwise — so it feeds straight into [`(format …)`](#format-line-thickness-colour-style)
+otherwise — so it feeds straight into [`(format …)`](#format-element-size-colour-style-or-glow)
 or [`(define …)`](#define-name-value).
 
 **Through points, at an angle** (the first argument is a number):
@@ -165,7 +188,11 @@ or [`(define …)`](#define-name-value).
 ```
 
 - **angle** — degrees **clockwise from the horizontal** (the same convention as
-  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical.
+  [projectivities](projectivities.md)). `0` is horizontal, `90` vertical. A
+  name holding a number counts as one, which is how a pencil comes out of a
+  [range](#range-from-to-step):
+  `(map (lambda (a) (add-line a (list P1))) (range 0 150 30))`. A nested
+  *form* yielding a number does not — write the number or name it.
 - **points** — a label, an id, a nested form that yields a point, or a list of
   any of those.
 
@@ -208,12 +235,56 @@ Nothing is created: Prism already keeps a point wherever lines cross, so this
 *finds* it — and shows it if you had [hidden](points-and-lines.md#hiding-a-point)
 it. Making a second point there would be the same point twice.
 
-If the two don't cross on the canvas — parallel, or meeting off it — the
-command says so rather than inventing a point.
+If the two don't cross on the canvas the command says so rather than inventing
+a point. When they are **parallel** it points you at the form below: they do
+meet, at infinity.
 
 !!! tip "From the canvas"
     Select two lines and right-click either of them → **Add Point at
     Intersection** runs this command for you.
+
+### `(point <line> infinity)`
+
+The point at infinity the line runs to — its **ideal point**. `inf` is accepted
+as a short form.
+
+```
+(point L1 infinity)    # the ideal point of L1
+(point a inf)          # by label
+```
+
+**Parallel lines share it.** Ask a second line in the same direction and you
+get the *same* point back, now carrying both — which is the whole content of
+"parallel lines meet at infinity". Once it is there, `(point L1 L2)` on those
+two parallels finds it, and `(ls)` reports it as `[at infinity of L1, L2]`.
+
+The point has no location, so there is nothing to drag: it *is* its direction.
+What gets drawn is an **arrowhead** where each of its lines leaves the
+reference frame, pointing the way that line runs. The point is named once —
+`Ω`, then `Ω2` and so on — because an arrow says which way but not which
+point. [`(label …)`](#label-element-text) renames it; `(label -auto)` leaves
+these names alone.
+
+Join it to a point and you get the **parallel** through that point:
+
+```
+(add-line (list A) (list Ω))    # the parallel to a through A
+```
+
+That line is pinned to A and orientation-locked, because the join of two
+points is a determined line; it joins Ω too, so it draws its own arrowhead.
+Two points at infinity can't be joined — they lie together on the line at
+infinity, which can't be drawn — and `(add-line <angle> …)` refuses one, since
+every line through it runs the same way.
+
+Remove one of the parallels and the point stays, carried by the rest. Remove
+the last of them and it goes too — there is no direction left for it to be the
+ideal point of.
+
+!!! tip "From the canvas"
+    Right-click a line → **Add Point at Infinity**. The item names the lines
+    that already share the point when there are any, and reads **Show Point at
+    Infinity** once this line has it.
 
 ### `(label <element> <text>)`
 
@@ -287,25 +358,44 @@ In the projective sense a triangle needs three points **not on a line**, so
 collinear points are refused rather than given three copies of the same side.
 The same goes for the same point twice.
 
-### `(format <line> <thickness> [<colour>] [<style>])`
+### `(format <element> <size> [<colour>] [<style or glow>])`
 
-Change how a line is drawn.
+Change how a line or a point is drawn.
 
 ```
 (format L14 0.5 #d3d3d3 "dashed")
-(format L2 3)                       # thickness alone
+(format L2 3)                       # size alone
 (format L2 1 grey)                  # a colour name works too
 (format (lines) 0.25 #aabbcc "dotted")
+(format (points) 3 red)             # every point at once
+(format (points) 3 red 9)           # …with a wider surround
 ```
 
-Thickness is in **screen pixels** and stays that width at any zoom. Colour is
-a hex code or any name Qt knows. The styles are `solid`, `dashed`, `dotted`,
-`dash-dot` and `dash-dot-dot`.
+**Size** is a line's thickness or a point's radius — the one measure each kind
+has. Both are in **screen pixels** and stay that size at any zoom. Colour is a
+hex code or any name Qt knows.
 
-Arguments after the line may be left off, so `(format L1 0.5)` changes only
-the thickness. A **list** works in place of a single line, which is the useful
-form for a net — dropping every construction line back to a pale hairline
-leaves the figure you care about standing out:
+The **last argument** belongs to whichever kind you are formatting: for lines
+a dash style — `solid`, `dashed`, `dotted`, `dash-dot`, `dash-dot-dot` — and
+for points the radius of the [surround](points-and-lines.md#display-properties)
+that cuts lines away behind the dot. It is read as a number if it is one and
+as a style name otherwise. Giving a style where nothing in the list is a line,
+or a glow where nothing is a point, says so rather than passing silently.
+
+Arguments after the element may be left off, so `(format L1 0.5)` changes only
+the thickness.
+
+**A list works in place of a single element**, which is the point of
+[`(lines)`](#enumerators-building-without-naming-every-step) and `(points)`:
+
+```
+(format (lines) 2 blue)              # every line
+(format (points) 3 red)              # every point
+(format (list (points) (lines)) 2 teal)   # both, one colour
+```
+
+That is the useful form for a net — dropping every construction line back to a
+pale hairline leaves the figure you care about standing out:
 
 ```
 (define scaffolding (lines))
@@ -313,7 +403,18 @@ leaves the figure you care about standing out:
 (format scaffolding 0.5 #d3d3d3 "dashed")
 ```
 
-Formatting is undoable and is kept with the drawing between sessions.
+Naming the list first is worth doing when you mean *these* lines: `(lines)`
+read later includes everything drawn since.
+
+Formatting is undoable, and is kept with the drawing between sessions — with
+one exception.
+
+!!! warning "A crossing's formatting doesn't persist"
+    Points where lines meet are **not saved**: they are recomputed from the
+    lines when the drawing is reopened, and come back in the default style.
+    `(format (points) …)` styles them for the session, and free points keep
+    their styling as you would expect. Style the lines, or place the points
+    you mean to keep.
 
 ### `(draw-cevians <triangle> <line>)`
 
@@ -338,6 +439,58 @@ the start of a harmonic construction rather than a dead end.
 A side parallel to the line never meets it, so there is no point to draw to;
 the command says which side and stops rather than drawing something arbitrary.
 Running it twice draws nothing new.
+
+### `(segment <line> <point> <point>)`
+
+Draw only the part of a line between two points on it.
+
+```
+(segment L1 P2 P3)              # by id
+(segment a B C)                 # by label
+(segment L1 (list P2 P3))       # a list of two works
+(segment L1 (meets L1 (list L2 L3)))   # the two crossings, whatever they are
+(segment L1 -full)              # draw the whole line again
+```
+
+The line is **unchanged**. It still lies where it lay, points still slide along
+the whole of it, and it still meets what it meets along the drawn part. Only the
+drawing stops at the two points.
+
+It stops *at them*, not where they were: the two points are what is remembered,
+so the segment follows them. Slide one along the line and the end goes with it.
+Move a line whose crossing bounds the segment and the end goes with the
+crossing — including out past the other end, which simply draws the segment the
+other way round.
+
+Both points have to be on the line. A point anchored to it, or a crossing the
+line helps make, is on it outright; anything else is measured, against the same
+band a click gets. A point that isn't on the line is refused by name:
+
+```
+> (segment L1 P1 P2)
+P2 isn't on L1, so there is no part of the line it could bound. Put it on
+the line first — (point L1 <fraction>) places one there, and a crossing is
+already on both its lines.
+```
+
+Setting a segment replaces a
+[visible range](points-and-lines.md#anchor-and-extents) set the other way, and
+vice versa: a line is cut down one way or the other, never both.
+
+!!! note "The crossings beyond the ends"
+
+    A crossing exists where the **drawn** parts of two lines meet, so the
+    crossings out past the ends go away while the segment is drawn, and come
+    back with the whole line. One that something is built on, or that you have
+    labelled or hidden, stays on as an undefined point rather than going
+    entirely.
+
+    The crossings that **bound** the segment are the exception: those are
+    looked for along the whole line, since a segment must not get to decide
+    where its own ends are.
+
+`-full` puts the whole line back, and is what the canvas's **Show Full Line**
+writes. Deleting either bounding point does the same thing.
 
 ### `(rm <element>)`
 
@@ -374,7 +527,7 @@ Empty the whole canvas.
 
 The names you have [defined](#define-name-value) are **left alone**. A list
 prunes itself to what is still there when it is next used, and a
-[function](#lambda-name--body) doesn't depend on the canvas at all — so a
+[function](#lambda-name-body) doesn't depend on the canvas at all — so a
 script can clear and rebuild without losing what it defined. That is the usual
 way to begin a script, since one otherwise draws on top of whatever happens to
 be there already.
@@ -406,14 +559,20 @@ point where lines cross, and `[hidden]`. Lines show their defining endpoints,
     something surprising. No saved script is affected — inspection commands
     were never recorded.
 
-### `(list <element> …)`
+### `(list <item> …)`
 
-Gather elements into a **list value**.
+Gather elements — or numbers — into a **list value**.
 
 ```
 (list P1 P2 P3)       # a list of three points
 (list L1 L2)          # lines work too
+(list 2/10 5/10 8/10) # and so do numbers
 ```
+
+A list of numbers is what [`(map …)`](#map-function-list) walks when the
+thing that varies is a *position* rather than a point. Write them out when
+they are irregular; [`(range …)`](#range-from-to-step) spells out an even
+run for you.
 
 On its own a list isn't much use — name it with
 [`(define …)`](#define-name-value) and then act on all of it at once. Lists
@@ -427,6 +586,8 @@ Give a value a name.
 ```
 (define tri (list P1 P2 P3))
 (define apex P4)
+(define tilt 30)              # a number is a value too
+(define tenths (range 0 1 1/10))
 ```
 
 The name can then be used wherever the value could be, and a name you define
@@ -446,7 +607,8 @@ ambiguous.
 
 A name can outlive what it holds — clear the canvas, or remove one of the
 points, and the list quietly shrinks to what is still there. If nothing is
-left, using the name says so.
+left, using the name says so. Numbers are never pruned this way: they were
+never on the canvas to lose.
 
 !!! warning "Names don't outlive the session"
     A definition lives as long as the app is open. The canvas persists between
@@ -502,6 +664,55 @@ A function may also be called where it stands, with no name at all:
     Allowed, but calls may not nest more than 50 deep; past that Prism says a
     function is probably calling itself without end, rather than falling over.
 
+### `(range <from> <to> <step>)`
+
+The numbers from one to another, by a step — **both ends included**.
+
+```
+(range 2/10 9/10 1/10)   # 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+(range 0 150 30)         # 0 30 60 90 120 150 — angles, not positions
+(range 9/10 2/10 1/10)   # the same run downwards
+```
+
+This is the list [`(map …)`](#map-function-list) was missing. A point whose
+place varies has nothing to iterate over otherwise — there is no element to
+walk, only a number that changes:
+
+```
+(map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))
+```
+
+Eight points down the vertical at 3/10, a tenth apart. Along a line you have
+already drawn, [`(point <line> <fraction>)`](#point-line-fraction) is the
+better body: those points are **anchored** to the line and ride it when it
+moves.
+
+```
+(add vertical 3/10)
+(map (lambda (f) (point L1 f)) (range 1/10 9/10 1/10))
+```
+
+The step is a distance; its sign is ignored, and the walk runs from the
+first number toward the second whichever way round they are. A step that
+doesn't divide the span stops short of the far end rather than overshooting
+it — `(range 0 1 0.3)` gives `0 0.3 0.6 0.9`. At most 200 numbers.
+
+**Joining the run to a point off the line** needs nothing further:
+[`(add-line …)`](#add-line-points-points) is already a cross product, so name
+what the map gave back and hand it the other point.
+
+```
+(add vertical 3/10)
+(define col (map (lambda (f) (point L1 f)) (range 1/10 9/10 1/10)))
+(define v (add point 8/10 1/2))
+(add-line col v)
+```
+
+Nine lines, each from one point of the run through `v` — a pencil cut by a
+transversal, which is where harmonic work tends to start. Every line is bound
+to both its points, so dragging `v` swings the whole pencil and sliding the
+vertical carries the run along it.
+
 ### `(map <function> <list>)`
 
 Call a function on **each element** of a list, in turn:
@@ -509,6 +720,7 @@ Call a function on **each element** of a list, in turn:
 ```
 (map cevian (points-on L1))
 (map (lambda (q) (add-line (list q) (points-off L1 tri))) (points-on L1))
+(map (lambda (d) (add point 3/10 d)) (range 2/10 9/10 1/10))
 ```
 
 This is the form to reach for when the thing to draw **depends on** the
@@ -631,7 +843,8 @@ none they take the whole canvas:
 !!! warning "They report relations, not geometry"
     A line counts as through a point when the figure **says** so: the point is
     its crossing, or the line is bound to it, pinned to pivot on it, anchored
-    to it, or carries its visible range. Two lines that happen to cross
+    to it, carries its visible range, or is drawn only as far as it. Two
+    lines that happen to cross
     exactly at a *placed* point are **not** reported — Prism makes no crossing
     point there (the point you placed is already the meet), so no relation was
     ever recorded:
@@ -661,6 +874,7 @@ can work on the canvas and come away with the script for what you did.
 |--------|------|
 | Add Free Point | `(add point <across> <down>)` |
 | Add Horizon | `(add horizon <fraction>)` |
+| Add Vertical | `(add vertical <fraction>)` |
 | Add Point to Line | `(point <line> <fraction>)` |
 | Add Point at Intersection | `(point <line> <line>)` |
 | Add Line Through Point | `(add-line 45 (list <point>))` |
@@ -671,12 +885,13 @@ can work on the canvas and come away with the script for what you did.
 | Delete Point / Hide Point | `(rm <element>)` |
 | Clear (toolbar) | `(clear)` |
 | Show N Hidden Points | `(show -all)` |
+| Show Segment Between Points Only | `(segment <line> <point> <point>)` |
+| Show Full Line | `(segment <line> -full)` |
 
 Some canvas commands have no console form yet and so write nothing: **Modify
-Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Show
-Full Line**, **Snap Point to Line**, **Lock to Line**, and **Pin Lines
-Through Point**. A script of a session that used those will be
-missing those steps.
+Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Snap
+Point to Line**, **Lock to Line**, and **Pin Lines Through Point**. A script of
+a session that used those will be missing those steps.
 
 !!! note "Ids shift"
     Commands are written with ids (`P1`, `L2`), and removing an element
