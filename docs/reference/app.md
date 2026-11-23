@@ -16,7 +16,7 @@ Entry point, main window, and shared enums.
 
 ## Settings & scripts
 
-Where the scripts folder lives, and how saved scripts are read/written.
+The default scripts folder, the scripts opened lately, and how a script is read and written.
 
 ::: prism.settings
 

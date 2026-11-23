@@ -13,6 +13,8 @@ real elements. Forms return the element they create, which is what allows the
 nesting above.
 """
 
+import os
+
 import shiboken6
 
 from PySide6.QtCore import Qt
@@ -94,6 +96,11 @@ class CommandInterpreter:
             "clear": self._form_clear,
             "add-line": self._form_add_line,
             "point": self._form_point,
+            "move-snapped-point": self._form_move_snapped_point,
+            "add-pencil": self._form_add_pencil,
+            "style": self._form_style,
+            "canvas": self._form_canvas,
+            "canvas-auto-intersect": self._form_canvas_moved,
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
@@ -485,6 +492,18 @@ class CommandInterpreter:
             "  (point <line> <line>)       the point where two lines meet\n"
             "  (point <line> infinity)     the point at infinity it runs to;\n"
             "                              parallel lines all share one\n"
+            "  (canvas <property> <value>) a property of the canvas itself;\n"
+            "                              (canvas) lists them. So far:\n"
+            "                              auto-intersect true/false\n"
+            "  (style \"<script>\")         take the canvas's default look\n"
+            "                              from a script of (format …);\n"
+            "                              (style -none) to stop\n"
+            "  (add-pencil <point> <count>)\n"
+            "                              count lines through the point,\n"
+            "                              evenly spaced and pinned to it\n"
+            "  (move-snapped-point <point> <fraction>)\n"
+            "                              slide a point along the line it is\n"
+            "                              snapped to; what dragging it does\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
             "  (clear)                     empty the canvas; defined names and\n"
@@ -561,6 +580,19 @@ class CommandInterpreter:
                 "(add line …) is now (add-line …), and it takes lists:\n"
                 "  (add-line (list P1) (list P2))   the line P1-P2\n"
                 "  (add-line 30 (list P1))          at 30 degrees through P1"
+            )
+        if what == "auto-intersect":
+            raise CommandError(
+                "That is a property of the canvas, not something to add:\n"
+                "  (canvas auto-intersect false)   mark only the crossings "
+                "you ask for"
+            )
+        if what == "pencil":
+            raise CommandError(
+                "A pencil is (add-pencil …) — hyphenated, like (add-line …), "
+                "because it takes an element where add's own subforms take "
+                "numbers:\n"
+                "  (add-pencil P1 10)   ten lines through P1, evenly spaced"
             )
         raise CommandError(
             f"Don't know how to add {args[0]!r}. Try (add point <across> "
@@ -756,6 +788,110 @@ class CommandInterpreter:
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
+        return point
+
+    def _form_add_pencil(self, args) -> list:
+        """``(add-pencil <point> <count>)`` — a fan of lines through a point.
+
+        The lines are evenly spaced and pinned to the point, so the whole
+        pencil turns about it.
+
+        Args:
+            args: The point, and how many lines to draw.
+
+        Returns:
+            The lines, so they compose — ``(format (add-pencil P1 12) 1
+                grey)``.
+        """
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (add-pencil <point> <count>)\n"
+                "  count lines through the point, evenly spaced and pinned\n"
+                "  e.g. (add-pencil P1 10)"
+            )
+        point = self._as_point(args[0])
+        if point.is_at_infinity():
+            raise CommandError(
+                f"{self._point_name(point)} is a point at infinity: every "
+                "line through it runs the same way, so there are no angles "
+                "to space out. Join it to a point instead — (add-line (list "
+                f"<point>) (list {self._point_name(point)})) — for the "
+                "parallel through that point."
+            )
+        count = self._as_count(args[1])
+        lines = self.scene.add_pencil(point, count)
+        if not lines:
+            raise CommandError(
+                f"Couldn't draw a pencil through {self._point_name(point)}."
+            )
+        return lines
+
+    def _as_count(self, argument) -> int:
+        """A whole number of lines, within :data:`PENCIL_LIMIT`.
+
+        Args:
+            argument: The count, or a form yielding one.
+
+        Returns:
+            The count.
+        """
+        value = self._value(argument)
+        number = parse_fraction(value)
+        if number is None:
+            raise CommandError(
+                f"Couldn't read {value!r} as a number of lines."
+            )
+        if number != int(number):
+            raise CommandError(
+                f"A pencil has a whole number of lines (got {number:g})."
+            )
+        count = int(number)
+        if count < 1 or count > self.PENCIL_LIMIT:
+            raise CommandError(
+                f"Draw between 1 and {self.PENCIL_LIMIT} lines (got {count})."
+            )
+        return count
+
+    def _form_move_snapped_point(self, args) -> PointItem:
+        """``(move-snapped-point <point> <fraction>)`` — slide it along its line.
+
+        What dragging a snapped point does, said as an instruction, so a
+        figure arrived at by noodling can be replayed. The point keeps its
+        anchor: this moves it *along* the line, never off it.
+
+        Args:
+            args: The point, and how far along its line to put it.
+
+        Returns:
+            The point, so it composes like the other forms.
+        """
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (move-snapped-point <point> <fraction>)\n"
+                "  slides a point along the line it is snapped to\n"
+                "  0 = the line's left-hand end, 1 = its right-hand end"
+            )
+        point = self._as_point(args[0])
+        line = point.slides_on_line()
+        if line is None:
+            raise CommandError(
+                f"{self._point_name(point)} isn't snapped to a line, so "
+                "there is nothing to slide it along. Snap Point to Line "
+                "puts an existing point on one; (point <line> <fraction>) "
+                "makes a new one already on it."
+            )
+        if point.anchor().locked:
+            raise CommandError(
+                f"{self._point_name(point)} is locked to "
+                f"{self._line_name(line)}, so it is held where it is. "
+                "Unlock From Line on its menu lets it slide again."
+            )
+        fraction = self._as_canvas_fraction(args[1])
+        if not self.scene.slide_point_to(point, fraction):
+            raise CommandError(
+                f"{self._line_name(line)} doesn't cross the canvas, so there "
+                "is no span to measure a fraction along."
+            )
         return point
 
     def _point_at_infinity(self, line: LineItem) -> PointItem:
@@ -971,6 +1107,9 @@ class CommandInterpreter:
     #: Most sides one (join …) will draw before refusing. Joining n points
     #: pairwise is n(n-1)/2 lines, which runs away fast: 20 points is 190.
     JOIN_LIMIT = 300
+
+    #: Most lines one pencil may have. Past this the point is solid ink.
+    PENCIL_LIMIT = 360
 
     #: Most times (repeat …) will run a form.
     REPEAT_LIMIT = 100
@@ -1337,6 +1476,10 @@ class CommandInterpreter:
         Returns:
             What was formatted.
         """
+        if len(args) == 2 and str(self._value(args[1])).lower() in (
+            "-default", "-reset"
+        ):
+            return self._format_default(args[0])
         if not 2 <= len(args) <= 4:
             raise CommandError(_FORMAT_USAGE)
         size = self._as_number(args[1], "a thickness or radius")
@@ -1375,6 +1518,234 @@ class CommandInterpreter:
         self.scene.commit_undo()
         described = ", ".join(self._element_name(item) for item in elements)
         return f"Formatted {described}"
+
+    def _format_default(self, argument) -> str:
+        """``(format <element> -default)`` — give an element back to the style.
+
+        Formatting something directly makes it **yours**, and the canvas's
+        style stops dressing it. This hands it back: the built-in look
+        returns, and the next style pass may dress it again.
+
+        Args:
+            argument: An element, or a list of them.
+
+        Returns:
+            What was reset.
+        """
+        elements = self._flatten(
+            [argument], (PointItem, LineItem), "point or line"
+        )
+        if not elements:
+            raise CommandError("(format … -default) needs a point or a line.")
+        for item in elements:
+            if isinstance(item, LineItem):
+                item.reset_style()
+            else:
+                item.reset_display()
+        self.scene.apply_style()
+        self.scene.commit_undo()
+        described = ", ".join(self._element_name(item) for item in elements)
+        return f"Reset {described} to the default look"
+
+    #: Canvas properties ``(canvas …)`` can read, and which of them it can
+    #: set. The style is listed but not set here: it has its own form, and
+    #: one setting with two spellings is a question of which is stale.
+    CANVAS_PROPERTIES = ("auto-intersect", "style")
+
+    def _form_canvas(self, args) -> str:
+        """``(canvas auto-intersect false)`` — a property of the canvas itself.
+
+        With no arguments it lists them; with one it reports that one; with
+        two it sets it.
+
+        Args:
+            args: A property name, and a value to set it to.
+
+        Returns:
+            What the property is, or has become.
+        """
+        if not args:
+            return "\n".join(
+                f"  {name:<16} {self._canvas_property(name)}"
+                for name in self.CANVAS_PROPERTIES
+            )
+        name = str(self._value(args[0])).lower()
+        if name not in self.CANVAS_PROPERTIES:
+            known = ", ".join(self.CANVAS_PROPERTIES)
+            raise CommandError(
+                f"The canvas has no property {name!r}. It has: {known}."
+            )
+        if len(args) == 1:
+            return f"{name} {self._canvas_property(name)}"
+        if len(args) != 2:
+            raise CommandError(_CANVAS_USAGE)
+        if name == "style":
+            raise CommandError(
+                'The style is set with (style "<script>"), which reads the '
+                "script and applies it. (canvas) reports it."
+            )
+        wanted = self._as_flag(args[1])
+        if not self.scene.set_auto_intersect(wanted):
+            return f"auto-intersect was already {self._flag_text(wanted)}."
+        self.scene.commit_undo()
+        if wanted:
+            return (
+                "auto-intersect true — a point is kept wherever lines cross."
+            )
+        return (
+            "auto-intersect false — only the crossings you ask for are "
+            "marked. (point <line> <line>) marks one; the rest were cleared, "
+            "except any you had labelled, hidden, built on or asked for."
+        )
+
+    def _form_canvas_moved(self, args) -> str:
+        """Say where ``(canvas-auto-intersect …)`` went.
+
+        One form for every canvas property keeps the next one from costing a
+        new command name, as ``(add line …)`` became ``(add-line …)``.
+
+        Args:
+            args: Ignored.
+
+        Raises:
+            CommandError: Always; this form points at the other.
+        """
+        raise CommandError(
+            "Canvas properties share one form:\n"
+            "  (canvas auto-intersect false)   set it\n"
+            "  (canvas auto-intersect)         report it\n"
+            "  (canvas)                        list them all"
+        )
+
+    def _canvas_property(self, name: str) -> str:
+        """A canvas property as the user would read it.
+
+        Args:
+            name: One of :data:`CANVAS_PROPERTIES`.
+
+        Returns:
+            Its value, as text.
+        """
+        if name == "auto-intersect":
+            return self._flag_text(self.scene.auto_intersect())
+        path = self.scene.style_path()
+        return path if path else "(none)"
+
+    #: What counts as yes and no in a canvas property.
+    TRUE_WORDS = ("true", "yes", "on", "1")
+    FALSE_WORDS = ("false", "no", "off", "0")
+
+    def _as_flag(self, argument) -> bool:
+        """Read a yes-or-no value.
+
+        Args:
+            argument: ``true``/``false``, or ``yes``/``no``, ``on``/``off``,
+                ``1``/``0``.
+
+        Returns:
+            What it means.
+        """
+        value = str(self._value(argument)).strip().lower()
+        if value in self.TRUE_WORDS:
+            return True
+        if value in self.FALSE_WORDS:
+            return False
+        raise CommandError(
+            f"Couldn't read {value!r} as true or false. Use true or false "
+            "(yes/no and on/off work too)."
+        )
+
+    @staticmethod
+    def _flag_text(value: bool) -> str:
+        """A yes-or-no value as the commands spell it."""
+        return "true" if value else "false"
+
+    def _form_style(self, args) -> str:
+        """``(style "<script>")`` — take the canvas's default look from a script.
+
+        The script is an ordinary one holding ``(format …)`` commands. Its
+        **path** is kept, not its contents, so editing it reaches every
+        drawing that points at it. It is re-read and re-asserted whenever
+        anything is drawn, which is what makes it a default rather than a
+        one-off.
+
+        Args:
+            args: The script, or a flag — ``-none`` to detach, ``-reapply``
+                to run it again now.
+
+        Returns:
+            What happened.
+        """
+        if not args:
+            path = self.scene.style_path()
+            if path is None:
+                return (
+                    "No style attached. (style \"<script>\") takes the "
+                    "canvas's look from a script of (format …) commands."
+                )
+            count = len(self.scene.style_commands())
+            return f"Style: {path} ({count} command(s))"
+        flag = str(self._value(args[0])).lower()
+        if flag in ("-none", "-detach", "-off"):
+            if not self.scene.detach_style():
+                return "No style was attached."
+            self.scene.commit_undo()
+            return (
+                "Style detached. What is drawn keeps the look it has; only "
+                "what comes next is left plain."
+            )
+        if flag == "-reapply":
+            if not self.scene.apply_style():
+                raise CommandError("No style attached to re-apply.")
+            self.scene.commit_undo()
+            return "Style re-applied."
+        if len(args) != 1:
+            raise CommandError(_STYLE_USAGE)
+        path = self._as_style_path(args[0])
+        try:
+            count = self.scene.attach_style(path)
+        except OSError as exc:
+            raise CommandError(f"Couldn't read that style: {exc}") from exc
+        self.scene.commit_undo()
+        skipped = self.scene.style_refusals()
+        note = ""
+        if skipped:
+            note = "\n" + "\n".join(f"  skipped {line}" for line in skipped)
+        if not count:
+            return (
+                f"Style {path} attached, but nothing in it says how "
+                f"something is drawn.{note}"
+            )
+        return f"Style {path} attached ({count} command(s)).{note}"
+
+    def _as_style_path(self, argument) -> str:
+        """Find a style script: a path as given, or a name in the scripts folder.
+
+        Args:
+            argument: What the user wrote.
+
+        Returns:
+            An existing file's path.
+        """
+        from prism.settings import SCRIPT_SUFFIX, scripts_dir
+
+        raw = str(self._value(argument)).strip()
+        if not raw:
+            raise CommandError(_STYLE_USAGE)
+        candidates = [os.path.expanduser(raw)]
+        if not raw.endswith(SCRIPT_SUFFIX):
+            candidates.append(os.path.expanduser(raw) + SCRIPT_SUFFIX)
+        folder = scripts_dir()
+        candidates.append(os.path.join(folder, raw))
+        if not raw.endswith(SCRIPT_SUFFIX):
+            candidates.append(os.path.join(folder, raw + SCRIPT_SUFFIX))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        raise CommandError(
+            f"No style script called {raw!r}. Give a path, or the name of "
+            f"one in your scripts folder ({folder})."
+        )
 
     def _as_color(self, argument) -> QColor:
         """Read a colour: ``#rrggbb``, or a name Qt knows."""
@@ -1833,7 +2204,26 @@ _FORMAT_USAGE = (
     "  colour: a hex code like #d3d3d3, or a name like grey\n"
     "  last:   a dash style for lines - solid, dashed, dotted, dash-dot,\n"
     "          dash-dot-dot - or a glow radius for points\n"
-    "  A list works wherever one element does."
+    "  A list works wherever one element does.\n"
+    "   or: (format <element> -default)          back to the plain look,\n"
+    "                                            and back under the style"
+)
+
+_CANVAS_USAGE = (
+    "Usage: (canvas <property> <value>)   set a property of the canvas\n"
+    "   or: (canvas <property>)           report one\n"
+    "   or: (canvas)                      list them all\n"
+    "  auto-intersect  true/false — whether a point is kept wherever\n"
+    "                  lines cross; false marks only the ones you ask for"
+)
+
+_STYLE_USAGE = (
+    'Usage: (style "<script>")   take the canvas\'s look from a script of\n'
+    "                            (format …) commands; a path, or the name\n"
+    "                            of one in your scripts folder\n"
+    "   or: (style)              say which style is attached\n"
+    "   or: (style -reapply)     run it again now\n"
+    "   or: (style -none)        stop taking a default look from it"
 )
 
 

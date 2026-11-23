@@ -26,14 +26,18 @@ configuration in `.vscode/launch.json` (press **F5**).
 
 ## First steps
 
-When Prism opens you'll see a blank canvas, a toolbar of tools, a **Library**
+When Prism opens you'll see a blank canvas, a toolbar of tools, a **Scripts**
 dock on the right, and a **Console** dock at the bottom.
 
 1. Press **P** (Point tool) and click a few times to place points.
 2. Press **L** (Line tool) and click two points — a line is drawn through them
    and extends across the whole canvas (lines are infinite).
 3. Press **V** (Select tool) and drag things around.
-4. Drag a **Triangle** out of the Library onto the canvas.
+4. Type `(draw-triangle P1 P2 P3)` in the console to join three of them.
+
+Everything you do by clicking is written into the console as the command
+that would have done it, so a figure you feel your way into can be
+[saved as a script](console.md#scripts) and replayed.
 
 See [Tools & Canvas](tools.md) for the full set of tools and shortcuts.
 

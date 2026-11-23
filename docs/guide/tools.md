@@ -130,7 +130,7 @@ elements themselves. See [Projective Basics](../concepts/projective-basics.md).
 
 Prism saves the window's size and position, and the whole dock layout, when you
 quit — which panels are open, where they sit, the width of the right-hand tab
-group (**Library** / **Scripts** / **Book**), and which of those tabs was on
+group (**Scripts** / **Book**), and which of those tabs was on
 top. Open it again and you get the canvas back the shape you left it.
 
 Size the Book panel once for comfortable reading and it stays that way.

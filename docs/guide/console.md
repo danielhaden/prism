@@ -286,6 +286,216 @@ ideal point of.
     that already share the point when there are any, and reads **Show Point at
     Infinity** once this line has it.
 
+### `(canvas <property> <value>)`
+
+A property of the canvas itself, rather than of anything on it.
+
+```
+(canvas)                           # list them all
+(canvas auto-intersect)            # report one
+(canvas auto-intersect false)      # set it
+```
+
+One form for all of them, so the next property costs a name in a list rather
+than a command of its own.
+
+#### `auto-intersect`
+
+Whether a point is kept **wherever lines cross**. True by default, which is
+what makes `(point L1 L2)` a matter of *finding* the crossing rather than
+making one.
+
+Set it false and the canvas marks only the crossings you ask for. In a
+[harmonic net](../concepts/projective-basics.md#construction-by-composition)
+every pair of lines crosses somewhere, and a figure of forty lines carries
+hundreds of dots that say nothing about the construction. Turning it off
+leaves the figure readable and the geometry untouched — the lines still meet
+where they meet.
+
+```
+(canvas auto-intersect false)
+(point L1 L2)                      # now this marks one, and keeps it
+```
+
+Switching it **off clears the markers nothing asks for**. It spares every one
+you have labelled, hidden, built on, bounded a segment with, or asked for by
+name — so nothing you have done is lost, and switching back **on** brings the
+rest back with their labels intact.
+
+A crossing you asked for stays for good: it follows its lines as they move,
+you can build on it, it survives further drawing and a reload, and a later
+sweep leaves it alone.
+
+!!! note "It changes what is drawn, not what is true"
+    Lines still meet where they meet. `(point L1 L2)` finds the crossing
+    either way — with `auto-intersect` off it marks it at the same moment,
+    which is the only difference.
+
+### `(style "<script>")`
+
+Take the canvas's **default look** from a script of `(format …)` commands.
+
+```
+(style "~/prism/styles/faint.prism")   # by path
+(style faint)                          # by name, from your scripts folder
+(style)                                # which one is attached?
+(style -reapply)                       # run it again now
+(style -none)                          # stop taking a look from it
+```
+
+A style is an ordinary `.prism` script that happens to hold only formatting:
+
+```
+; faint.prism — everything pale and thin
+(format (points) 1 #888888 4)
+(format (lines) 0.5 #cccccc)
+```
+
+So there is nothing new to learn and nothing new to manage. To write one:
+**File → New Script**, type the `(format …)` lines, **Save Script As…** into
+your scripts folder, then `(style <name>)` or **File → Attach Style…**. Or
+write the file in any editor — it is plain text. You can keep a style beside
+your drawings or in a repository, and send it to someone.
+
+**The canvas stores the path, not the contents.** Several drawings can take
+their look from one script, and editing that script reaches all of them. The
+script is re-read whenever the style is asserted, so a change shows up as soon
+as you draw anything.
+
+**It is a default, not a one-off.** The style is re-asserted as each action
+finishes, so whatever you draw next is already wearing it — including
+[crossings](#point-line-line), which are rebuilt constantly and have never
+kept formatting of their own through a reload. Under a style they come back
+right every time.
+
+#### Picking something out
+
+Formatting an element **directly** makes it yours, and the style stops
+touching it:
+
+```
+(style faint)                 # the whole figure goes pale
+(format L3 2 red)             # L3 is yours now
+(add point 1/2 1/2)           # the style re-runs… and L3 stays red
+```
+
+That is what lets a figure be pale except for the one line the construction
+turns on. The same goes for the **Line Properties…** and **Modify Display
+Properties…** dialogs — choosing a look by hand is choosing it by hand,
+however you do it.
+
+To hand an element back, give it the plain look again:
+
+```
+(format L3 -default)          # back to default, and back under the style
+```
+
+Detaching a style leaves what is drawn as it is — a style is how things are
+dressed, not a costume whipped away. Only what comes next is left plain.
+
+#### What a style may say
+
+`(format …)`, and `(define …)` to name a value you use more than once.
+Nothing else: **a style runs every time you draw**, so a command that
+*builds* would add another copy of whatever it makes on every action. Those
+lines are skipped, and attaching says which and why.
+
+```
+(define hair 0.4)
+(format (lines) hair grey)
+(add horizon 1/2)     ; skipped — that builds, and a style only dresses
+```
+
+A line Prism can't read is skipped the same way, and the rest of the style
+still runs.
+
+!!! warning "`(define …)` takes numbers, not colours"
+    `(define hair 0.4)` works. `(define pale #bbbbbb)` does not — `(define
+    …)` reads its value as an element or a number, and a colour is neither.
+    This is older than styles and shows up in the console too; write colours
+    out in each `(format …)` for now.
+
+!!! note "Points and lines today; planes when they arrive"
+    A style is whatever `(format …)` accepts, so it governs exactly the kinds
+    that command knows. Planes aren't in Prism yet; when they are, a style
+    will reach them without any change to this mechanism.
+
+!!! tip "From the canvas"
+    **File → Attach Style…** picks the script, and names it afterwards
+    (*Change Style… (faint)*); **Detach Style** stops it. Attaching runs as
+    `(style …)`, so the look a figure was drawn under is part of the script
+    that rebuilds it.
+
+### `(add-pencil <point> <count>)`
+
+Draw `count` lines through a point, evenly spaced, and return them.
+
+```
+(add-pencil P1 10)      # ten lines through P1
+(add-pencil A 24)       # a dense fan through A
+```
+
+Each line is pinned to the point, so the whole pencil turns about it, and the
+first is horizontal with the rest following clockwise.
+
+!!! note "Why the spacing is 180°/count"
+    A line has **no direction** to it: the line at 10° through a point and the
+    line at 190° through it are *the same line*. So the directions through a
+    point fill half a turn, not a whole one.
+
+    `(add-pencil P1 10)` therefore spaces its lines 18° apart, not 36°.
+    Dividing 360 would draw every line twice over for an even count — ten
+    asked for, five drawn, each with a twin stacked exactly on it.
+
+    What you see is still a fan filling the circle. Each line runs *both* ways
+    from the point, so ten lines make twenty rays, evenly spaced right round.
+
+Refused for a point at infinity: every line through one runs the same way, so
+there are no angles to space out.
+[Join it to a point](#point-line-infinity) instead, for the parallel.
+
+The lines come back as a list, so they compose:
+
+```
+(format (add-pencil P1 12) 1 grey)   # a pale fan
+```
+
+!!! tip "From the canvas"
+    Right-click a point → **Add Pencil…** and give it a number.
+    **Add Lines Through Point…** is the fuller form, with a start angle, an
+    end angle and a splay to set; this one is the common case asked as a
+    single number.
+
+### `(move-snapped-point <point> <fraction>)`
+
+Slide a point along the line it is snapped to, and return it.
+
+```
+(move-snapped-point P1 1/2)     # halfway along its line
+(move-snapped-point A 0.8)      # by label
+```
+
+The fraction is measured exactly as
+[`(point <line> <fraction>)`](#point-line-fraction) measures it: `0` is the
+line's left-hand end where it crosses the reference frame, `1` its right-hand
+end. Values outside `0`–`1` are allowed — the canvas is bigger than the frame,
+and a point can be dragged past its edge.
+
+The point **keeps its anchor**: this moves it *along* the line, never off it.
+Everything built on the point follows, so a pencil pinned there swings round
+with it.
+
+This is what dragging the point does, written as an instruction — which is
+the point of it. A drag used to leave nothing behind; now letting go writes
+this command, so a figure you felt your way into can be replayed.
+
+It is refused for a point that isn't snapped to a line (there is nothing to
+slide it along — use **Snap Point to Line** first), and for one **locked** to
+its line, since locking says to hold it where it is.
+
+!!! tip "From the canvas"
+    Just drag the point. The command is written for you when you let go.
+
 ### `(label <element> <text>)`
 
 Name a point or a line. The label is drawn on the canvas beside it, and becomes
@@ -374,6 +584,11 @@ Change how a line or a point is drawn.
 **Size** is a line's thickness or a point's radius — the one measure each kind
 has. Both are in **screen pixels** and stay that size at any zoom. Colour is a
 hex code or any name Qt knows.
+
+`(format <element> -default)` puts an element back to the plain built-in
+look — and back under the canvas's [style](#style-script), if one is
+attached, since formatting something directly is what took it out from under
+one.
 
 The **last argument** belongs to whichever kind you are formatting: for lines
 a dash style — `solid`, `dashed`, `dotted`, `dash-dot`, `dash-dot-dot` — and
@@ -878,6 +1093,8 @@ can work on the canvas and come away with the script for what you did.
 | Add Point to Line | `(point <line> <fraction>)` |
 | Add Point at Intersection | `(point <line> <line>)` |
 | Add Line Through Point | `(add-line 45 (list <point>))` |
+| Add Pencil… | `(add-pencil <point> <count>)` |
+| Attach Style… / Detach Style | `(style "<script>")` / `(style -none)` |
 | Add Lines Through Point… | one `(add-line <angle> (list <point>))` per ray |
 | Add Line Through Points | `(add-line (list <point>) (list <point>))` |
 | Add / Edit / Remove Label | `(label <element> "…")` |
@@ -887,11 +1104,29 @@ can work on the canvas and come away with the script for what you did.
 | Show N Hidden Points | `(show -all)` |
 | Show Segment Between Points Only | `(segment <line> <point> <point>)` |
 | Show Full Line | `(segment <line> -full)` |
+| *Dragging* a point snapped to a line | `(move-snapped-point <point> <fraction>)` |
 
-Some canvas commands have no console form yet and so write nothing: **Modify
-Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Snap
-Point to Line**, **Lock to Line**, and **Pin Lines Through Point**. A script of
-a session that used those will be missing those steps.
+### Dragging writes it too
+
+Menu commands were the easy half. The way a figure actually gets made is by
+**moving things about** — and until now a drag left nothing behind, so you
+could noodle your way into a diagram, save it, and find the script rebuilt
+everything in its first position.
+
+A drag is now written down when you let go: one command, at the place it
+ended, not one per twitch of the mouse. Picking a point up and putting it back
+writes nothing.
+
+So far this covers a **point snapped to a line**. Its position is a single
+number — how far along the line it sits — which is exactly what the command
+takes. Dragging a free point, a label or a group still writes nothing; those
+have no command to their name yet, and Prism passes over what it can't say
+rather than guessing.
+
+Some canvas commands have no console form either, and so write nothing:
+**Modify Display Properties…**, **Line Properties…**, **Define Visible
+Range…**, **Snap Point to Line**, **Lock to Line**, and **Pin Lines Through
+Point**. A script of a session that used those will be missing those steps.
 
 !!! note "Ids shift"
     Commands are written with ids (`P1`, `L2`), and removing an element
@@ -910,12 +1145,35 @@ Click **Save Script…** next to the input and give it a name. The session's
 **building** commands are written out in order — inspection commands
 (`(ls)`, `(help)`) are left out, so the script is just the construction.
 
+It is written to your [default script folder](#where-scripts-live) and opens
+in the Scripts panel, ready to read, tidy and run again.
+
+### Opening a script
+
+Scripts are opened from the **File** menu:
+
+| Command | What it does |
+|---------|--------------|
+| **New Script** (Ctrl+N) | Start an empty script in the editor |
+| **Open Prism Script…** (Ctrl+O) | Open a `.prism` file from anywhere on disk |
+| **Open Recent** | The last few scripts you opened, by name |
+| **Save Script** (Ctrl+S) | Write the editor back to its file |
+| **Save Script As…** (Ctrl+Shift+S) | Write it somewhere new |
+
+A script is an ordinary file and may live wherever you keep your work — beside
+a drawing, in a notes folder, in a repository. That is why the File menu opens
+one rather than a list in the panel: a list can only show one folder, and the
+script you want is as often as not in another.
+
+**Open Recent** names scripts by their own name, and adds the folder when two
+of them share it. A script you have deleted or moved drops off the list rather
+than sitting there offering to open nothing.
+
 ### The Scripts panel
 
-**View → Show Scripts** opens a dock (tabbed with the Library) listing every
-script in your scripts folder, with an **editor** below the list. Select a
-script and its text appears there; drag the divider to give the list or the
-editor more room.
+**View → Show Scripts** opens a dock (tabbed with the Book) holding the
+**editor** for whichever script is open. Opening one raises the panel, so the
+File menu brings it forward for you.
 
 The editor **numbers its lines** in a small grey gutter on the left. A script
 is read as much as it is written — to find the step that drew a line, or the
@@ -930,23 +1188,40 @@ where you are without hunting for the caret.
 | **Run** | Execute what's in the editor; commands and output are echoed to the console |
 | **Save** | Write the editor back to the file |
 | **Revert** | Throw away your edits and re-read the file |
-| **Refresh** | Re-read the folder, so scripts you add by hand show up |
 
 **Run uses the editor, not the file**, so you can try a change before keeping
 it. Edit, run, look at the canvas, adjust — then **Save** when it does what you
-want, or **Revert** when it doesn't. A script with unsaved edits is marked
-*modified* under the editor, and selecting a different one asks before
-discarding them. Double-clicking a script still runs it.
+want, or **Revert** when it doesn't.
+
+A script with unsaved edits is marked *modified* under the editor, and opening
+another one — or closing Prism — asks before discarding them. Saving a script
+that has never been written asks where to put it, starting in your default
+folder.
+
+The line under the buttons says where the open script is. With nothing open it
+names the default folder instead, which is where a new one would go.
 
 Replaying a script doesn't re-record its commands, so running one won't
 duplicate it into the next thing you save.
 
 ### Where scripts live
 
-Scripts are plain text files (`.prism`) in your **scripts folder**, so you can
-edit them in any editor as well as in the panel. Choose the folder from **Settings → Scripts Folder…**;
-it defaults to a per-user application-data directory, and the panel shows the
-current path at the bottom.
+Scripts are plain text files (`.prism`), so you can edit them in any editor as
+well as in the panel.
+
+One folder is the **default**: it is where the console's **Save Script…**
+writes, where **Save Script As…** starts, and where **Open Prism Script…**
+looks first. It defaults to a per-user application-data directory and is
+remembered between sessions. Two ways to change it, both under **File**:
+
+- **Set Default Script Folder…** picks one with a folder dialog.
+- **Use Current Script's Folder** adopts the folder the open script came from.
+  It is only offered when that script is somewhere else, since otherwise it
+  would do nothing.
+
+Opening a script from another folder is a one-off and changes nothing — the
+default is a starting point, not a fence. Settle into a folder of your own and
+adopt it once, and everything afterwards goes there.
 
 Scripts may contain blank lines and [remarks](#remarks):
 

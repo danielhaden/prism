@@ -3,7 +3,7 @@
 Prism is a **PySide6 desktop app for projective-geometry drawings**. The goal is
 to build complex projective constructions (pencils, complete quadrangles,
 harmonic nets, perspective figures) through *composition* — snapping, pinning,
-grouping, templates, and a scripting console. The long-term target is
+grouping, and a scripting console. The long-term target is
 reproducing dense harmonic-net drawings.
 
 Core philosophy: elements are **projective entities**. Lines are infinite by
@@ -42,9 +42,9 @@ is imposed *projectively* using the app's own elements.
 
 ```
 main.py → prism/app.py → prism/main_window.py (QMainWindow)
-  CanvasView (canvas/view.py)   — pan, wheel-zoom (capped), template drops
+  CanvasView (canvas/view.py)   — pan, wheel-zoom (capped)
   CanvasScene (canvas/scene.py) — the hub: owns geometry, propagates deps
-  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, ElementsPanel
+  Docks: ConsolePanel, ScriptsPanel, ElementsPanel, BookPanel
 ```
 
 - **`CanvasScene`** coordinates everything: snapping, endpoint bindings, pivots
@@ -88,7 +88,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   "Snap Point to Line" tests. Grouping a crossing is allowed — a group moves
   its children, and a determined point simply stays where its lines put it.
   The meet test survives only where derivation genuinely matters: snapshots
-  and templates don't store meets (they are recomputed), `rm` hides rather
+  don't store meets (they are recomputed), `rm` hides rather
   than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
   relation, not a kind.
 - **An anchored point cannot be set loose.** There is no "Remove Anchor"
@@ -130,8 +130,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   run in dependency order (see **Propagation**), so what you build follows.
   Still excluded, deliberately: anchoring a meet to a line (its position is
   already determined — `is_determined()`), `rm` of a meet (it hides instead,
-  since the lines still meet), and storing meets in snapshots/templates
-  (they're recomputed). Grouping a meet **is** allowed as of stage 2.
+  since the lines still meet), and storing meets in snapshots (they're
+  recomputed). Grouping a meet **is** allowed as of stage 2.
 
 ### Lines (`LineItem`)
 
@@ -211,9 +211,27 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`nearest_selected_line`, nearest wins). Without it the command is
   unreachable unless you hit the line's ~6px band, since a miss opens the
   canvas menu instead — which is what "the command doesn't appear" meant.
+- **`(add-pencil <point> <count>)`** draws `count` lines through a point,
+  evenly spaced, via `CanvasScene.add_pencil` → `add_projectivity`.
+  **The step is 180°/count, not 360°/count, and that is geometry rather than
+  a saving**: a line has no direction, so the line at 10° through a point and
+  the line at 190° through it are the same line. The directions through a
+  point fill half a turn. Dividing 360 would draw every line twice over for
+  an even count — ten asked for, five drawn, each with a twin stacked exactly
+  on it. The picture is unchanged: each line runs both ways, so n lines make
+  2n rays evenly spaced right round, which is what "evenly spaced around the
+  point" looks like. Verified with a pixel probe — a circle round the centre
+  of a 12-line pencil crosses 24 bands.
+  Hyphenated, not `(add pencil …)`, by the rule that split `add-line` off:
+  `add`'s own subforms take numbers and this takes an element. `(add pencil
+  …)` is kept as an error saying where it went, as `(add line …)` is.
+  `PENCIL_LIMIT` is 360; the count must be whole.
 - A point's menu offers **Add Line Through Point** (one line at
-  `PointItem.NEW_LINE_ANGLE`, 45°) and **Add Lines Through Point…** (the
-  `ProjectivityDialog` angles). Both go through `add_projectivity`, so the
+  `PointItem.NEW_LINE_ANGLE`, 45°), **Add Pencil…** (a count, defaulting to
+  `PointItem.PENCIL_COUNT`, written as one `(add-pencil …)`) and **Add Lines
+  Through Point…** (the `ProjectivityDialog` angles — the fuller form, with a
+  start, an end and a splay, written as one `(add-line <angle> …)` per ray).
+  All go through `add_projectivity`, so the
   lines are **pinned** to the point and it commits undo for them. Both are
   available on intersection points too: the lines are new, so nothing can
   depend on them yet and no cycle is possible. Note "Pin Lines Through Point" only pins *existing*
@@ -228,6 +246,33 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   adds an unattached point there, **Add Horizon** a horizontal
   orientation-locked line at the clicked height, and **Add Vertical** the
   same a quarter turn round at the clicked width (`add_vertical_at`).
+- **Dragging writes the script too** (`_log_drag`, called from
+  `end_item_drag`). Menu actions were the easy half; the way a figure is
+  actually made is by moving things, and a drag used to leave nothing behind
+  — you could noodle your way into a diagram, save it, and find the script
+  rebuilt everything in its first position. One command is written **when the
+  gesture ends**, from the `(item, position at the press)` pairs
+  `begin_item_drag` collected, not one per mouse-move; an item that ended
+  where it started writes nothing. `end_item_drag` clears `_drag_items`
+  *before* logging, so nothing the command sets off finds a drag apparently
+  still in flight. The re-run lands the item where it already is, so
+  `commit_undo`'s "nothing actually changed" check leaves a drag at **one**
+  undo step — measured.
+  **Only a point snapped to a line so far**
+  (`PointItem.slides_on_line()` → `(move-snapped-point <point> <fraction>)`):
+  its position is a single number, the fraction along its line, which is what
+  the command takes. A free point, a label's offset and a group have no
+  command to their name yet and are **passed over rather than guessed at** —
+  that is the next piece, and the goal is every canvas action logged.
+- `CanvasScene.slide_point_to(point, fraction)` moves the **anchor's
+  parameter**, not the point; the point follows through `sync_to_anchor`, and
+  `itemChange` notifies as usual so dependents come with it. It **honours a
+  locked `LineAnchor`** and returns False — locking says "hold it here", and
+  a command that moved it anyway would make the lock a suggestion. The form
+  refuses first, with the remedy (Unlock From Line) in the message.
+  `position_along_line()` is the exact inverse of `fraction_along_line()`,
+  shared with `add_point_on_line`, so a position read off the canvas and one
+  named in a command mean the same thing.
 - **Canvas actions should run as console commands.** `MainWindow` hands the
   scene `console.run_command` via `set_command_runner()`; an action calls
   `scene.run_as_command("(…)")`, which returns False when no runner is set so
@@ -322,6 +367,10 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
+  `(add-pencil <point> <count>)`, `(style "<script>")`,
+  `(canvas <property> <value>)`,
+  `(format <element> -default)`,
+  `(move-snapped-point <point> <fraction>)`,
   `(segment <line> <point> <point>)`, `(segment <line> -full)`,
   `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>
   <to> <step>)`, `(help)`.
@@ -429,17 +478,151 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`P1`, `L1`). Fractions accept `1/3` or `0.5`. Angles are **degrees clockwise
   from horizontal**. Canvas fractions: 0 = top/left, 1 = bottom/right, of the
   *reference frame*.
-- **Scripts**: Console "Save Script…" records the session's *building* commands;
-  ScriptsPanel lists/runs them. Location set via **Settings → Scripts Folder…**
-  (`prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides; `.prism` text files).
+- **Scripts**: Console "Save Script…" records the session's *building*
+  commands and opens the result in the ScriptsPanel editor, which runs it.
+  Opening, saving and the default folder are the **File menu**'s (see **The
+  File menu (scripts)**; `prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides;
+  `.prism` text files).
   `prism/settings.py` also holds the book path/page (see **Panels → Book**) and
   the window layout.
 
+## The File menu (scripts)
+
+- **File** is the first menu, and every command in it acts on the **open
+  script** — Prism's only documents are scripts, since the canvas keeps itself
+  (see **The drawing, between sessions**). New Script / Open Prism Script… /
+  Open Recent / Save Script / Save Script As… / Set Default Script Folder… /
+  Use Current Script's Folder, on the standard `QKeySequence` shortcuts.
+- **The menu settles itself in `aboutToShow`** (`_sync_file_menu`). What it
+  offers depends on the open script's path, its dirty flag and what is on
+  disk, none of which announces itself; reading those as the menu opens beats
+  keeping four actions in step from afar. Open Recent is rebuilt there too.
+- **The default scripts folder is a starting point, not a fence.**
+  `settings.scripts_dir()` is where **Save Script** writes and where **Open**
+  starts looking; opening a script elsewhere changes nothing. Two ways to move
+  it, both under File: a folder dialog, or **Use Current Script's Folder**,
+  enabled only when the open script is somewhere else. It moved out of the
+  Settings menu — one setting in two menus is only ever a question of which
+  one is stale. `PRISM_SCRIPTS_DIR` still overrides, and
+  `scripts_dir_is_fixed()` greys both commands out when it does (mirrors
+  `shelf_is_fixed`).
+- **Recent scripts** live in `settings.recent_scripts()` as a JSON list under
+  `scripts/recent`, capped at `RECENT_LIMIT` (8). The getter **filters to
+  files that still exist**, and `remember_script` writes that filtered list
+  back, so a deleted script leaves for good rather than lingering. Menu text
+  is the bare name, qualified with the parent folder only when two entries
+  share one (`_recent_label`) — once scripts come from anywhere, two called
+  `net` is ordinary.
+- `ConsolePanel.scriptSaved` now carries **the path**. `MainWindow` remembers
+  it and opens it in the editor, so what you just recorded is there to read
+  and run again. It used to carry nothing and refresh the list.
+- `settings.list_scripts()` is **gone** — nothing lists a folder any more.
+
+## Canvas properties
+
+- **`(canvas <property> <value>)`** is the one form for every property of the
+  canvas itself; `(canvas)` lists them, `(canvas <property>)` reports one.
+  One form rather than a `canvas-*` family, so the next property costs a name
+  in `CANVAS_PROPERTIES` instead of a command. `(canvas-auto-intersect …)`
+  and `(add auto-intersect …)` are both kept as errors saying where it went.
+  `style` is **listed but not settable** here — it has `(style …)`, which
+  reads the script and applies it.
+- **`auto-intersect`** (`scene._auto_intersect`, persisted) decides whether
+  `_apply_meets` **creates** a marker for a place no existing marker claims.
+  Off, it skips creation and nothing else: markers already there are still
+  claimed, updated and followed as their lines move, so what you asked for
+  stays live.
+- **`_meet_is_spoken_for()`** is the keep-rule, pulled out of `_apply_meets`
+  and now used by both it and the sweep: depended on, bounds a segment,
+  labelled, hidden, **or asked for by name**. Switching auto-intersect off
+  clears everything else (`_clear_unasked_meets`), so the clearing loses no
+  work and switching back on restores the rest with their labels.
+- **`PointItem._asked_for`** is the new reason, set by `_mark_meet_of()`,
+  which `meet_of` falls through to when auto-intersect is off. It finds the
+  place the same way the sweep does, so a third line already concurrent there
+  joins the same point rather than a second appearing on top of it.
+- **It is persisted on the crossing record, and restore has to *make* the
+  marker.** With auto-intersect off the recompute marks nothing, so
+  `_restore_crossing_labels` — which used to only decorate markers the
+  recompute had built — now calls `scene.meet_of(...)` for a recorded
+  crossing it can't find. Without that, reloading lost every crossing you had
+  named. `capture` keeps a crossing that is labelled, hidden **or asked for**.
+  `scene._auto_intersect` is restored *before* `recompute_intersections()`,
+  which is what reads it.
+- This is **"Next steps" item 3** (intersection-marker visibility control)
+  done, for the case that matters: a dense net can now be built without
+  hundreds of dots that say nothing about the construction.
+
+## The canvas's style
+
+- **A style is an ordinary `.prism` script of `(format …)` commands**, and
+  the canvas keeps its **path**, not its contents (`scene._style_path`,
+  persisted under `"style"`). That is the whole of what makes it reusable:
+  several drawings share one script, and editing the script reaches them
+  all. Nothing new to open, save or manage — it is a script, so the File
+  menu, the Scripts panel and the scripts folder already handle it.
+- **It is a default, not a one-off.** `settle_style()` runs from the top of
+  `commit_undo()`, *before* the snapshot, so what an action drew is already
+  dressed when the state is captured and undo steps between states that each
+  look right. The guard that keeps this cheap is `_styled_mark` against
+  `_seq_counter`: nothing has been **created** since the style last ran, so
+  there is nothing to dress — which is why a drag, a relabel or a format
+  doesn't set a sweep running. Measured at ~8% on a 77-element build.
+- **A style pass takes no undo steps.** `_form_format` commits one per
+  command, so `commit_undo()` returns early while `_styling_depth` is
+  non-zero; the action that set the pass going takes the one snapshot.
+- **Style commands run through the scene's own `CommandInterpreter`**, made
+  on first use, *not* the console's. Through the console they would be
+  echoed on every action and recorded into the next script saved. It also
+  keeps a style self-contained: it cannot see the console's `(define …)`
+  names, and the scene stays usable headless.
+- **Formatting by hand wins, and keeps winning.** `PointItem.set_display`
+  and `LineItem.set_style` each ask `scene.applying_default_style()`: if a
+  style is being applied and the item `is_styled_by_hand()`, they **return
+  without doing anything**; if it is *not* being applied, they set that flag.
+  One rule in one place per kind, so it catches the command, both display
+  dialogs and anything added later. `(format <element> -default)` →
+  `reset_display()` / `reset_style()` hands it back.
+  `_styling_depth` is a **count, not a flag**: a creation default applied
+  inside a style pass would otherwise clear it on the way out.
+- **Persisted per element** as `own_style`, defaulting to **False** when
+  absent — a drawing written before styles was drawn plain, and reading its
+  elements as "the user's own" would leave a newly attached style with
+  nothing it was allowed to touch.
+- `restore_style()` puts the attachment back **without running it**: a
+  snapshot already holds every element's look, so re-reading the file once
+  per undo step would buy nothing. `MainWindow.__init__` calls
+  `apply_style()` once after `_restore_drawing()`, since the script may have
+  been edited since the drawing was saved.
+- **This closes the "a crossing's formatting does not persist" gap** for
+  anything a style covers: markers are recomputed and then dressed afresh
+  every time. A crossing formatted *by hand* still doesn't survive a reload —
+  `capture()` stores only points with no anchor — which is unchanged.
+- **A style may only say how things are drawn** (`STYLE_FORMS` = `format`,
+  `define`). `_read_style` parses each line and drops anything else,
+  returning `(commands, refused)`. This is not tidiness: **a style runs on
+  every action**, so a building command in one adds another copy of what it
+  makes each time — measured before it was shut, one `(add point …)` in a
+  style turned a single action into two new points. Attaching names what it
+  skipped and why; a later change to the file is reported only when the set
+  of refusals *changes*, since a standing complaint on every action is noise.
+  An unparseable line is skipped the same way and the rest still runs.
+- Known wart, older than styles and now more visible: `(define <name>
+  <colour>)` fails — `_form_define` reads its value as an element or a
+  number, and `#bbbbbb` is neither, so it reports "No element named". Numbers
+  bind fine. Fixing it means letting `_form_define` bind a literal that
+  `QColor` accepts, which would make palettes-in-a-style work.
+- **Planes come free.** A style is whatever `(format …)` accepts, so it
+  governs exactly the kinds that command knows. When planes land, extending
+  `_form_format` (and adding a `(planes)` enumerator) reaches styles with no
+  change here.
+- The older `scene._point_style` ("apply to all" in the point dialog, a
+  default for points made later) still works and is applied *as a default*,
+  so it does not mark a new point as the user's own. A style asserted
+  afterwards wins over it.
+
 ## Panels
 
-- **Library** (right): built-in templates (Triangle, Quadrilateral, Complete
-  Quadrangle, Projectivity) + user-saved; drag onto canvas; save selection;
-  right-click rename/delete; persisted via `prism/template_store.py`.
 - **Console** (bottom).
 - **Elements** (`prism/elements_panel.py`; left): a `QTreeWidget` of the whole
   canvas — Points, Lines, Groups, and the names bound with `(define …)` (read
@@ -458,8 +641,16 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`_seen_sections`). Its **objectName is still `SelectionPanel`**, which is
   what Qt saves dock layouts against — renaming it would strand saved
   layouts, so it stays. It replaced the old selection-only panel.
-- **Scripts** (right, tabbed with Library): the folder's `.prism` files in a
-  list, with an editor under it in a vertical splitter. The editor is
+- **Scripts** (right, tabbed with the Book): an editor over **one script at a
+  time**. It used to list the scripts folder above the editor; the list is
+  gone and **the File menu opens a script instead** — a script is an ordinary
+  file that may live anywhere, so a list of one folder could only ever show
+  some of them. The panel keeps the editing concerns (the open path, the
+  dirty flag, reading and writing); `MainWindow` owns the commands and the
+  dialogs. Saving an untitled script needs a dialog, so the panel's own Save
+  button calls back through `set_save_handler(…)` — the same bargain as
+  `CanvasScene.set_command_runner`, and it falls back to `save()` when no
+  handler is set so the panel stays usable headless. The editor is
   `prism/script_editor.py`'s **`ScriptEditor`** — a `QPlainTextEdit` with a
   line-number gutter (`_LineNumbers`, a plain child widget so it doesn't
   scroll horizontally with the text). Numbers are drawn at `NUMBER_SCALE`
@@ -473,13 +664,15 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   repainted). Width is measured with the **bold** font, the wider of the two,
   so the gutter doesn't jostle as the cursor moves. **Run** executes the
   *editor's* text, not the file, so an edit can be tried before it's kept;
-  Save / Revert / Refresh alongside. Unsaved edits mark the script *modified*
-  and prompt (Save / Discard / Cancel) when you select another — Cancel puts
-  the selection back. Saving goes through `settings.write_script(path, text)`,
+  Save / Revert alongside (Refresh went with the list). Unsaved edits mark the
+  script *modified* and prompt (Save / Discard / Cancel) before New, Open, and
+  **on `closeEvent`** — the canvas keeps itself between sessions, but a script
+  is a file, so Cancel there `event.ignore()`s the close. Saving goes through
+  `settings.write_script(path, text)`,
   which writes the **exact path** the script was read from: deriving it from
   the display name would send a hand-named script like `net(1).prism` to
   `net1.prism` and leave the original behind.
-- **Book** (`prism/book_panel.py`; right, tabbed with Library/Scripts): a
+- **Book** (`prism/book_panel.py`; right, tabbed with Scripts): a
   `QPdfView` reader over a **shelf** of PDFs — Whicher's *Projective
   Geometry*, Coxeter's — with a dropdown at the top to pick between them and
   a **…** button for Add / Rename / Remove. Added from **Settings → Add
@@ -709,8 +902,28 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    (three collinear points → the fourth harmonic), which is what makes a net
    *disciplined* rather than merely dense.
 3. Intersection-marker **visibility control** (dense nets get busy).
+   **Done** as `(canvas auto-intersect false)` — see **Canvas
+   properties**. What is left is finer grain than all-or-nothing:
+   marking crossings of a chosen set of lines, say.
 4. Save/load a drawing to a file (scene_state is most of the way there).
 5. Possibly: promote/detach UX, snapping toggles, coordinate readout.
+
+## Removed features
+
+- **The Library panel and templates are gone** (`library_panel.py`,
+  `templates.py`, `template_store.py`, and the view's drag-and-drop). The
+  console does the job better: a template was a frozen figure you dropped on
+  the canvas, while a script is one you can read, edit, parameterise and
+  replay, and **clicking already writes the script**. The built-ins it
+  carried all have console forms — `(draw-triangle …)`, `(add-line …)` for a
+  quadrilateral, `(add-pencil …)` for a projectivity.
+- `LAYOUT_VERSION` went to **2** for it: the right-hand tab group was
+  anchored on the Library and is anchored on Scripts now, so a layout saved
+  against the old group would restore with a tab that is not there.
+- A user's saved templates are left on disk at
+  `user_templates.json` in the app-data directory (the old
+  `PRISM_TEMPLATE_STORE` override pointed at it). Nothing reads it; it is
+  theirs to delete.
 
 ## Branch history (merged PRs → main)
 

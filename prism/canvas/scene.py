@@ -8,6 +8,7 @@ endpoints follow and intersections recompute.
 """
 
 import math
+import os
 from typing import Callable
 
 import shiboken6
@@ -147,6 +148,26 @@ class CanvasScene(QGraphicsScene):
         self._point_style: dict | None = None
         # Set by MainWindow: lets canvas actions run as console commands.
         self._run_command = None
+        # The canvas's style: a script of (format …) commands, kept by path
+        # so several drawings can share one and editing it reaches them all.
+        self._style_path: str | None = None
+        self._style_commands: list = []
+        # Whether a point is kept wherever lines cross. Off, the canvas marks
+        # only the crossings you ask for — a dense net is unreadable with
+        # every one of them dotted in.
+        self._auto_intersect = True
+        # Lines the style holds that a style may not say; see STYLE_FORMS.
+        self._style_refused: list = []
+        # How many style passes are running. A count rather than a flag, so a
+        # nested pass (a default applied to a new point inside one) can't
+        # clear it on the way out.
+        self._styling_depth = 0
+        # The creation number the style was last asserted at; nothing new has
+        # been drawn while it still matches, so there is nothing to dress.
+        self._styled_mark = -1
+        # Made on first use; a style's commands run through this, not the
+        # console's, so they are neither echoed nor recorded into a script.
+        self._style_interpreter = None
 
     # -- Undo / redo -------------------------------------------------------
 
@@ -218,9 +239,21 @@ class CanvasScene(QGraphicsScene):
         self._emit_history()
 
     def commit_undo(self) -> None:
-        """Record the current state as a new undo step (call after an action)."""
+        """Record the current state as a new undo step (call after an action).
+
+        The canvas's style is asserted **first**, so what the action drew is
+        already dressed when the snapshot is taken — undo then steps between
+        states that each look right, rather than flickering through a pass of
+        restyling.
+        """
         if self._restoring:
             return
+        if self._styling_depth:
+            # A style pass is not an action. Its (format …) commands each
+            # ask for an undo step; the action that set the pass running
+            # takes one snapshot afterwards, which is the right granularity.
+            return
+        self.settle_style()
         from prism.scene_state import capture
 
         state = capture(self)
@@ -530,8 +563,48 @@ class CanvasScene(QGraphicsScene):
         return True
 
     def end_item_drag(self) -> None:
-        """Forget what was being dragged: the gesture is over."""
+        """The gesture is over: write down what it did, and forget it."""
+        dragged = self._drag_items
+        # Cleared first, so nothing the logged command sets off can find a
+        # drag still apparently in flight.
         self._drag_items = []
+        self._log_drag(dragged)
+
+    def _log_drag(self, dragged: list) -> None:
+        """Write a finished drag to the console as the command that repeats it.
+
+        Clicking writes the script (see **Canvas actions should run as
+        console commands**), and dragging was the one way of working that
+        left nothing to replay: you could noodle your way into a figure and
+        save it, but not rebuild it. Each item that actually moved is
+        therefore expressed as the command that would put it there.
+
+        **Only a point that slides along a line so far.** Its position is a
+        single number — the fraction along its line — which is exactly what
+        ``(move-snapped-point …)`` takes. The rest of the drag vocabulary (a
+        free point, a label's offset, a group) has no command to its name
+        yet, and an item without one is passed over rather than guessed at.
+
+        Args:
+            dragged: ``(item, position when the press began)`` pairs, as
+                :meth:`begin_item_drag` collected them.
+        """
+        for item, start in dragged:
+            if not shiboken6.isValid(item) or item.scene() is not self:
+                continue  # it went away mid-drag
+            if item.pos() == start:
+                continue  # picked up and put down again
+            if not isinstance(item, PointItem):
+                continue
+            line = item.slides_on_line()
+            if line is None:
+                continue
+            fraction = self.fraction_along_line(line, item.center())
+            if fraction is not None:
+                self.run_as_command(
+                    f"(move-snapped-point {self.point_id(item)} "
+                    f"{_number(fraction)})"
+                )
 
     @staticmethod
     def _drag_delta(
@@ -592,9 +665,17 @@ class CanvasScene(QGraphicsScene):
         return point
 
     def _apply_default_point_style(self, point: PointItem) -> None:
-        """Give a newly created point the scene's display defaults, if set."""
+        """Give a newly created point the scene's display defaults, if set.
+
+        Applied *as a default*, so the point is not thereby marked as
+        formatted by hand — it has not been; nobody has looked at it yet.
+        """
         if self._point_style:
-            point.set_display(**self._point_style)
+            self._styling_depth += 1
+            try:
+                point.set_display(**self._point_style)
+            finally:
+                self._styling_depth -= 1
 
     def apply_point_style_to_all(self, style: dict) -> int:
         """Apply display properties to every point, and to points created later.
@@ -655,19 +736,73 @@ class CanvasScene(QGraphicsScene):
         Returns:
             The new point, or None if the line doesn't cross the canvas.
         """
-        span = line.span_in_rect(self.reference_rect())
-        if span is None:
+        position = self.position_along_line(line, fraction)
+        if position is None:
             return None
-        a, b = span
-        pos = QPointF(
-            a.x() + (b.x() - a.x()) * fraction,
-            a.y() + (b.y() - a.y()) * fraction,
-        )
-        point = self.add_point(pos)
+        point = self.add_point(position)
         point.set_anchor_line(line)
         self.recompute_intersections()
         self.commit_undo()
         return point
+
+    def position_along_line(
+        self, line: LineItem, fraction: float
+    ) -> QPointF | None:
+        """Where a fraction along a line's visible span falls.
+
+        The exact inverse of :meth:`fraction_along_line`, and what both
+        :meth:`add_point_on_line` and :meth:`slide_point_to` place by, so a
+        position read off the canvas and a position named in a command mean
+        the same thing.
+
+        Args:
+            line: The line to measure along.
+            fraction: 0 is the span's left-hand end, 1 its right-hand end
+                (top and bottom when the line is upright). Outside 0-1 is
+                allowed — the canvas is bigger than the frame.
+
+        Returns:
+            The scene position, or None if the line doesn't cross the frame.
+        """
+        span = line.span_in_rect(self.reference_rect())
+        if span is None:
+            return None
+        start, end = span
+        return QPointF(
+            start.x() + (end.x() - start.x()) * fraction,
+            start.y() + (end.y() - start.y()) * fraction,
+        )
+
+    def slide_point_to(self, point: PointItem, fraction: float) -> bool:
+        """Slide a point along the line it is snapped to.
+
+        The point keeps its anchor — this is the drag a user does with the
+        mouse, written as an instruction. What moves is the anchor's
+        parameter; the point then follows it, and everything computed from
+        the point follows in turn.
+
+        Args:
+            point: A point snapped to a line.
+            fraction: Where along the line's span to put it, measured as
+                :meth:`position_along_line` does.
+
+        Returns:
+            Whether it moved; False when the point slides on nothing, when it
+                is **locked** to its line, or when that line doesn't cross
+                the frame to measure a fraction along.
+        """
+        line = point.slides_on_line()
+        if line is None or point.anchor().locked:
+            # Locking says "hold it here"; a command that moved it anyway
+            # would make the lock a suggestion.
+            return False
+        position = self.position_along_line(line, fraction)
+        if position is None:
+            return False
+        point.anchor().t = line.param_of(position)
+        point.sync_to_anchor()
+        self.commit_undo()
+        return True
 
     # -- Points at infinity ------------------------------------------------
 
@@ -997,6 +1132,234 @@ class CanvasScene(QGraphicsScene):
         """
         rect = self.reference_rect()
         return self._add_vertical_at_x(rect.left() + fraction * rect.width())
+
+    # -- Canvas properties -------------------------------------------------
+
+    def auto_intersect(self) -> bool:
+        """Whether a point is kept wherever lines cross."""
+        return self._auto_intersect
+
+    def set_auto_intersect(self, on: bool) -> bool:
+        """Turn automatic crossing points on or off.
+
+        Switching it **on** brings every crossing back on the next recompute.
+        Switching it **off** clears the markers nothing asks for — see
+        :meth:`_meet_is_spoken_for` for what that spares, which is everything
+        you have labelled, hidden, built on, bounded a segment with, or asked
+        for by name. So the clearing loses no work, and turning it on again
+        puts the rest back with their labels intact.
+
+        Args:
+            on: Whether to mark crossings automatically.
+
+        Returns:
+            Whether the setting changed.
+        """
+        on = bool(on)
+        if on == self._auto_intersect:
+            return False
+        self._auto_intersect = on
+        if on:
+            self.recompute_intersections()
+        else:
+            self._clear_unasked_meets()
+        self.settle_definitions()
+        return True
+
+    def _clear_unasked_meets(self) -> None:
+        """Take away the crossing markers nothing asks for."""
+        for point in list(self._meets):
+            if self._meet_is_spoken_for(point):
+                continue
+            self._meets.remove(point)
+            self._retire_point(point)
+
+    # -- The canvas's style ------------------------------------------------
+
+    def applying_default_style(self) -> bool:
+        """Whether a style (or a creation default) is being applied just now.
+
+        Items ask this before deciding that being formatted makes them the
+        user's own. A style dressing the canvas is not somebody choosing how
+        one element should look.
+        """
+        return self._styling_depth > 0
+
+    def style_path(self) -> str | None:
+        """The script this canvas takes its look from, or None."""
+        return self._style_path
+
+    def style_refusals(self) -> list:
+        """Notes about lines in the style that a style may not say."""
+        return list(self._style_refused)
+
+    def style_commands(self) -> list:
+        """The style's commands as last read, for reporting and persistence."""
+        return list(self._style_commands)
+
+    def attach_style(self, path: str) -> int:
+        """Take this canvas's default look from a script of ``(format …)``.
+
+        The **path** is kept, not the contents: edit the script and every
+        drawing that points at it follows. Re-read whenever the style is
+        asserted, so a change shows up without re-attaching.
+
+        Args:
+            path: The style script.
+
+        Returns:
+            How many commands it holds.
+
+        Raises:
+            OSError: If the script can't be read.
+        """
+        commands, refused = self._read_style(path)
+        self._style_path = os.path.abspath(path)
+        self._style_commands = commands
+        self._style_refused = []
+        self._styled_mark = -1
+        self.apply_style()
+        return len(commands)
+
+    def detach_style(self) -> bool:
+        """Stop taking a default look from a script.
+
+        What is already drawn keeps the look it has — a style is how things
+        are dressed, not a costume whipped away. Only what comes next is
+        untouched by it.
+
+        Returns:
+            Whether there had been one.
+        """
+        had = self._style_path is not None
+        self._style_path = None
+        self._style_commands = []
+        self._style_refused = []
+        self._styled_mark = -1
+        return had
+
+    def restore_style(self, path: str | None) -> None:
+        """Put the attachment back from a snapshot, **without running it**.
+
+        A snapshot already holds every element's look, so replaying it is
+        enough to make the canvas right: running the style again would read
+        a file once per undo step for no gain. The mark is set to the
+        current creation count so :meth:`settle_style` agrees nothing is
+        owed until something new is drawn.
+
+        Args:
+            path: The style script, or None for no style.
+        """
+        self._style_path = path or None
+        self._style_commands = []  # re-read whenever it is next asserted
+        self._style_refused = []
+        self._styled_mark = self._seq_counter
+
+    #: What a style is allowed to say. A style describes how things are
+    #: *drawn*; a command that **builds** would run again on every pass,
+    #: adding another copy of whatever it makes each time anything was drawn
+    #: — measured, before this was shut: one (add point …) in a style turned
+    #: a single action into two new points.
+    STYLE_FORMS = ("format", "define")
+
+    @classmethod
+    def _read_style(cls, path: str) -> tuple:
+        """Read a style script, keeping only what a style may say.
+
+        Args:
+            path: The script to read.
+
+        Returns:
+            ``(commands, refused)`` — the lines that will run, in order, and
+                a plain-English note about each line that won't.
+        """
+        from prism.sexpr import SexprError, parse
+
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        commands, refused = [], []
+        for number, raw in enumerate(text.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith(";"):
+                continue
+            try:
+                forms = parse(line)
+            except SexprError as exc:
+                refused.append(f"line {number}: {exc}")
+                continue
+            names = [
+                form[0].lower()
+                for form in forms
+                if isinstance(form, list) and form and isinstance(form[0], str)
+            ]
+            stray = [name for name in names if name not in cls.STYLE_FORMS]
+            if not names:
+                refused.append(f"line {number}: not a command")
+            elif stray:
+                refused.append(
+                    f"line {number}: ({stray[0]} …) doesn't say how "
+                    "something is drawn, and a style runs every time you draw"
+                )
+            else:
+                commands.append(line)
+        return commands, refused
+
+    def apply_style(self) -> bool:
+        """Run the style over the canvas, dressing anything not spoken for.
+
+        The script is **re-read** each time, so editing it and drawing
+        anything is enough to see the change. An element formatted by hand is
+        passed over — :meth:`applying_default_style` is how it knows.
+
+        Commands run through an interpreter of the canvas's own, not the
+        console's: a style is self-contained, and running it through the
+        console would echo it and record it into the next script you saved.
+
+        Returns:
+            Whether a style ran.
+        """
+        if self._style_path is None:
+            return False
+        try:
+            self._style_commands, refused = self._read_style(self._style_path)
+        except OSError as exc:
+            self.statusMessage.emit(
+                f"Couldn't read the style {self._style_path}: {exc}"
+            )
+            return False
+        # Said when it starts being true and not again, since a style is
+        # asserted on every action and a standing complaint would be noise.
+        if refused != self._style_refused:
+            self._style_refused = refused
+            for note in refused:
+                self.statusMessage.emit(f"Style: {note}")
+        if self._style_interpreter is None:
+            from prism.commands import CommandInterpreter
+
+            self._style_interpreter = CommandInterpreter(self)
+        self._styling_depth += 1
+        try:
+            for command in self._style_commands:
+                output, good = self._style_interpreter.run(command)
+                if not good:
+                    self.statusMessage.emit(f"Style: {output}")
+        finally:
+            self._styling_depth -= 1
+        self._styled_mark = self._seq_counter
+        return True
+
+    def settle_style(self) -> None:
+        """Re-assert the style if anything has been drawn since it last ran.
+
+        Called as an action finishes, which is often; the creation counter is
+        what keeps that cheap. A drag, a relabelling, a format — none of them
+        make anything, so none of them set the style running over the whole
+        canvas again.
+        """
+        if self._style_path is None or self._styling_depth:
+            return
+        if self._seq_counter != self._styled_mark:
+            self.apply_style()
 
     def set_command_runner(self, runner: Callable | None) -> None:
         """Let canvas actions go through the console.
@@ -1413,6 +1776,37 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return created
 
+    def add_pencil(self, point: PointItem, count: int) -> list:
+        """Draw ``count`` lines through a point, evenly spaced.
+
+        **The spacing is 180°/count, not 360°/count**, and that is geometry
+        rather than a saving. A line has no direction to it: the line at 10°
+        through a point and the line at 190° through it are *the same line*.
+        The directions through a point therefore fill half a turn, not a
+        whole one, and dividing 360 would draw every line twice over for an
+        even count — ten lines asked for, five drawn, each with a twin
+        stacked exactly on it.
+
+        What you see is still a fan filling the circle. Each line runs both
+        ways from the point, so ``count`` lines make ``2 × count`` rays,
+        evenly spaced right round — which is what "evenly spaced around the
+        point" looks like on the canvas.
+
+        The first line is horizontal; the rest follow clockwise from it.
+
+        Args:
+            point: The centre of the pencil.
+            count: How many lines; one or more.
+
+        Returns:
+            The lines created, empty for a point at infinity (which has no
+                pencil of angles — see :meth:`add_projectivity`).
+        """
+        if count < 1:
+            return []
+        step = 180.0 / count
+        return self.add_projectivity(point, [i * step for i in range(count)])
+
     def lines_through_both(self, first: PointItem, second: PointItem) -> list:
         """Every line both points lie on, in creation order.
 
@@ -1563,12 +1957,9 @@ class CanvasScene(QGraphicsScene):
         for where, lines in places:
             point = self._claim_meet(spare, lines)
             if point is None:
-                point = PointItem(where)
-                point.set_anchor(MeetAnchor(lines))
-                self._apply_default_point_style(point)
-                self._tag(point)
-                self.addItem(point)
-                self._meets.append(point)
+                if not self._auto_intersect:
+                    continue  # nobody asked for this crossing
+                self._new_meet(where, lines)
             else:
                 spare.remove(point)
                 point.anchor().set_lines(lines)
@@ -1580,12 +1971,7 @@ class CanvasScene(QGraphicsScene):
                 # not the scene's to manage.
                 self._meets.remove(point)
                 continue
-            if (
-                self._is_depended_on(point)
-                or self._bounds_a_segment(point)
-                or point.label_text()
-                or not point.is_shown()
-            ):
+            if self._meet_is_spoken_for(point):
                 # Something is built on this meet, or you have said something
                 # about it, so it outlives the crossing: undefined, ready to
                 # come back when the lines meet again.
@@ -1593,6 +1979,47 @@ class CanvasScene(QGraphicsScene):
             else:
                 self._meets.remove(point)
                 self._retire_point(point)
+
+    def _meet_is_spoken_for(self, point: PointItem) -> bool:
+        """Whether a crossing marker is wanted apart from the lines crossing.
+
+        The reasons a marker outlives its crossing, and the same reasons it
+        survives ``auto-intersect`` being switched off: something is built on
+        it, it bounds a drawn segment, you have named it, you have hidden it
+        (so the scene is remembering that choice), or you asked for it by
+        name in the first place.
+
+        Args:
+            point: The marker to judge.
+
+        Returns:
+            Whether to keep it.
+        """
+        return bool(
+            self._is_depended_on(point)
+            or self._bounds_a_segment(point)
+            or point.label_text()
+            or not point.is_shown()
+            or point.was_asked_for()
+        )
+
+    def _new_meet(self, where: QPointF, lines: list) -> PointItem:
+        """Put a marker at a crossing and take it into the scene's keeping.
+
+        Args:
+            where: The scene position.
+            lines: The lines meeting there.
+
+        Returns:
+            The new marker.
+        """
+        point = PointItem(where)
+        point.set_anchor(MeetAnchor(lines))
+        self._apply_default_point_style(point)
+        self._tag(point)
+        self.addItem(point)
+        self._meets.append(point)
+        return point
 
     @staticmethod
     def _claim_meet(candidates: list, lines: list):
@@ -1664,6 +2091,34 @@ class CanvasScene(QGraphicsScene):
         for point in self.ideal_points():
             anchor = point.anchor()
             if anchor.references_line(a) and anchor.references_line(b):
+                return point
+        if not self._auto_intersect:
+            # Nothing was swept up, because the canvas isn't sweeping. Asking
+            # for this one is what brings it into being — and marks it as
+            # asked for, so it stays.
+            return self._mark_meet_of(a, b)
+        return None
+
+    def _mark_meet_of(self, a: LineItem, b: LineItem) -> PointItem | None:
+        """Put a marker where two lines cross, whether or not they were swept.
+
+        For ``auto-intersect`` off, where the crossing is real but unmarked.
+        The place is found the same way the automatic sweep finds it, so a
+        third line already concurrent there joins the same point rather than
+        a second one appearing on top of it.
+
+        Args:
+            a: One line.
+            b: The other.
+
+        Returns:
+            The marker, or None if the two don't cross on the canvas.
+        """
+        for where, lines in self._gather_meeting_places():
+            if any(ln is a for ln in lines) and any(ln is b for ln in lines):
+                point = self._new_meet(where, lines)
+                point.set_asked_for(True)
+                self.settle_definitions()
                 return point
         return None
 

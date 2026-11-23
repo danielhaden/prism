@@ -55,8 +55,9 @@ class _CommandInput(QLineEdit):
 class ConsolePanel(QDockWidget):
     """A command line over the canvas, with the session recordable as a script."""
 
-    #: Emitted after a script is saved, so the Scripts panel can refresh.
-    scriptSaved = Signal()
+    #: Emitted with the path after a script is saved, so the window can open
+    #: it in the editor and list it under Open Recent.
+    scriptSaved = Signal(str)
 
     def __init__(self, scene, parent=None):
         super().__init__("Console", parent)
@@ -155,7 +156,7 @@ class ConsolePanel(QDockWidget):
             QMessageBox.warning(self, "Save Script", f"Couldn't save it: {exc}")
             return
         self._echo(f"Saved {len(self._recorded)} command(s) to {path}")
-        self.scriptSaved.emit()
+        self.scriptSaved.emit(path)
 
     # -- Internal ----------------------------------------------------------
 

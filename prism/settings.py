@@ -1,8 +1,13 @@
 """Application settings, the on-disk script library, and the book.
 
-The scripts folder is where saved console scripts live. It defaults to a
-per-user application-data directory, is configurable from **Settings > Scripts
-Folder…**, and can be overridden with ``PRISM_SCRIPTS_DIR`` (used by tests).
+The *default scripts folder* is where **Save Script** writes and where **File
+> Open Prism Script…** starts looking. It defaults to a per-user
+application-data directory, is set from **File > Set Default Script Folder…**,
+and can be overridden with ``PRISM_SCRIPTS_DIR`` (used by tests). A script may
+be opened from anywhere; the folder is a starting point, not a fence.
+
+The scripts opened lately are remembered too, so **File > Open Recent** can
+offer them by name wherever on disk they live.
 
 The window's size and its dock layout are remembered the same way, so the
 canvas comes back the shape you left it.
@@ -24,6 +29,7 @@ from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
 SCRIPT_SUFFIX = ".prism"
 
 _SCRIPTS_DIR_KEY = "paths/scripts_dir"
+_RECENT_SCRIPTS_KEY = "scripts/recent"
 _BOOK_PATH_KEY = "paths/book_path"
 _WINDOW_GEOMETRY_KEY = "window/geometry"
 _WINDOW_STATE_KEY = "window/state"
@@ -34,6 +40,9 @@ _CURRENT_BOOK_KEY = "books/current"
 #: Longest display name derived from a filename; longer ones are cut short.
 BOOK_NAME_LIMIT = 48
 
+#: How many recently opened scripts **File > Open Recent** remembers.
+RECENT_LIMIT = 8
+
 
 def default_scripts_dir() -> str:
     base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
@@ -43,7 +52,7 @@ def default_scripts_dir() -> str:
 
 
 def scripts_dir() -> str:
-    """The folder scripts are read from and saved to."""
+    """The default scripts folder: where saving writes and opening starts."""
     override = os.environ.get("PRISM_SCRIPTS_DIR")
     if override:
         return override
@@ -52,6 +61,16 @@ def scripts_dir() -> str:
 
 def set_scripts_dir(path: str) -> None:
     QSettings().setValue(_SCRIPTS_DIR_KEY, path)
+
+
+def scripts_dir_is_fixed() -> bool:
+    """Whether ``PRISM_SCRIPTS_DIR`` is standing in for the scripts folder.
+
+    When it is, choosing another folder would be ignored on the next read, so
+    the commands that set one are offered greyed out rather than appearing to
+    work. Same bargain as :func:`shelf_is_fixed`.
+    """
+    return bool(os.environ.get("PRISM_SCRIPTS_DIR"))
 
 
 def ensure_scripts_dir() -> str:
@@ -98,19 +117,63 @@ def load_script(path: str) -> str:
         return handle.read()
 
 
-def list_scripts() -> list:
-    """Saved scripts as ``(name, path)`` pairs, sorted by name."""
-    folder = scripts_dir()
+# -- Recently opened -----------------------------------------------------
+
+
+def recent_scripts() -> list:
+    """The scripts opened lately, newest first.
+
+    Only files that are still there come back. A script you deleted or
+    renamed should not sit in the menu offering to open nothing, and because
+    :func:`remember_script` writes this list back, the stale entry is gone
+    for good the next time one is opened.
+
+    Returns:
+        Absolute paths, newest first, at most :data:`RECENT_LIMIT` of them.
+    """
+    stored = QSettings().value(_RECENT_SCRIPTS_KEY, "")
     try:
-        names = os.listdir(folder)
-    except OSError:
+        raw = json.loads(stored) if stored else []
+    except ValueError:
+        raw = []
+    if not isinstance(raw, list):
         return []
-    found = [
-        (n[: -len(SCRIPT_SUFFIX)], os.path.join(folder, n))
-        for n in names
-        if n.endswith(SCRIPT_SUFFIX)
-    ]
-    return sorted(found, key=lambda pair: pair[0].lower())
+    paths = [str(entry) for entry in raw if isinstance(entry, str)]
+    return [path for path in paths if os.path.isfile(path)][:RECENT_LIMIT]
+
+
+def remember_script(path: str) -> None:
+    """Put a script at the top of the recently opened list.
+
+    Args:
+        path: The script's path. An entry already in the list moves up rather
+            than appearing twice, and the oldest falls off the end.
+    """
+    path = os.path.abspath(path)
+    kept = [other for other in recent_scripts() if other != path]
+    QSettings().setValue(
+        _RECENT_SCRIPTS_KEY, json.dumps([path] + kept[: RECENT_LIMIT - 1])
+    )
+
+
+def forget_script(path: str) -> None:
+    """Drop a script from the recently opened list.
+
+    For one that is still on disk but wouldn't open — a folder that lost its
+    permissions, a file that isn't text. A missing file needs no help; it is
+    filtered out on the way in.
+
+    Args:
+        path: The script to forget.
+    """
+    path = os.path.abspath(path)
+    kept = [other for other in recent_scripts() if other != path]
+    QSettings().setValue(_RECENT_SCRIPTS_KEY, json.dumps(kept))
+
+
+def clear_recent_scripts() -> None:
+    """Empty the recently opened list."""
+    QSettings().remove(_RECENT_SCRIPTS_KEY)
 
 
 # -- The shelf -----------------------------------------------------------

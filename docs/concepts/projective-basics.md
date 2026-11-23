@@ -68,5 +68,5 @@ stay concurrent and rotate about it. See
 Classical projective results — the harmonic conjugate, the complete quadrangle,
 nets of harmonicity — are built by **repeated incidence constructions**: draw
 lines through points, mark where they cross, repeat. Prism is designed around
-this: snapping, pinning, automatic intersections, grouping, and templates are
-all in service of *composing* elements into larger figures.
+this: snapping, pinning, automatic intersections, grouping, and a console
+that composes are all in service of building elements into larger figures.

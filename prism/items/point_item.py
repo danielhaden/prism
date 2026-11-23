@@ -31,6 +31,15 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
 
     RADIUS = 1.0
     DEFAULT_COLOR = "#000000"
+    #: Whether this point's look was chosen directly rather than by a style.
+    #: A class attribute, so it is there however early Qt calls back in.
+    _styled_by_hand = False
+
+    #: Whether a crossing was asked for by name rather than found by the
+    #: automatic sweep. Only meaningful on a meet, and only matters when the
+    #: canvas is **not** adding crossings automatically: it is what makes
+    #: this one yours, and keeps it.
+    _asked_for = False
     DEFAULT_GLOW_RADIUS = 7.0
     DEFAULT_GLOW_COLOR = "#fafafa"  # matches the canvas background
 
@@ -39,6 +48,9 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: or an upright however the point was placed; it is pinned to the point,
     #: so dragging it rotates it to wherever you want.
     NEW_LINE_ANGLE = 45.0
+
+    #: Lines offered by default in **Add Pencil…**.
+    PENCIL_COUNT = 6
 
     #: Clickable radius, in screen pixels. The drawn dot is radius 1, far too
     #: small to aim at; this is the target you actually get.
@@ -95,6 +107,12 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         self, radius=None, color=None, glow_radius=None, glow_color=None
     ) -> None:
         """Update any of the point's display properties."""
+        scene = self.scene()
+        as_default = scene is not None and scene.applying_default_style()
+        if as_default and self._styled_by_hand:
+            return  # formatted by hand; a style keeps its hands off it
+        if not as_default:
+            self._styled_by_hand = True
         self.prepareGeometryChange()
         if radius is not None:
             self._radius = float(radius)
@@ -108,6 +126,51 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if glow_color is not None:
             self._glow_color = QColor(glow_color)
         self.update()
+
+    def reset_display(self) -> None:
+        """Go back to how a point is drawn before anyone says otherwise.
+
+        Also hands the point back to the canvas's style: it is no longer
+        yours, so the next pass may dress it again.
+        """
+        self._styled_by_hand = False
+        self.prepareGeometryChange()
+        self._radius = float(self.RADIUS)
+        self.setRect(
+            -self._radius, -self._radius, 2 * self._radius, 2 * self._radius
+        )
+        color = QColor(self.DEFAULT_COLOR)
+        self.setBrush(QBrush(color))
+        self.setPen(QPen(color.darker(180), 1.5))
+        self._glow_radius = float(self.DEFAULT_GLOW_RADIUS)
+        self._glow_color = QColor(self.DEFAULT_GLOW_COLOR)
+        self.update()
+
+    def was_asked_for(self) -> bool:
+        """Whether this crossing was asked for rather than swept up.
+
+        With ``auto-intersect`` off the canvas marks no crossing of its own
+        accord, so the ones that are there are the ones you named. That has
+        to outlive a sweep, and a reload.
+        """
+        return self._asked_for
+
+    def set_asked_for(self, asked: bool) -> None:
+        """Say whether this crossing was asked for by name."""
+        self._asked_for = bool(asked)
+
+    def is_styled_by_hand(self) -> bool:
+        """Whether someone formatted this point directly.
+
+        A point that was is left alone by the canvas's style — you picked it
+        out on purpose, and a style re-asserting itself over the top would
+        undo that every time anything was drawn.
+        """
+        return self._styled_by_hand
+
+    def set_styled_by_hand(self, owned: bool) -> None:
+        """Say whether this point's look is the user's own (for persistence)."""
+        self._styled_by_hand = bool(owned)
 
     # -- Geometry ----------------------------------------------------------
 
@@ -206,6 +269,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # a stray selected point (a crossing caught by a rubber band, say)
         # used to make the command vanish with no explanation.
         line_action = one_line_action = pencil_action = None
+        even_pencil_action = None
         segment_action = segment_line = None
         two_points = (
             scene.selected_points()
@@ -259,6 +323,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
                 unavailable.setEnabled(False)
             else:
                 one_line_action = menu.addAction("Add Line Through Point")
+                even_pencil_action = menu.addAction("Add Pencil…")
                 pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()
 
@@ -322,6 +387,8 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
                 f"(add-line {angle:g} (list {scene.point_id(self)}))"
             ):
                 scene.add_line_through(self, angle)
+        elif even_pencil_action is not None and chosen is even_pencil_action:
+            self._add_pencil()
         elif pencil_action is not None and chosen is pencil_action:
             self._add_lines_through()
         elif snap_action is not None and chosen is snap_action:
@@ -382,6 +449,28 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if count == 1 and self in selected:
             return "select one more point"
         return None
+
+    def _add_pencil(self) -> None:
+        """Draw a fan of evenly spaced lines through this point.
+
+        The count is all there is to choose. ``Add Lines Through Point…``
+        is the form with a start, an end and a splay to set; this one is the
+        common case — n lines, spread evenly — asked as one number.
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        scene = self.scene()
+        if scene is None:
+            return
+        parent = scene.views()[0] if scene.views() else None
+        count, ok = QInputDialog.getInt(
+            parent, "Add Pencil", "How many lines?", self.PENCIL_COUNT, 1, 360
+        )
+        if not ok:
+            return
+        name = scene.point_id(self)
+        if not scene.run_as_command(f"(add-pencil {name} {count})"):
+            scene.add_pencil(self, count)
 
     def _add_lines_through(self) -> None:
         """Draw a pencil of lines through this point, at angles you choose."""
@@ -473,6 +562,23 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         parallel lines that run to it.
         """
         return self._anchor is not None and self._anchor.kind == "infinity"
+
+    def slides_on_line(self) -> object | None:
+        """The line this point is snapped to and slides along, or None.
+
+        Like :meth:`is_meet`, a statement about what currently determines the
+        point rather than a kind of point: one carrying a
+        :class:`~prism.anchors.LineAnchor` is held to a line and free along
+        it. A locked anchor still answers with its line — it is the same
+        relation, just not free at the moment.
+
+        Returns:
+            The line, or None when nothing holds this point to one.
+        """
+        anchor = self._anchor
+        if anchor is None or anchor.kind != "line":
+            return None
+        return anchor.line
 
     def infinity_lines(self) -> list:
         """The parallel lines running to this ideal point, or an empty list."""

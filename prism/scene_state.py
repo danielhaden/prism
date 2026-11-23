@@ -144,6 +144,7 @@ def capture(scene) -> dict:
                 "label": _capture_label(point),
                 "anchor": anchor,
                 "shown": point.is_shown(),
+                "own_style": point.is_styled_by_hand(),
             }
         )
 
@@ -182,6 +183,7 @@ def capture(scene) -> dict:
                 "range": visible_range,
                 "locked": line.is_orientation_locked(),
                 "label": _capture_label(line),
+                "own_style": line.is_styled_by_hand(),
             }
         )
 
@@ -195,13 +197,22 @@ def capture(scene) -> dict:
             continue
         label = _capture_label(marker)
         shown = marker.is_shown()
-        if label is None and shown:
+        asked = marker.was_asked_for()
+        if label is None and shown and not asked:
             continue  # nothing about this one worth keeping
         indices = [l_index.get(id(line)) for line in anchor.lines]
         if any(index is None for index in indices) or len(indices) < 2:
             continue
         crossing_labels.append(
-            {"lines": sorted(indices), "label": label, "shown": shown}
+            {
+                "lines": sorted(indices),
+                "label": label,
+                "shown": shown,
+                # With auto-intersect off the recompute marks nothing, so an
+                # asked-for crossing has to be made again on the way back in
+                # — otherwise reloading loses every crossing you named.
+                "asked": asked,
+            }
         )
 
     groups = []
@@ -221,6 +232,10 @@ def capture(scene) -> dict:
         "groups": groups,
         "crossings": crossing_labels,
         "point_style": _capture_point_style(getattr(scene, "_point_style", None)),
+        # The canvas's style, by path: the script is the shared thing, and
+        # copying its contents in would fork it per drawing.
+        "style": getattr(scene, "_style_path", None),
+        "auto_intersect": getattr(scene, "_auto_intersect", True),
     }
 
 
@@ -242,6 +257,10 @@ def restore(scene, state: dict) -> None:
         )
         _restore_label(point, data["label"])
         point.set_shown(data.get("shown", True))
+        # set_display above marks a point as the user's own, which is right
+        # when someone formats one and wrong when we are replaying what was
+        # stored; the snapshot knows which this was.
+        point.set_styled_by_hand(data.get("own_style", False))
         points.append(point)
 
     lines = []
@@ -254,6 +273,7 @@ def restore(scene, state: dict) -> None:
         line.setPen(pen)
         line.set_orientation_locked(data.get("locked", False))
         _restore_label(line, data["label"])
+        line.set_styled_by_hand(data.get("own_style", False))
         lines.append(line)
 
     # Wire relationships once both sides exist.
@@ -286,6 +306,12 @@ def restore(scene, state: dict) -> None:
             group.addToGroup(points[index] if kind == "p" else lines[index])
 
     scene._point_style = _restore_point_style(state.get("point_style"))
+    # The attachment comes back; the look does not need re-running, since
+    # every element's own look was stored above.
+    if hasattr(scene, "restore_style"):
+        scene.restore_style(state.get("style"))
+    # Before the recompute, which is what reads it.
+    scene._auto_intersect = bool(state.get("auto_intersect", True))
     scene.recompute_intersections()
     _restore_crossing_labels(scene, lines, state.get("crossings", []))
     # Meets exist only now, so relationships naming one are wired here. Doing
@@ -323,9 +349,18 @@ def _restore_crossing_labels(scene, lines, entries) -> None:
         marker = next(
             (m for key, m in markers if len(key & ids) >= 2), None
         )
+        if marker is None and len(wanted) >= 2:
+            # Nothing swept this one up — auto-intersect is off — so ask for
+            # it by name, exactly as the user did when it first appeared.
+            marker = scene.meet_of(lines[wanted[0]], lines[wanted[1]])
+            if marker is not None:
+                markers.append(
+                    (frozenset(id(ln) for ln in marker.anchor().lines), marker)
+                )
         if marker is not None:
             _restore_label(marker, entry["label"])
             marker.set_shown(entry.get("shown", True))
+            marker.set_asked_for(entry.get("asked", False))
 
 
 def _resolve_point(ref, points, scene=None):
