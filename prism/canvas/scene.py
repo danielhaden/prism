@@ -530,8 +530,48 @@ class CanvasScene(QGraphicsScene):
         return True
 
     def end_item_drag(self) -> None:
-        """Forget what was being dragged: the gesture is over."""
+        """The gesture is over: write down what it did, and forget it."""
+        dragged = self._drag_items
+        # Cleared first, so nothing the logged command sets off can find a
+        # drag still apparently in flight.
         self._drag_items = []
+        self._log_drag(dragged)
+
+    def _log_drag(self, dragged: list) -> None:
+        """Write a finished drag to the console as the command that repeats it.
+
+        Clicking writes the script (see **Canvas actions should run as
+        console commands**), and dragging was the one way of working that
+        left nothing to replay: you could noodle your way into a figure and
+        save it, but not rebuild it. Each item that actually moved is
+        therefore expressed as the command that would put it there.
+
+        **Only a point that slides along a line so far.** Its position is a
+        single number — the fraction along its line — which is exactly what
+        ``(move-snapped-point …)`` takes. The rest of the drag vocabulary (a
+        free point, a label's offset, a group) has no command to its name
+        yet, and an item without one is passed over rather than guessed at.
+
+        Args:
+            dragged: ``(item, position when the press began)`` pairs, as
+                :meth:`begin_item_drag` collected them.
+        """
+        for item, start in dragged:
+            if not shiboken6.isValid(item) or item.scene() is not self:
+                continue  # it went away mid-drag
+            if item.pos() == start:
+                continue  # picked up and put down again
+            if not isinstance(item, PointItem):
+                continue
+            line = item.slides_on_line()
+            if line is None:
+                continue
+            fraction = self.fraction_along_line(line, item.center())
+            if fraction is not None:
+                self.run_as_command(
+                    f"(move-snapped-point {self.point_id(item)} "
+                    f"{_number(fraction)})"
+                )
 
     @staticmethod
     def _drag_delta(
@@ -655,19 +695,73 @@ class CanvasScene(QGraphicsScene):
         Returns:
             The new point, or None if the line doesn't cross the canvas.
         """
-        span = line.span_in_rect(self.reference_rect())
-        if span is None:
+        position = self.position_along_line(line, fraction)
+        if position is None:
             return None
-        a, b = span
-        pos = QPointF(
-            a.x() + (b.x() - a.x()) * fraction,
-            a.y() + (b.y() - a.y()) * fraction,
-        )
-        point = self.add_point(pos)
+        point = self.add_point(position)
         point.set_anchor_line(line)
         self.recompute_intersections()
         self.commit_undo()
         return point
+
+    def position_along_line(
+        self, line: LineItem, fraction: float
+    ) -> QPointF | None:
+        """Where a fraction along a line's visible span falls.
+
+        The exact inverse of :meth:`fraction_along_line`, and what both
+        :meth:`add_point_on_line` and :meth:`slide_point_to` place by, so a
+        position read off the canvas and a position named in a command mean
+        the same thing.
+
+        Args:
+            line: The line to measure along.
+            fraction: 0 is the span's left-hand end, 1 its right-hand end
+                (top and bottom when the line is upright). Outside 0-1 is
+                allowed — the canvas is bigger than the frame.
+
+        Returns:
+            The scene position, or None if the line doesn't cross the frame.
+        """
+        span = line.span_in_rect(self.reference_rect())
+        if span is None:
+            return None
+        start, end = span
+        return QPointF(
+            start.x() + (end.x() - start.x()) * fraction,
+            start.y() + (end.y() - start.y()) * fraction,
+        )
+
+    def slide_point_to(self, point: PointItem, fraction: float) -> bool:
+        """Slide a point along the line it is snapped to.
+
+        The point keeps its anchor — this is the drag a user does with the
+        mouse, written as an instruction. What moves is the anchor's
+        parameter; the point then follows it, and everything computed from
+        the point follows in turn.
+
+        Args:
+            point: A point snapped to a line.
+            fraction: Where along the line's span to put it, measured as
+                :meth:`position_along_line` does.
+
+        Returns:
+            Whether it moved; False when the point slides on nothing, when it
+                is **locked** to its line, or when that line doesn't cross
+                the frame to measure a fraction along.
+        """
+        line = point.slides_on_line()
+        if line is None or point.anchor().locked:
+            # Locking says "hold it here"; a command that moved it anyway
+            # would make the lock a suggestion.
+            return False
+        position = self.position_along_line(line, fraction)
+        if position is None:
+            return False
+        point.anchor().t = line.param_of(position)
+        point.sync_to_anchor()
+        self.commit_undo()
+        return True
 
     # -- Points at infinity ------------------------------------------------
 

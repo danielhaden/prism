@@ -94,6 +94,7 @@ class CommandInterpreter:
             "clear": self._form_clear,
             "add-line": self._form_add_line,
             "point": self._form_point,
+            "move-snapped-point": self._form_move_snapped_point,
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
@@ -485,6 +486,9 @@ class CommandInterpreter:
             "  (point <line> <line>)       the point where two lines meet\n"
             "  (point <line> infinity)     the point at infinity it runs to;\n"
             "                              parallel lines all share one\n"
+            "  (move-snapped-point <point> <fraction>)\n"
+            "                              slide a point along the line it is\n"
+            "                              snapped to; what dragging it does\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
             "  (clear)                     empty the canvas; defined names and\n"
@@ -756,6 +760,48 @@ class CommandInterpreter:
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
+        return point
+
+    def _form_move_snapped_point(self, args) -> PointItem:
+        """``(move-snapped-point <point> <fraction>)`` — slide it along its line.
+
+        What dragging a snapped point does, said as an instruction, so a
+        figure arrived at by noodling can be replayed. The point keeps its
+        anchor: this moves it *along* the line, never off it.
+
+        Args:
+            args: The point, and how far along its line to put it.
+
+        Returns:
+            The point, so it composes like the other forms.
+        """
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (move-snapped-point <point> <fraction>)\n"
+                "  slides a point along the line it is snapped to\n"
+                "  0 = the line's left-hand end, 1 = its right-hand end"
+            )
+        point = self._as_point(args[0])
+        line = point.slides_on_line()
+        if line is None:
+            raise CommandError(
+                f"{self._point_name(point)} isn't snapped to a line, so "
+                "there is nothing to slide it along. Snap Point to Line "
+                "puts an existing point on one; (point <line> <fraction>) "
+                "makes a new one already on it."
+            )
+        if point.anchor().locked:
+            raise CommandError(
+                f"{self._point_name(point)} is locked to "
+                f"{self._line_name(line)}, so it is held where it is. "
+                "Unlock From Line on its menu lets it slide again."
+            )
+        fraction = self._as_canvas_fraction(args[1])
+        if not self.scene.slide_point_to(point, fraction):
+            raise CommandError(
+                f"{self._line_name(line)} doesn't cross the canvas, so there "
+                "is no span to measure a fraction along."
+            )
         return point
 
     def _point_at_infinity(self, line: LineItem) -> PointItem:

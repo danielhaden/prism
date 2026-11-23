@@ -286,6 +286,36 @@ ideal point of.
     that already share the point when there are any, and reads **Show Point at
     Infinity** once this line has it.
 
+### `(move-snapped-point <point> <fraction>)`
+
+Slide a point along the line it is snapped to, and return it.
+
+```
+(move-snapped-point P1 1/2)     # halfway along its line
+(move-snapped-point A 0.8)      # by label
+```
+
+The fraction is measured exactly as
+[`(point <line> <fraction>)`](#point-line-fraction) measures it: `0` is the
+line's left-hand end where it crosses the reference frame, `1` its right-hand
+end. Values outside `0`–`1` are allowed — the canvas is bigger than the frame,
+and a point can be dragged past its edge.
+
+The point **keeps its anchor**: this moves it *along* the line, never off it.
+Everything built on the point follows, so a pencil pinned there swings round
+with it.
+
+This is what dragging the point does, written as an instruction — which is
+the point of it. A drag used to leave nothing behind; now letting go writes
+this command, so a figure you felt your way into can be replayed.
+
+It is refused for a point that isn't snapped to a line (there is nothing to
+slide it along — use **Snap Point to Line** first), and for one **locked** to
+its line, since locking says to hold it where it is.
+
+!!! tip "From the canvas"
+    Just drag the point. The command is written for you when you let go.
+
 ### `(label <element> <text>)`
 
 Name a point or a line. The label is drawn on the canvas beside it, and becomes
@@ -887,11 +917,29 @@ can work on the canvas and come away with the script for what you did.
 | Show N Hidden Points | `(show -all)` |
 | Show Segment Between Points Only | `(segment <line> <point> <point>)` |
 | Show Full Line | `(segment <line> -full)` |
+| *Dragging* a point snapped to a line | `(move-snapped-point <point> <fraction>)` |
 
-Some canvas commands have no console form yet and so write nothing: **Modify
-Display Properties…**, **Line Properties…**, **Define Visible Range…**, **Snap
-Point to Line**, **Lock to Line**, and **Pin Lines Through Point**. A script of
-a session that used those will be missing those steps.
+### Dragging writes it too
+
+Menu commands were the easy half. The way a figure actually gets made is by
+**moving things about** — and until now a drag left nothing behind, so you
+could noodle your way into a diagram, save it, and find the script rebuilt
+everything in its first position.
+
+A drag is now written down when you let go: one command, at the place it
+ended, not one per twitch of the mouse. Picking a point up and putting it back
+writes nothing.
+
+So far this covers a **point snapped to a line**. Its position is a single
+number — how far along the line it sits — which is exactly what the command
+takes. Dragging a free point, a label or a group still writes nothing; those
+have no command to their name yet, and Prism passes over what it can't say
+rather than guessing.
+
+Some canvas commands have no console form either, and so write nothing:
+**Modify Display Properties…**, **Line Properties…**, **Define Visible
+Range…**, **Snap Point to Line**, **Lock to Line**, and **Pin Lines Through
+Point**. A script of a session that used those will be missing those steps.
 
 !!! note "Ids shift"
     Commands are written with ids (`P1`, `L2`), and removing an element

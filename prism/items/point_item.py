@@ -474,6 +474,23 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         """
         return self._anchor is not None and self._anchor.kind == "infinity"
 
+    def slides_on_line(self) -> object | None:
+        """The line this point is snapped to and slides along, or None.
+
+        Like :meth:`is_meet`, a statement about what currently determines the
+        point rather than a kind of point: one carrying a
+        :class:`~prism.anchors.LineAnchor` is held to a line and free along
+        it. A locked anchor still answers with its line — it is the same
+        relation, just not free at the moment.
+
+        Returns:
+            The line, or None when nothing holds this point to one.
+        """
+        anchor = self._anchor
+        if anchor is None or anchor.kind != "line":
+            return None
+        return anchor.line
+
     def infinity_lines(self) -> list:
         """The parallel lines running to this ideal point, or an empty list."""
         return list(self._anchor.lines) if self.is_at_infinity() else []

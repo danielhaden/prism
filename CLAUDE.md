@@ -228,6 +228,33 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   adds an unattached point there, **Add Horizon** a horizontal
   orientation-locked line at the clicked height, and **Add Vertical** the
   same a quarter turn round at the clicked width (`add_vertical_at`).
+- **Dragging writes the script too** (`_log_drag`, called from
+  `end_item_drag`). Menu actions were the easy half; the way a figure is
+  actually made is by moving things, and a drag used to leave nothing behind
+  — you could noodle your way into a diagram, save it, and find the script
+  rebuilt everything in its first position. One command is written **when the
+  gesture ends**, from the `(item, position at the press)` pairs
+  `begin_item_drag` collected, not one per mouse-move; an item that ended
+  where it started writes nothing. `end_item_drag` clears `_drag_items`
+  *before* logging, so nothing the command sets off finds a drag apparently
+  still in flight. The re-run lands the item where it already is, so
+  `commit_undo`'s "nothing actually changed" check leaves a drag at **one**
+  undo step — measured.
+  **Only a point snapped to a line so far**
+  (`PointItem.slides_on_line()` → `(move-snapped-point <point> <fraction>)`):
+  its position is a single number, the fraction along its line, which is what
+  the command takes. A free point, a label's offset and a group have no
+  command to their name yet and are **passed over rather than guessed at** —
+  that is the next piece, and the goal is every canvas action logged.
+- `CanvasScene.slide_point_to(point, fraction)` moves the **anchor's
+  parameter**, not the point; the point follows through `sync_to_anchor`, and
+  `itemChange` notifies as usual so dependents come with it. It **honours a
+  locked `LineAnchor`** and returns False — locking says "hold it here", and
+  a command that moved it anyway would make the lock a suggestion. The form
+  refuses first, with the remedy (Unlock From Line) in the message.
+  `position_along_line()` is the exact inverse of `fraction_along_line()`,
+  shared with `add_point_on_line`, so a position read off the canvas and one
+  named in a command mean the same thing.
 - **Canvas actions should run as console commands.** `MainWindow` hands the
   scene `console.run_command` via `set_command_runner()`; an action calls
   `scene.run_as_command("(…)")`, which returns False when no runner is set so
@@ -322,6 +349,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
+  `(move-snapped-point <point> <fraction>)`,
   `(segment <line> <point> <point>)`, `(segment <line> -full)`,
   `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>
   <to> <step>)`, `(help)`.
