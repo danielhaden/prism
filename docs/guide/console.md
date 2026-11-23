@@ -286,6 +286,77 @@ ideal point of.
     that already share the point when there are any, and reads **Show Point at
     Infinity** once this line has it.
 
+### `(style "<script>")`
+
+Take the canvas's **default look** from a script of `(format …)` commands.
+
+```
+(style "~/prism/styles/faint.prism")   # by path
+(style faint)                          # by name, from your scripts folder
+(style)                                # which one is attached?
+(style -reapply)                       # run it again now
+(style -none)                          # stop taking a look from it
+```
+
+A style is an ordinary `.prism` script that happens to hold only formatting:
+
+```
+; faint.prism — everything pale and thin
+(format (points) 1 #888888 4)
+(format (lines) 0.5 #cccccc)
+```
+
+So there is nothing new to learn and nothing new to manage. You edit a style
+in the Scripts panel, open it from the **File** menu, keep it beside your
+drawings or in a repository, and send it to someone.
+
+**The canvas stores the path, not the contents.** Several drawings can take
+their look from one script, and editing that script reaches all of them. The
+script is re-read whenever the style is asserted, so a change shows up as soon
+as you draw anything.
+
+**It is a default, not a one-off.** The style is re-asserted as each action
+finishes, so whatever you draw next is already wearing it — including
+[crossings](#point-line-line), which are rebuilt constantly and have never
+kept formatting of their own through a reload. Under a style they come back
+right every time.
+
+#### Picking something out
+
+Formatting an element **directly** makes it yours, and the style stops
+touching it:
+
+```
+(style faint)                 # the whole figure goes pale
+(format L3 2 red)             # L3 is yours now
+(add point 1/2 1/2)           # the style re-runs… and L3 stays red
+```
+
+That is what lets a figure be pale except for the one line the construction
+turns on. The same goes for the **Line Properties…** and **Modify Display
+Properties…** dialogs — choosing a look by hand is choosing it by hand,
+however you do it.
+
+To hand an element back, give it the plain look again:
+
+```
+(format L3 -default)          # back to default, and back under the style
+```
+
+Detaching a style leaves what is drawn as it is — a style is how things are
+dressed, not a costume whipped away. Only what comes next is left plain.
+
+!!! note "Points and lines today; planes when they arrive"
+    A style is whatever `(format …)` accepts, so it governs exactly the kinds
+    that command knows. Planes aren't in Prism yet; when they are, a style
+    will reach them without any change to this mechanism.
+
+!!! tip "From the canvas"
+    **File → Attach Style…** picks the script, and names it afterwards
+    (*Change Style… (faint)*); **Detach Style** stops it. Attaching runs as
+    `(style …)`, so the look a figure was drawn under is part of the script
+    that rebuilds it.
+
 ### `(add-pencil <point> <count>)`
 
 Draw `count` lines through a point, evenly spaced, and return them.
@@ -444,6 +515,11 @@ Change how a line or a point is drawn.
 **Size** is a line's thickness or a point's radius — the one measure each kind
 has. Both are in **screen pixels** and stay that size at any zoom. Colour is a
 hex code or any name Qt knows.
+
+`(format <element> -default)` puts an element back to the plain built-in
+look — and back under the canvas's [style](#style-script), if one is
+attached, since formatting something directly is what took it out from under
+one.
 
 The **last argument** belongs to whichever kind you are formatting: for lines
 a dash style — `solid`, `dashed`, `dotted`, `dash-dot`, `dash-dot-dot` — and
@@ -949,6 +1025,7 @@ can work on the canvas and come away with the script for what you did.
 | Add Point at Intersection | `(point <line> <line>)` |
 | Add Line Through Point | `(add-line 45 (list <point>))` |
 | Add Pencil… | `(add-pencil <point> <count>)` |
+| Attach Style… / Detach Style | `(style "<script>")` / `(style -none)` |
 | Add Lines Through Point… | one `(add-line <angle> (list <point>))` per ray |
 | Add Line Through Points | `(add-line (list <point>) (list <point>))` |
 | Add / Edit / Remove Label | `(label <element> "…")` |

@@ -8,6 +8,7 @@ endpoints follow and intersections recompute.
 """
 
 import math
+import os
 from typing import Callable
 
 import shiboken6
@@ -147,6 +148,20 @@ class CanvasScene(QGraphicsScene):
         self._point_style: dict | None = None
         # Set by MainWindow: lets canvas actions run as console commands.
         self._run_command = None
+        # The canvas's style: a script of (format …) commands, kept by path
+        # so several drawings can share one and editing it reaches them all.
+        self._style_path: str | None = None
+        self._style_commands: list = []
+        # How many style passes are running. A count rather than a flag, so a
+        # nested pass (a default applied to a new point inside one) can't
+        # clear it on the way out.
+        self._styling_depth = 0
+        # The creation number the style was last asserted at; nothing new has
+        # been drawn while it still matches, so there is nothing to dress.
+        self._styled_mark = -1
+        # Made on first use; a style's commands run through this, not the
+        # console's, so they are neither echoed nor recorded into a script.
+        self._style_interpreter = None
 
     # -- Undo / redo -------------------------------------------------------
 
@@ -218,9 +233,21 @@ class CanvasScene(QGraphicsScene):
         self._emit_history()
 
     def commit_undo(self) -> None:
-        """Record the current state as a new undo step (call after an action)."""
+        """Record the current state as a new undo step (call after an action).
+
+        The canvas's style is asserted **first**, so what the action drew is
+        already dressed when the snapshot is taken — undo then steps between
+        states that each look right, rather than flickering through a pass of
+        restyling.
+        """
         if self._restoring:
             return
+        if self._styling_depth:
+            # A style pass is not an action. Its (format …) commands each
+            # ask for an undo step; the action that set the pass running
+            # takes one snapshot afterwards, which is the right granularity.
+            return
+        self.settle_style()
         from prism.scene_state import capture
 
         state = capture(self)
@@ -632,9 +659,17 @@ class CanvasScene(QGraphicsScene):
         return point
 
     def _apply_default_point_style(self, point: PointItem) -> None:
-        """Give a newly created point the scene's display defaults, if set."""
+        """Give a newly created point the scene's display defaults, if set.
+
+        Applied *as a default*, so the point is not thereby marked as
+        formatted by hand — it has not been; nobody has looked at it yet.
+        """
         if self._point_style:
-            point.set_display(**self._point_style)
+            self._styling_depth += 1
+            try:
+                point.set_display(**self._point_style)
+            finally:
+                self._styling_depth -= 1
 
     def apply_point_style_to_all(self, style: dict) -> int:
         """Apply display properties to every point, and to points created later.
@@ -1091,6 +1126,149 @@ class CanvasScene(QGraphicsScene):
         """
         rect = self.reference_rect()
         return self._add_vertical_at_x(rect.left() + fraction * rect.width())
+
+    # -- The canvas's style ------------------------------------------------
+
+    def applying_default_style(self) -> bool:
+        """Whether a style (or a creation default) is being applied just now.
+
+        Items ask this before deciding that being formatted makes them the
+        user's own. A style dressing the canvas is not somebody choosing how
+        one element should look.
+        """
+        return self._styling_depth > 0
+
+    def style_path(self) -> str | None:
+        """The script this canvas takes its look from, or None."""
+        return self._style_path
+
+    def style_commands(self) -> list:
+        """The style's commands as last read, for reporting and persistence."""
+        return list(self._style_commands)
+
+    def attach_style(self, path: str) -> int:
+        """Take this canvas's default look from a script of ``(format …)``.
+
+        The **path** is kept, not the contents: edit the script and every
+        drawing that points at it follows. Re-read whenever the style is
+        asserted, so a change shows up without re-attaching.
+
+        Args:
+            path: The style script.
+
+        Returns:
+            How many commands it holds.
+
+        Raises:
+            OSError: If the script can't be read.
+        """
+        commands = self._read_style(path)
+        self._style_path = os.path.abspath(path)
+        self._style_commands = commands
+        self._styled_mark = -1
+        self.apply_style()
+        return len(commands)
+
+    def detach_style(self) -> bool:
+        """Stop taking a default look from a script.
+
+        What is already drawn keeps the look it has — a style is how things
+        are dressed, not a costume whipped away. Only what comes next is
+        untouched by it.
+
+        Returns:
+            Whether there had been one.
+        """
+        had = self._style_path is not None
+        self._style_path = None
+        self._style_commands = []
+        self._styled_mark = -1
+        return had
+
+    def restore_style(self, path: str | None) -> None:
+        """Put the attachment back from a snapshot, **without running it**.
+
+        A snapshot already holds every element's look, so replaying it is
+        enough to make the canvas right: running the style again would read
+        a file once per undo step for no gain. The mark is set to the
+        current creation count so :meth:`settle_style` agrees nothing is
+        owed until something new is drawn.
+
+        Args:
+            path: The style script, or None for no style.
+        """
+        self._style_path = path or None
+        self._style_commands = []  # re-read whenever it is next asserted
+        self._styled_mark = self._seq_counter
+
+    @staticmethod
+    def _read_style(path: str) -> list:
+        """The (format …) lines of a style script, remarks and blanks dropped.
+
+        Args:
+            path: The script to read.
+
+        Returns:
+            The commands, in order.
+        """
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        return [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.strip().startswith(";")
+        ]
+
+    def apply_style(self) -> bool:
+        """Run the style over the canvas, dressing anything not spoken for.
+
+        The script is **re-read** each time, so editing it and drawing
+        anything is enough to see the change. An element formatted by hand is
+        passed over — :meth:`applying_default_style` is how it knows.
+
+        Commands run through an interpreter of the canvas's own, not the
+        console's: a style is self-contained, and running it through the
+        console would echo it and record it into the next script you saved.
+
+        Returns:
+            Whether a style ran.
+        """
+        if self._style_path is None:
+            return False
+        try:
+            self._style_commands = self._read_style(self._style_path)
+        except OSError as exc:
+            self.statusMessage.emit(
+                f"Couldn't read the style {self._style_path}: {exc}"
+            )
+            return False
+        if self._style_interpreter is None:
+            from prism.commands import CommandInterpreter
+
+            self._style_interpreter = CommandInterpreter(self)
+        self._styling_depth += 1
+        try:
+            for command in self._style_commands:
+                output, good = self._style_interpreter.run(command)
+                if not good:
+                    self.statusMessage.emit(f"Style: {output}")
+        finally:
+            self._styling_depth -= 1
+        self._styled_mark = self._seq_counter
+        return True
+
+    def settle_style(self) -> None:
+        """Re-assert the style if anything has been drawn since it last ran.
+
+        Called as an action finishes, which is often; the creation counter is
+        what keeps that cheap. A drag, a relabelling, a format — none of them
+        make anything, so none of them set the style running over the whole
+        canvas again.
+        """
+        if self._style_path is None or self._styling_depth:
+            return
+        if self._seq_counter != self._styled_mark:
+            self.apply_style()
 
     def set_command_runner(self, runner: Callable | None) -> None:
         """Let canvas actions go through the console.

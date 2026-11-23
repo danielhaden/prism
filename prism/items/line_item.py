@@ -90,10 +90,18 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
     #: line translated from another — are parallel to the bit.
     PARALLEL_EPS = 1e-6
 
+    #: How a line is drawn before anyone says otherwise.
+    DEFAULT_COLOR = "#333333"
+    DEFAULT_WIDTH = 2.0
+
+    #: Whether this line's look was chosen directly rather than by a style.
+    #: A class attribute, so it is there however early Qt calls back in.
+    _styled_by_hand = False
+
     def __init__(self, start: QPointF, end: QPointF):
         super().__init__(QLineF(start, end))
 
-        pen = QPen(QColor("#333333"), 2)
+        pen = QPen(QColor(self.DEFAULT_COLOR), self.DEFAULT_WIDTH)
         pen.setCosmetic(True)  # constant on-screen width regardless of zoom
         self.setPen(pen)
 
@@ -352,6 +360,12 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
             width: Thickness in screen pixels (the pen is cosmetic), or None.
             style: A Qt pen style, or None.
         """
+        scene = self.scene()
+        as_default = scene is not None and scene.applying_default_style()
+        if as_default and self._styled_by_hand:
+            return  # formatted by hand; a style keeps its hands off it
+        if not as_default:
+            self._styled_by_hand = True
         pen = QPen(self.pen())
         if color is not None:
             pen.setColor(color)
@@ -362,6 +376,32 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         pen.setCosmetic(True)  # keep thickness constant on screen
         self.setPen(pen)
         self.update()
+
+    def reset_style(self) -> None:
+        """Go back to how a line is drawn before anyone says otherwise.
+
+        Also hands the line back to the canvas's style: it is no longer
+        yours, so the next pass may dress it again.
+        """
+        self._styled_by_hand = False
+        pen = QPen(QColor(self.DEFAULT_COLOR), self.DEFAULT_WIDTH)
+        pen.setStyle(Qt.SolidLine)
+        pen.setCosmetic(True)
+        self.setPen(pen)
+        self.update()
+
+    def is_styled_by_hand(self) -> bool:
+        """Whether someone formatted this line directly.
+
+        A line that was is left alone by the canvas's style — you picked it
+        out on purpose, and a style re-asserting itself over the top would
+        undo that every time anything was drawn.
+        """
+        return self._styled_by_hand
+
+    def set_styled_by_hand(self, owned: bool) -> None:
+        """Say whether this line's look is the user's own (for persistence)."""
+        self._styled_by_hand = bool(owned)
 
     def open_line_style_dialog(self) -> None:
         from prism.line_dialog import LineStyleDialog

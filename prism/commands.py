@@ -13,6 +13,8 @@ real elements. Forms return the element they create, which is what allows the
 nesting above.
 """
 
+import os
+
 import shiboken6
 
 from PySide6.QtCore import Qt
@@ -96,6 +98,7 @@ class CommandInterpreter:
             "point": self._form_point,
             "move-snapped-point": self._form_move_snapped_point,
             "add-pencil": self._form_add_pencil,
+            "style": self._form_style,
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
@@ -487,6 +490,9 @@ class CommandInterpreter:
             "  (point <line> <line>)       the point where two lines meet\n"
             "  (point <line> infinity)     the point at infinity it runs to;\n"
             "                              parallel lines all share one\n"
+            "  (style \"<script>\")         take the canvas's default look\n"
+            "                              from a script of (format …);\n"
+            "                              (style -none) to stop\n"
             "  (add-pencil <point> <count>)\n"
             "                              count lines through the point,\n"
             "                              evenly spaced and pinned to it\n"
@@ -1459,6 +1465,10 @@ class CommandInterpreter:
         Returns:
             What was formatted.
         """
+        if len(args) == 2 and str(self._value(args[1])).lower() in (
+            "-default", "-reset"
+        ):
+            return self._format_default(args[0])
         if not 2 <= len(args) <= 4:
             raise CommandError(_FORMAT_USAGE)
         size = self._as_number(args[1], "a thickness or radius")
@@ -1497,6 +1507,114 @@ class CommandInterpreter:
         self.scene.commit_undo()
         described = ", ".join(self._element_name(item) for item in elements)
         return f"Formatted {described}"
+
+    def _format_default(self, argument) -> str:
+        """``(format <element> -default)`` — give an element back to the style.
+
+        Formatting something directly makes it **yours**, and the canvas's
+        style stops dressing it. This hands it back: the built-in look
+        returns, and the next style pass may dress it again.
+
+        Args:
+            argument: An element, or a list of them.
+
+        Returns:
+            What was reset.
+        """
+        elements = self._flatten(
+            [argument], (PointItem, LineItem), "point or line"
+        )
+        if not elements:
+            raise CommandError("(format … -default) needs a point or a line.")
+        for item in elements:
+            if isinstance(item, LineItem):
+                item.reset_style()
+            else:
+                item.reset_display()
+        self.scene.apply_style()
+        self.scene.commit_undo()
+        described = ", ".join(self._element_name(item) for item in elements)
+        return f"Reset {described} to the default look"
+
+    def _form_style(self, args) -> str:
+        """``(style "<script>")`` — take the canvas's default look from a script.
+
+        The script is an ordinary one holding ``(format …)`` commands. Its
+        **path** is kept, not its contents, so editing it reaches every
+        drawing that points at it. It is re-read and re-asserted whenever
+        anything is drawn, which is what makes it a default rather than a
+        one-off.
+
+        Args:
+            args: The script, or a flag — ``-none`` to detach, ``-reapply``
+                to run it again now.
+
+        Returns:
+            What happened.
+        """
+        if not args:
+            path = self.scene.style_path()
+            if path is None:
+                return (
+                    "No style attached. (style \"<script>\") takes the "
+                    "canvas's look from a script of (format …) commands."
+                )
+            count = len(self.scene.style_commands())
+            return f"Style: {path} ({count} command(s))"
+        flag = str(self._value(args[0])).lower()
+        if flag in ("-none", "-detach", "-off"):
+            if not self.scene.detach_style():
+                return "No style was attached."
+            self.scene.commit_undo()
+            return (
+                "Style detached. What is drawn keeps the look it has; only "
+                "what comes next is left plain."
+            )
+        if flag == "-reapply":
+            if not self.scene.apply_style():
+                raise CommandError("No style attached to re-apply.")
+            self.scene.commit_undo()
+            return "Style re-applied."
+        if len(args) != 1:
+            raise CommandError(_STYLE_USAGE)
+        path = self._as_style_path(args[0])
+        try:
+            count = self.scene.attach_style(path)
+        except OSError as exc:
+            raise CommandError(f"Couldn't read that style: {exc}") from exc
+        self.scene.commit_undo()
+        if not count:
+            return f"Style {path} attached, but it holds no commands."
+        return f"Style {path} attached ({count} command(s))."
+
+    def _as_style_path(self, argument) -> str:
+        """Find a style script: a path as given, or a name in the scripts folder.
+
+        Args:
+            argument: What the user wrote.
+
+        Returns:
+            An existing file's path.
+        """
+        from prism.settings import SCRIPT_SUFFIX, scripts_dir
+
+        raw = str(self._value(argument)).strip()
+        if not raw:
+            raise CommandError(_STYLE_USAGE)
+        candidates = [os.path.expanduser(raw)]
+        if not raw.endswith(SCRIPT_SUFFIX):
+            candidates.append(os.path.expanduser(raw) + SCRIPT_SUFFIX)
+        folder = scripts_dir()
+        candidates.append(os.path.join(folder, raw))
+        if not raw.endswith(SCRIPT_SUFFIX):
+            candidates.append(os.path.join(folder, raw + SCRIPT_SUFFIX))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        raise CommandError(
+            f"No style script called {raw!r}. Give a path, or the name of "
+            f"one in your scripts folder ({folder})."
+        )
 
     def _as_color(self, argument) -> QColor:
         """Read a colour: ``#rrggbb``, or a name Qt knows."""
@@ -1955,7 +2073,18 @@ _FORMAT_USAGE = (
     "  colour: a hex code like #d3d3d3, or a name like grey\n"
     "  last:   a dash style for lines - solid, dashed, dotted, dash-dot,\n"
     "          dash-dot-dot - or a glow radius for points\n"
-    "  A list works wherever one element does."
+    "  A list works wherever one element does.\n"
+    "   or: (format <element> -default)          back to the plain look,\n"
+    "                                            and back under the style"
+)
+
+_STYLE_USAGE = (
+    'Usage: (style "<script>")   take the canvas\'s look from a script of\n'
+    "                            (format …) commands; a path, or the name\n"
+    "                            of one in your scripts folder\n"
+    "   or: (style)              say which style is attached\n"
+    "   or: (style -reapply)     run it again now\n"
+    "   or: (style -none)        stop taking a default look from it"
 )
 
 

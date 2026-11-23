@@ -144,6 +144,7 @@ def capture(scene) -> dict:
                 "label": _capture_label(point),
                 "anchor": anchor,
                 "shown": point.is_shown(),
+                "own_style": point.is_styled_by_hand(),
             }
         )
 
@@ -182,6 +183,7 @@ def capture(scene) -> dict:
                 "range": visible_range,
                 "locked": line.is_orientation_locked(),
                 "label": _capture_label(line),
+                "own_style": line.is_styled_by_hand(),
             }
         )
 
@@ -221,6 +223,9 @@ def capture(scene) -> dict:
         "groups": groups,
         "crossings": crossing_labels,
         "point_style": _capture_point_style(getattr(scene, "_point_style", None)),
+        # The canvas's style, by path: the script is the shared thing, and
+        # copying its contents in would fork it per drawing.
+        "style": getattr(scene, "_style_path", None),
     }
 
 
@@ -242,6 +247,10 @@ def restore(scene, state: dict) -> None:
         )
         _restore_label(point, data["label"])
         point.set_shown(data.get("shown", True))
+        # set_display above marks a point as the user's own, which is right
+        # when someone formats one and wrong when we are replaying what was
+        # stored; the snapshot knows which this was.
+        point.set_styled_by_hand(data.get("own_style", False))
         points.append(point)
 
     lines = []
@@ -254,6 +263,7 @@ def restore(scene, state: dict) -> None:
         line.setPen(pen)
         line.set_orientation_locked(data.get("locked", False))
         _restore_label(line, data["label"])
+        line.set_styled_by_hand(data.get("own_style", False))
         lines.append(line)
 
     # Wire relationships once both sides exist.
@@ -286,6 +296,10 @@ def restore(scene, state: dict) -> None:
             group.addToGroup(points[index] if kind == "p" else lines[index])
 
     scene._point_style = _restore_point_style(state.get("point_style"))
+    # The attachment comes back; the look does not need re-running, since
+    # every element's own look was stored above.
+    if hasattr(scene, "restore_style"):
+        scene.restore_style(state.get("style"))
     scene.recompute_intersections()
     _restore_crossing_labels(scene, lines, state.get("crossings", []))
     # Meets exist only now, so relationships naming one are wired here. Doing

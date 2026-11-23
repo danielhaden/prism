@@ -367,7 +367,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
-  `(add-pencil <point> <count>)`,
+  `(add-pencil <point> <count>)`, `(style "<script>")`,
+  `(format <element> -default)`,
   `(move-snapped-point <point> <fraction>)`,
   `(segment <line> <point> <point>)`, `(segment <line> -full)`,
   `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>
@@ -515,6 +516,60 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   it and opens it in the editor, so what you just recorded is there to read
   and run again. It used to carry nothing and refresh the list.
 - `settings.list_scripts()` is **gone** — nothing lists a folder any more.
+
+## The canvas's style
+
+- **A style is an ordinary `.prism` script of `(format …)` commands**, and
+  the canvas keeps its **path**, not its contents (`scene._style_path`,
+  persisted under `"style"`). That is the whole of what makes it reusable:
+  several drawings share one script, and editing the script reaches them
+  all. Nothing new to open, save or manage — it is a script, so the File
+  menu, the Scripts panel and the scripts folder already handle it.
+- **It is a default, not a one-off.** `settle_style()` runs from the top of
+  `commit_undo()`, *before* the snapshot, so what an action drew is already
+  dressed when the state is captured and undo steps between states that each
+  look right. The guard that keeps this cheap is `_styled_mark` against
+  `_seq_counter`: nothing has been **created** since the style last ran, so
+  there is nothing to dress — which is why a drag, a relabel or a format
+  doesn't set a sweep running. Measured at ~8% on a 77-element build.
+- **A style pass takes no undo steps.** `_form_format` commits one per
+  command, so `commit_undo()` returns early while `_styling_depth` is
+  non-zero; the action that set the pass going takes the one snapshot.
+- **Style commands run through the scene's own `CommandInterpreter`**, made
+  on first use, *not* the console's. Through the console they would be
+  echoed on every action and recorded into the next script saved. It also
+  keeps a style self-contained: it cannot see the console's `(define …)`
+  names, and the scene stays usable headless.
+- **Formatting by hand wins, and keeps winning.** `PointItem.set_display`
+  and `LineItem.set_style` each ask `scene.applying_default_style()`: if a
+  style is being applied and the item `is_styled_by_hand()`, they **return
+  without doing anything**; if it is *not* being applied, they set that flag.
+  One rule in one place per kind, so it catches the command, both display
+  dialogs and anything added later. `(format <element> -default)` →
+  `reset_display()` / `reset_style()` hands it back.
+  `_styling_depth` is a **count, not a flag**: a creation default applied
+  inside a style pass would otherwise clear it on the way out.
+- **Persisted per element** as `own_style`, defaulting to **False** when
+  absent — a drawing written before styles was drawn plain, and reading its
+  elements as "the user's own" would leave a newly attached style with
+  nothing it was allowed to touch.
+- `restore_style()` puts the attachment back **without running it**: a
+  snapshot already holds every element's look, so re-reading the file once
+  per undo step would buy nothing. `MainWindow.__init__` calls
+  `apply_style()` once after `_restore_drawing()`, since the script may have
+  been edited since the drawing was saved.
+- **This closes the "a crossing's formatting does not persist" gap** for
+  anything a style covers: markers are recomputed and then dressed afresh
+  every time. A crossing formatted *by hand* still doesn't survive a reload —
+  `capture()` stores only points with no anchor — which is unchanged.
+- **Planes come free.** A style is whatever `(format …)` accepts, so it
+  governs exactly the kinds that command knows. When planes land, extending
+  `_form_format` (and adding a `(planes)` enumerator) reaches styles with no
+  change here.
+- The older `scene._point_style` ("apply to all" in the point dialog, a
+  default for points made later) still works and is applied *as a default*,
+  so it does not mark a new point as the user's own. A style asserted
+  afterwards wins over it.
 
 ## Panels
 

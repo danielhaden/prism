@@ -31,6 +31,9 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
 
     RADIUS = 1.0
     DEFAULT_COLOR = "#000000"
+    #: Whether this point's look was chosen directly rather than by a style.
+    #: A class attribute, so it is there however early Qt calls back in.
+    _styled_by_hand = False
     DEFAULT_GLOW_RADIUS = 7.0
     DEFAULT_GLOW_COLOR = "#fafafa"  # matches the canvas background
 
@@ -98,6 +101,12 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         self, radius=None, color=None, glow_radius=None, glow_color=None
     ) -> None:
         """Update any of the point's display properties."""
+        scene = self.scene()
+        as_default = scene is not None and scene.applying_default_style()
+        if as_default and self._styled_by_hand:
+            return  # formatted by hand; a style keeps its hands off it
+        if not as_default:
+            self._styled_by_hand = True
         self.prepareGeometryChange()
         if radius is not None:
             self._radius = float(radius)
@@ -111,6 +120,38 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if glow_color is not None:
             self._glow_color = QColor(glow_color)
         self.update()
+
+    def reset_display(self) -> None:
+        """Go back to how a point is drawn before anyone says otherwise.
+
+        Also hands the point back to the canvas's style: it is no longer
+        yours, so the next pass may dress it again.
+        """
+        self._styled_by_hand = False
+        self.prepareGeometryChange()
+        self._radius = float(self.RADIUS)
+        self.setRect(
+            -self._radius, -self._radius, 2 * self._radius, 2 * self._radius
+        )
+        color = QColor(self.DEFAULT_COLOR)
+        self.setBrush(QBrush(color))
+        self.setPen(QPen(color.darker(180), 1.5))
+        self._glow_radius = float(self.DEFAULT_GLOW_RADIUS)
+        self._glow_color = QColor(self.DEFAULT_GLOW_COLOR)
+        self.update()
+
+    def is_styled_by_hand(self) -> bool:
+        """Whether someone formatted this point directly.
+
+        A point that was is left alone by the canvas's style — you picked it
+        out on purpose, and a style re-asserting itself over the top would
+        undo that every time anything was drawn.
+        """
+        return self._styled_by_hand
+
+    def set_styled_by_hand(self, owned: bool) -> None:
+        """Say whether this point's look is the user's own (for persistence)."""
+        self._styled_by_hand = bool(owned)
 
     # -- Geometry ----------------------------------------------------------
 

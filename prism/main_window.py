@@ -89,6 +89,10 @@ class MainWindow(QMainWindow):
         # Bring back last session's drawing before the first snapshot, so undo
         # starts from what's on screen rather than from an empty canvas.
         self._restore_drawing()
+        # The drawing stores each element's look, so it comes back right —
+        # but the style script may have been edited since it was saved, and
+        # opening is the moment to pick that up.
+        self.scene.apply_style()
         self.scene.init_history()
         self._select_tool(Tool.SELECT)
         # Snapshot the built-in layout before any saved one lands on top of it,
@@ -284,6 +288,18 @@ class MainWindow(QMainWindow):
         )
         self.adopt_folder_action.triggered.connect(self._adopt_current_folder)
 
+        self.attach_style_action = QAction("Attach Style…", self)
+        self.attach_style_action.setToolTip(
+            "Take the canvas's default look from a script of (format …) commands"
+        )
+        self.attach_style_action.triggered.connect(self._attach_style)
+
+        self.detach_style_action = QAction("Detach Style", self)
+        self.detach_style_action.setToolTip(
+            "Stop taking a default look from a script"
+        )
+        self.detach_style_action.triggered.connect(self._detach_style)
+
     # -- UI construction ---------------------------------------------------
 
     def _build_toolbar(self) -> None:
@@ -318,6 +334,9 @@ class MainWindow(QMainWindow):
         self._file_menu.addSeparator()
         self._file_menu.addAction(self.default_folder_action)
         self._file_menu.addAction(self.adopt_folder_action)
+        self._file_menu.addSeparator()
+        self._file_menu.addAction(self.attach_style_action)
+        self._file_menu.addAction(self.detach_style_action)
         # What these offer depends on the open script and on what is on disk,
         # neither of which announces itself, so the menu settles its own
         # contents as it opens rather than being kept in step from afar.
@@ -394,6 +413,13 @@ class MainWindow(QMainWindow):
             os.path.dirname(open_path) != os.path.abspath(scripts_dir())
         )
         self.adopt_folder_action.setEnabled(elsewhere and not fixed)
+        attached = self.scene.style_path()
+        self.attach_style_action.setText(
+            f"Change Style… ({os.path.basename(attached)})"
+            if attached
+            else "Attach Style…"
+        )
+        self.detach_style_action.setEnabled(attached is not None)
         self._rebuild_recent_menu()
 
     def _rebuild_recent_menu(self) -> None:
@@ -532,6 +558,29 @@ class MainWindow(QMainWindow):
         """Bring the Scripts panel out from behind whichever tab is raised."""
         self.scripts.show()
         self.scripts.raise_()
+
+    def _attach_style(self) -> None:
+        """Choose the script the canvas takes its default look from."""
+        start = self.scene.style_path() or ensure_scripts_dir()
+        chosen, _ = QFileDialog.getOpenFileName(
+            self,
+            "Attach Style",
+            start,
+            f"Prism scripts (*{SCRIPT_SUFFIX});;All files (*)",
+        )
+        if not chosen:
+            return
+        # Through the console, so the style a figure was drawn under is part
+        # of the script that rebuilds it.
+        if not self.scene.run_as_command(f'(style "{chosen}")'):
+            try:
+                self.scene.attach_style(chosen)
+            except OSError as exc:
+                self.statusBar().showMessage(f"Couldn't read that style: {exc}", 6000)
+
+    def _detach_style(self) -> None:
+        if not self.scene.run_as_command("(style -none)"):
+            self.scene.detach_style()
 
     def _set_default_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
