@@ -3,7 +3,7 @@
 Prism is a **PySide6 desktop app for projective-geometry drawings**. The goal is
 to build complex projective constructions (pencils, complete quadrangles,
 harmonic nets, perspective figures) through *composition* — snapping, pinning,
-grouping, templates, and a scripting console. The long-term target is
+grouping, and a scripting console. The long-term target is
 reproducing dense harmonic-net drawings.
 
 Core philosophy: elements are **projective entities**. Lines are infinite by
@@ -42,9 +42,9 @@ is imposed *projectively* using the app's own elements.
 
 ```
 main.py → prism/app.py → prism/main_window.py (QMainWindow)
-  CanvasView (canvas/view.py)   — pan, wheel-zoom (capped), template drops
+  CanvasView (canvas/view.py)   — pan, wheel-zoom (capped)
   CanvasScene (canvas/scene.py) — the hub: owns geometry, propagates deps
-  Docks: LibraryPanel, ConsolePanel, ScriptsPanel, ElementsPanel
+  Docks: ConsolePanel, ScriptsPanel, ElementsPanel, BookPanel
 ```
 
 - **`CanvasScene`** coordinates everything: snapping, endpoint bindings, pivots
@@ -88,7 +88,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   "Snap Point to Line" tests. Grouping a crossing is allowed — a group moves
   its children, and a determined point simply stays where its lines put it.
   The meet test survives only where derivation genuinely matters: snapshots
-  and templates don't store meets (they are recomputed), `rm` hides rather
+  don't store meets (they are recomputed), `rm` hides rather
   than removes, and `(list)` describes one as `[meet of L1, L2, …]` — the
   relation, not a kind.
 - **An anchored point cannot be set loose.** There is no "Remove Anchor"
@@ -130,8 +130,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   run in dependency order (see **Propagation**), so what you build follows.
   Still excluded, deliberately: anchoring a meet to a line (its position is
   already determined — `is_determined()`), `rm` of a meet (it hides instead,
-  since the lines still meet), and storing meets in snapshots/templates
-  (they're recomputed). Grouping a meet **is** allowed as of stage 2.
+  since the lines still meet), and storing meets in snapshots (they're
+  recomputed). Grouping a meet **is** allowed as of stage 2.
 
 ### Lines (`LineItem`)
 
@@ -623,9 +623,6 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 
 ## Panels
 
-- **Library** (right): built-in templates (Triangle, Quadrilateral, Complete
-  Quadrangle, Projectivity) + user-saved; drag onto canvas; save selection;
-  right-click rename/delete; persisted via `prism/template_store.py`.
 - **Console** (bottom).
 - **Elements** (`prism/elements_panel.py`; left): a `QTreeWidget` of the whole
   canvas — Points, Lines, Groups, and the names bound with `(define …)` (read
@@ -644,7 +641,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`_seen_sections`). Its **objectName is still `SelectionPanel`**, which is
   what Qt saves dock layouts against — renaming it would strand saved
   layouts, so it stays. It replaced the old selection-only panel.
-- **Scripts** (right, tabbed with Library): an editor over **one script at a
+- **Scripts** (right, tabbed with the Book): an editor over **one script at a
   time**. It used to list the scripts folder above the editor; the list is
   gone and **the File menu opens a script instead** — a script is an ordinary
   file that may live anywhere, so a list of one folder could only ever show
@@ -675,7 +672,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   which writes the **exact path** the script was read from: deriving it from
   the display name would send a hand-named script like `net(1).prism` to
   `net1.prism` and leave the original behind.
-- **Book** (`prism/book_panel.py`; right, tabbed with Library/Scripts): a
+- **Book** (`prism/book_panel.py`; right, tabbed with Scripts): a
   `QPdfView` reader over a **shelf** of PDFs — Whicher's *Projective
   Geometry*, Coxeter's — with a dropdown at the top to pick between them and
   a **…** button for Add / Rename / Remove. Added from **Settings → Add
@@ -910,6 +907,23 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    marking crossings of a chosen set of lines, say.
 4. Save/load a drawing to a file (scene_state is most of the way there).
 5. Possibly: promote/detach UX, snapping toggles, coordinate readout.
+
+## Removed features
+
+- **The Library panel and templates are gone** (`library_panel.py`,
+  `templates.py`, `template_store.py`, and the view's drag-and-drop). The
+  console does the job better: a template was a frozen figure you dropped on
+  the canvas, while a script is one you can read, edit, parameterise and
+  replay, and **clicking already writes the script**. The built-ins it
+  carried all have console forms — `(draw-triangle …)`, `(add-line …)` for a
+  quadrilateral, `(add-pencil …)` for a projectivity.
+- `LAYOUT_VERSION` went to **2** for it: the right-hand tab group was
+  anchored on the Library and is anchored on Scripts now, so a layout saved
+  against the old group would restore with a tab that is not there.
+- A user's saved templates are left on disk at
+  `user_templates.json` in the app-data directory (the old
+  `PRISM_TEMPLATE_STORE` override pointed at it). Nothing reads it; it is
+  theirs to delete.
 
 ## Branch history (merged PRs → main)
 

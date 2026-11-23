@@ -22,7 +22,7 @@ class Anchor:
 
     #: Short tag identifying the anchor kind.
     kind = "anchor"
-    #: Whether a point holding this anchor should be persisted (undo/templates).
+    #: Whether a point holding this anchor should be persisted (undo, saving).
     persistent = False
 
     def position(self) -> QPointF | None:

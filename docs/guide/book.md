@@ -3,7 +3,7 @@
 Prism's constructions come out of books — Olive Whicher's *Projective
 Geometry: Creative Polarities in Space and Time*, Coxeter's *Projective
 Geometry* — so the app can keep them open beside the canvas. The **Book**
-panel is a PDF reader docked on the right, tabbed with the Library and
+panel is a PDF reader docked on the right, tabbed with the
 Scripts; toggle it from **View → Show Book**.
 
 ## The shelf

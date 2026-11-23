@@ -18,9 +18,9 @@ templating elements together.
 - **Projectivities (pencils)** — lines pinned through a common point that
   rotate about it.
 - **Automatic intersections** wherever visible lines cross.
-- **A template library** of built-in figures plus your own saved constructions,
-  inserted by drag-and-drop.
-- **A console** for inspecting and (increasingly) scripting the canvas.
+- **A console** that builds, inspects and scripts the canvas — every figure
+  you can click into being can be written down, saved as a script and
+  replayed.
 
 ## Where to go next
 

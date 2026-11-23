@@ -60,7 +60,6 @@ nav:
       - Tools & Canvas: guide/tools.md
       - Points & Lines: guide/points-and-lines.md
       - Projectivities & Pivots: guide/projectivities.md
-      - The Library: guide/library.md
       - The Console: guide/console.md
       - The Book: guide/book.md
   - Concepts:
@@ -71,6 +70,5 @@ nav:
       - Anchors: reference/anchors.md
       - Dependencies: reference/dependencies.md
       - Canvas: reference/canvas.md
-      - Templates: reference/templates.md
       - Console Commands: reference/commands.md
       - Application: reference/app.md

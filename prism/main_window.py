@@ -9,7 +9,6 @@ from PySide6.QtWidgets import QFileDialog, QMainWindow
 from prism.book_panel import BookPanel
 from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
-from prism.library_panel import LibraryPanel
 from prism.scripts_panel import ScriptsPanel
 from prism.elements_panel import ElementsPanel
 from prism.scene_state import capture, restore
@@ -37,7 +36,10 @@ from prism.tools import Tool
 class MainWindow(QMainWindow):
     #: Bumped when the set of docks changes enough that an older saved layout
     #: would restore badly; Qt then ignores states saved under a lower number.
-    LAYOUT_VERSION = 1
+    #: 2: the Library dock went, and the right-hand tab group is anchored on
+    #: Scripts instead — a layout saved against the old group would restore
+    #: with a tab that no longer exists.
+    LAYOUT_VERSION = 2
 
     #: Bumped when the saved-canvas format changes in a way that can't be
     #: read back; an older file is then ignored rather than half-restored.
@@ -52,9 +54,6 @@ class MainWindow(QMainWindow):
         self.view = CanvasView(self.scene, self)
         self.setCentralWidget(self.view)
 
-        self.library = LibraryPanel(self.scene, self)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.library)
-
         self.console = ConsolePanel(self.scene, self)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console)
         # Canvas actions with a console equivalent run as that command, so the
@@ -68,15 +67,14 @@ class MainWindow(QMainWindow):
 
         self.scripts = ScriptsPanel(self.console.run_script, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.scripts)
-        self.tabifyDockWidget(self.library, self.scripts)
         # Saving an untitled script needs the File menu's dialog, so the
         # panel's own Save button goes the same way as the menu command.
         self.scripts.set_save_handler(self._save_script)
 
         self.book = BookPanel(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.book)
-        self.tabifyDockWidget(self.library, self.book)
-        self.library.raise_()
+        self.tabifyDockWidget(self.scripts, self.book)
+        self.scripts.raise_()
         self.console.scriptSaved.connect(self._script_saved)
 
         self._tool_actions: dict[Tool, QAction] = {}
@@ -356,9 +354,6 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.fit_action)
         view_menu.addSeparator()
-        toggle_library = self.library.toggleViewAction()
-        toggle_library.setText("Show Library")
-        view_menu.addAction(toggle_library)
         toggle_console = self.console.toggleViewAction()
         toggle_console.setText("Show Console")
         view_menu.addAction(toggle_console)

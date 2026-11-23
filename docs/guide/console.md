@@ -1171,7 +1171,7 @@ than sitting there offering to open nothing.
 
 ### The Scripts panel
 
-**View → Show Scripts** opens a dock (tabbed with the Library) holding the
+**View → Show Scripts** opens a dock (tabbed with the Book) holding the
 **editor** for whichever script is open. Opening one raises the panel, so the
 File menu brings it forward for you.
 

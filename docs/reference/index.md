@@ -13,7 +13,7 @@ main.py  →  prism.app.run()  →  prism.main_window.MainWindow
         ┌────────────────────────────┼───────────────────────────┐
         │                            │                           │
   CanvasView (view)          CanvasScene (scene)          Dock panels
-  pan / zoom / drops     coordinates all geometry      Library, Console
+  pan and zoom           coordinates all geometry      Console, Scripts
                                      │
                  ┌───────────────────┼───────────────────┐
               PointItem           LineItem          IntersectionPointItem
@@ -26,8 +26,6 @@ main.py  →  prism.app.run()  →  prism.main_window.MainWindow
   bindings, pivots (pencils), and automatic intersections.
 - **Items** (`prism.items`) are the drawable objects. `PointItem` and
   `LineItem` mix in `Labelable` for right-click labels.
-- **Templates** (`prism.templates`) serialize/instantiate figures for the
-  Library; `prism.template_store` persists user templates.
 - **Commands** (`prism.commands`) back the console.
 
 ## Contributing docstrings
@@ -41,6 +39,5 @@ clarity. mkdocstrings renders them here automatically.
 - [Items](items.md) — points, lines, intersections, groups, labels
 - [Dependencies](dependencies.md) — what is computed from what
 - [Canvas](canvas.md) — the scene and view
-- [Templates](templates.md) — the Library's figures and persistence
 - [Console Commands](commands.md) — the CLI interpreter
 - [Application](app.md) — entry point, main window, tools

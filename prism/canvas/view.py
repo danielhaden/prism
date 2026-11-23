@@ -8,7 +8,6 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPolygonF
 from PySide6.QtWidgets import QGraphicsView
 
 from prism.items import PointItem
-from prism.templates import TEMPLATE_MIME, deserialize, instantiate
 from prism.tools import Tool
 
 
@@ -39,11 +38,15 @@ class CanvasView(QGraphicsView):
 
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.RubberBandDrag)
+        # QGraphicsView takes drops by default, which was for the
+        # Library's templates. Nothing drops onto the canvas now, and a
+        # view that says it accepts them just shows a drop cursor and
+        # swallows the gesture.
+        self.setAcceptDrops(False)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setBackgroundBrush(QColor("#fafafa"))
         self.setMouseTracking(True)
-        self.setAcceptDrops(True)
         # The off-screen markers live at the viewport edge, so a change
         # anywhere can alter them; repaint the lot rather than track it.
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -298,38 +301,6 @@ class CanvasView(QGraphicsView):
         else:
             # Disable rubber-band so drawing clicks aren't swallowed.
             self.setDragMode(QGraphicsView.NoDrag)
-
-    # -- Drag & drop (templates from the Library) -------------------------
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat(TEMPLATE_MIME):
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat(TEMPLATE_MIME):
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        mime = event.mimeData()
-        if mime.hasFormat(TEMPLATE_MIME):
-            template = deserialize(mime.data(TEMPLATE_MIME))
-            scene_pos = self.mapToScene(event.position().toPoint())
-            self.insert_template(template, scene_pos)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
-    def insert_template(self, template, scene_pos):
-        """Instantiate a template at a scene position (returns new items)."""
-        created = instantiate(self.scene(), template, scene_pos)
-        scene = self.scene()
-        if scene is not None and hasattr(scene, "commit_undo"):
-            scene.commit_undo()
-        return created
 
     # -- Zoom --------------------------------------------------------------
 
