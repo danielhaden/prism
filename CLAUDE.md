@@ -940,6 +940,36 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - QGraphicsItemGroup **clears/loses child registration** on ungroup — remove &
   re-add children so the scene re-registers them in its selection index.
 - Enum access differs by PySide version: `QLineF.IntersectionType.Bounded…`.
+- **A harness waits for a condition, never for a duration.** The drag
+  harness (`scratchpad/horizon_point.py`) used `qWait(30)` after `show()` and
+  `qWait(8)` between synthetic mouse moves, and failed twice in sweeps while
+  passing on either side — which reads as a regression in the one path that
+  has actually crashed the app, and isn't one. Its waits are conditions now:
+  `qWaitForWindowExposed`, then a predicate pumped to a ceiling that **exits
+  saying the harness couldn't set its scene up**, rather than failing a
+  behaviour check. The gesture is aimed from `centerOn(point)` instead of
+  from whatever scroll offset the view settled at, and every synthetic event
+  is flushed before the next is sent — which is also what makes the move
+  count exact, since Qt compresses mouse moves only while one is still
+  pending. With the slide pinned to the pixels dragged (108px across is
+  108/zoom scene units along a horizontal line), the whole outcome is a
+  number, so there is nothing left for the machine's mood to change.
+- **"The moves stopped arriving" means the grabber went invisible.** Qt
+  releases the mouse grab when the grabbing item stops being visible, so a
+  point that goes undefined or hidden mid-drag takes the rest of the gesture
+  with it: no further `drag_items`, no release, `_drag_items` left full and
+  nothing moved. That is exactly the signature the flaky sweeps recorded —
+  three checks failing but **not** "Qt's raw-pointer loop never ran", so
+  `returns` was empty rather than holding a `False` — and injecting
+  `set_shown(False)` part-way through a gesture reproduces it line for line.
+  The harness therefore watches `set_shown` / `set_position_undefined` on the
+  dragged point for the length of the gesture and prints the **stack that
+  made the change**. If it recurs with a stack inside Prism it is a real
+  defect — a drag that dies silently — not harness timing.
+- Keep a fault injection beside a harness that guards a crash
+  (`scratchpad/inject_hidden.py`, `inject_qt_loop.py`: the same file with the
+  bug put back). A harness that always passes is indistinguishable from one
+  that tests nothing, and these two are what prove the checks still bite.
 
 ## Next steps (deferred to future sessions)
 
