@@ -107,6 +107,10 @@ class CanvasScene(QGraphicsScene):
     #: the viewport (so their clipped ends are never visible).
     REFERENCE_SIZE = 1200.0
 
+    #: What a new point at infinity is called. Omega is the usual name for an
+    #: ideal point; a second one becomes Omega2, and so on.
+    INFINITY_LABEL = "Ω"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSceneRect(-2000, -2000, 4000, 4000)
@@ -718,6 +722,13 @@ class CanvasScene(QGraphicsScene):
             changed = existing.anchor().add_line(line)
             if changed:
                 existing.sync_to_anchor()
+            if not existing.label_text():
+                # Nameless: either from a drawing saved before these points
+                # came named, or because the label was taken off. Arrowheads
+                # alone don't say which point they run to, so give it one.
+                existing.set_label(self._next_infinity_label())
+                self._set_label_italic(existing, False)
+                changed = True
             # Asking for a hidden point is reason enough to draw it again.
             if existing.set_shown(True) or changed:
                 self.settle_definitions()
@@ -728,9 +739,34 @@ class CanvasScene(QGraphicsScene):
             return None
         point = self.add_point(where)
         point.set_anchor(InfinityAnchor([line]))
+        point.set_label(self._next_infinity_label())
+        self._set_label_italic(point, False)
         self.recompute_intersections()
         self.commit_undo()
         return point
+
+    def _next_infinity_label(self) -> str:
+        """A free name for a new point at infinity.
+
+        Points at infinity come labelled, because an arrowhead on its own says
+        which way but not which point — and a figure usually has more than one
+        direction in it. Omega is the usual name for an ideal point; further
+        ones are numbered.
+
+        Returns:
+            A label not already in use anywhere on the canvas.
+        """
+        taken = {
+            item.label_text()
+            for item in self.items()
+            if hasattr(item, "label_text") and item.label_text()
+        }
+        if self.INFINITY_LABEL not in taken:
+            return self.INFINITY_LABEL
+        number = 2
+        while f"{self.INFINITY_LABEL}{number}" in taken:
+            number += 1
+        return f"{self.INFINITY_LABEL}{number}"
 
     def settle_ideal_points(self) -> None:
         """Re-decide which lines still run to each point at infinity.
@@ -832,13 +868,75 @@ class CanvasScene(QGraphicsScene):
         """Add an infinite line through two points, bound to both.
 
         Each endpoint is bound to a point, so the line stays through them as
-        they move. Returns None if the two points coincide.
+        they move.
+
+        Joining a point to a **point at infinity** is the parallel through it:
+        see :meth:`add_parallel_through`. Two points at infinity both lie on
+        the line at infinity, which is not a line that can be drawn.
+
+        Args:
+            a: One point.
+            b: The other.
+
+        Returns:
+            The new line, or None if the two coincide or are both at infinity.
         """
-        if a is b or a.center() == b.center():
+        if a is b:
+            return None
+        if a.is_at_infinity() and b.is_at_infinity():
+            return None
+        if a.is_at_infinity() or b.is_at_infinity():
+            ideal, finite = (a, b) if a.is_at_infinity() else (b, a)
+            return self.add_parallel_through(finite, ideal)
+        if a.center() == b.center():
             return None
         line = self.add_line(a.center(), b.center())
         line.bind_endpoint(1, a)
         line.bind_endpoint(2, b)
+        self.on_line_changed(line)
+        self.commit_undo()
+        return line
+
+    def add_parallel_through(
+        self, point: PointItem, ideal: PointItem
+    ) -> LineItem | None:
+        """Add the line through ``point`` that runs to ``ideal``.
+
+        The join of a point and a point at infinity is the **parallel**: the
+        one line through the point in that direction. Prism builds it as just
+        that — pinned to the point, so it follows it, and orientation-locked
+        (see :meth:`~prism.items.line_item.LineItem.set_orientation_locked`),
+        because a determined line has no freedom left to be dragged out of.
+        Unlock it if you want it to turn.
+
+        The new line joins the ideal point as well, so the whole pencil of
+        parallels is carried there and ``lines_through`` reports it.
+
+        Args:
+            point: The point the line runs through.
+            ideal: The point at infinity giving its direction.
+
+        Returns:
+            The new line, or None if the ideal point has no direction left.
+        """
+        direction = ideal.anchor().direction()
+        if direction is None:
+            return None
+        centre = point.center()
+        half = 60.0  # defining half-length; rendering is infinite
+        line = self.add_line(
+            QPointF(
+                centre.x() - direction.x() * half,
+                centre.y() - direction.y() * half,
+            ),
+            QPointF(
+                centre.x() + direction.x() * half,
+                centre.y() + direction.y() * half,
+            ),
+        )
+        line.set_pivot(point)
+        line.set_orientation_locked(True)
+        ideal.anchor().add_line(line)
         self.on_line_changed(line)
         self.commit_undo()
         return line
@@ -854,7 +952,9 @@ class CanvasScene(QGraphicsScene):
             key=lambda it: getattr(it, "_seq", 0),
         )
 
-    def add_line_through(self, point: PointItem, angle_degrees: float) -> LineItem:
+    def add_line_through(
+        self, point: PointItem, angle_degrees: float
+    ) -> LineItem | None:
         """Add one infinite line through ``point`` at a given angle.
 
         Args:
@@ -862,9 +962,11 @@ class CanvasScene(QGraphicsScene):
             angle_degrees: Direction, in degrees clockwise from horizontal.
 
         Returns:
-            The new line.
+            The new line, or None for a point at infinity, which has no pencil
+                of angles — see :meth:`add_projectivity`.
         """
-        return self.add_projectivity(point, [angle_degrees])[0]
+        created = self.add_projectivity(point, [angle_degrees])
+        return created[0] if created else None
 
     def add_horizon(self, fraction: float) -> LineItem:
         """Add a horizontal, orientation-locked line across the canvas.
@@ -1271,12 +1373,30 @@ class CanvasScene(QGraphicsScene):
             and it.anchor_references_line(line)
         ]
 
-    def add_projectivity(self, point: PointItem, angles) -> list:
+    def add_projectivity(self, point: PointItem, angles: list) -> list:
         """Create a pencil of lines through ``point`` at the given angles.
 
         Angles are degrees clockwise from horizontal. Each line is infinite and
         pinned to ``point`` (so the pencil rotates about it).
+
+        A **point at infinity** has no pencil of this kind: every line through
+        it runs in its one direction, so they differ by position rather than
+        angle. Nothing is drawn for one.
+
+        Args:
+            point: The centre of the pencil.
+            angles: The angles to draw, in degrees clockwise from horizontal.
+
+        Returns:
+            The lines created, which is empty for a point at infinity.
         """
+        if point.is_at_infinity():
+            self.statusMessage.emit(
+                "A point at infinity has no pencil of angles: every line "
+                "through it runs the same way. Join it to a point instead, "
+                "for the parallel through that point."
+            )
+            return []
         center = point.center()
         half = 60.0  # defining half-length; rendering is infinite
         created = []
@@ -1797,11 +1917,20 @@ class CanvasScene(QGraphicsScene):
         intersection marker keeps the same identity as its lines move, so its
         label stays with it.
 
+        Points at infinity are left alone. They arrive named — Omega, and so
+        on — and that name says what the point is, which a letter from the
+        sequence would only take away. The lettering skips them, so the finite
+        points still read A, B, C in order.
+
         Returns:
             How many points and lines were labelled.
         """
         points = sorted(
-            (it for it in self.items() if isinstance(it, PointItem)),
+            (
+                it
+                for it in self.items()
+                if isinstance(it, PointItem) and not it.is_at_infinity()
+            ),
             key=lambda it: getattr(it, "_seq", 0),
         )
         lines = sorted(

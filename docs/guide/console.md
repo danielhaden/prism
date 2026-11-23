@@ -259,9 +259,23 @@ get the *same* point back, now carrying both — which is the whole content of
 two parallels finds it, and `(ls)` reports it as `[at infinity of L1, L2]`.
 
 The point has no location, so there is nothing to drag: it *is* its direction.
-What gets drawn is a **hollow ring** out where the line leaves the reference
-frame, marking the way the line runs rather than claiming the point sits there.
-Move the line and the ring moves with it.
+What gets drawn is an **arrowhead** where each of its lines leaves the
+reference frame, pointing the way that line runs. The point is named once —
+`Ω`, then `Ω2` and so on — because an arrow says which way but not which
+point. [`(label …)`](#label-element-text) renames it; `(label -auto)` leaves
+these names alone.
+
+Join it to a point and you get the **parallel** through that point:
+
+```
+(add-line (list A) (list Ω))    # the parallel to a through A
+```
+
+That line is pinned to A and orientation-locked, because the join of two
+points is a determined line; it joins Ω too, so it draws its own arrowhead.
+Two points at infinity can't be joined — they lie together on the line at
+infinity, which can't be drawn — and `(add-line <angle> …)` refuses one, since
+every line through it runs the same way.
 
 Remove one of the parallels and the point stays, carried by the rest. Remove
 the last of them and it goes too — there is no direction left for it to be the

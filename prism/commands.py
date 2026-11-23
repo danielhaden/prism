@@ -631,6 +631,16 @@ class CommandInterpreter:
             points = self._flatten(args[1:], PointItem, "point")
             if not points:
                 raise CommandError("No points to draw a line through.")
+            ideal = [point for point in points if point.is_at_infinity()]
+            if ideal:
+                raise CommandError(
+                    f"{self._point_name(ideal[0])} is a point at infinity: "
+                    "every line through it runs the same way, so an angle "
+                    "means nothing there. Join it to a point instead — "
+                    "(add-line (list <point>) (list "
+                    f"{self._point_name(ideal[0])})) — for the parallel "
+                    "through that point."
+                )
             return self._only(
                 [self.scene.add_line_through(point, angle) for point in points]
             )
@@ -945,6 +955,12 @@ class CommandInterpreter:
             return existing
         line = self.scene.add_line_between(a, b)
         if line is None:
+            if a.is_at_infinity() and b.is_at_infinity():
+                raise CommandError(
+                    "Those are both points at infinity. They do lie on one "
+                    "line together — the line at infinity — but it is not a "
+                    "line that can be drawn."
+                )
             raise CommandError(
                 "Can't draw a side: two of those points are in the same place."
             )

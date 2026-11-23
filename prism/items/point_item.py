@@ -44,10 +44,16 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: small to aim at; this is the target you actually get.
     HIT_PX = 6.0
 
-    #: Screen-pixel radius of the ring drawn for a point at infinity. Hollow,
-    #: and wider than an ordinary dot, so it never reads as a point sitting at
-    #: that spot on the frame edge — there is no such spot to sit at.
-    INFINITY_RING = 5.0
+    #: The arrowhead drawn for a point at infinity, in screen pixels: how far
+    #: its tip reaches past the point, how far its base sits behind, and half
+    #: its width. An arrow rather than a dot because the point has no
+    #: location — what there is to show is the *direction* its lines run.
+    #: :class:`~prism.items.line_item.LineItem` does the drawing, once for
+    #: each line running to the point; the sizes live here because they
+    #: describe the point's marker, and its halo and label measure from them.
+    INFINITY_TIP = 9.0
+    INFINITY_BACK = 3.0
+    INFINITY_HALF_WIDTH = 4.5
 
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
@@ -132,20 +138,61 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         return self.scenePos()
 
     def _drawn_radius(self) -> float:
-        """The radius the marker is actually drawn at, in screen pixels.
+        """How far the marker reaches from the point, in screen pixels.
 
-        A point at infinity is a ring rather than a dot, and a wider one, so
-        the selection halo and the label both have to be measured from that
-        instead.
+        A point at infinity is an arrowhead rather than a dot, and a longer
+        one, so the selection halo and the label are measured from that.
         """
-        return self.INFINITY_RING if self.is_at_infinity() else self._radius
+        return self.INFINITY_TIP if self.is_at_infinity() else self._radius
+
+    def infinity_direction(self, view: object = None) -> QPointF | None:
+        """Which way the arrowhead points, as a unit vector in screen pixels.
+
+        The point ignores the view's transformations, so it is drawn in screen
+        pixels while its direction is a fact about the scene. The direction is
+        mapped through the view to bridge the two; without a view to ask, the
+        scene direction stands in, which is exact whenever the view only
+        scales.
+
+        Args:
+            view: The view to map through; the scene's first, if not given.
+
+        Returns:
+            A unit vector in screen pixels, or None if it has no direction (or
+                this is not a point at infinity).
+        """
+        if not self.is_at_infinity():
+            return None
+        direction = self._anchor.direction()
+        if direction is None:
+            return None
+        if view is None:
+            scene = self.scene()
+            views = scene.views() if scene is not None else []
+            view = views[0] if views else None
+        if view is not None and hasattr(view, "viewportTransform"):
+            transform = view.viewportTransform()
+            direction = QPointF(
+                transform.m11() * direction.x() + transform.m21() * direction.y(),
+                transform.m12() * direction.x() + transform.m22() * direction.y(),
+            )
+        length = (direction.x() ** 2 + direction.y() ** 2) ** 0.5
+        if length < 1e-12:
+            return None
+        return QPointF(direction.x() / length, direction.y() / length)
 
     def _label_anchor(self) -> QPointF:
         """Where a label hangs off this point, in item-local pixels.
 
-        Off the edge of what is actually drawn, so a ring's label clears it by
-        the same margin a dot's does rather than sitting against it.
+        Clear of what is actually drawn, so a label sits off the marker rather
+        than against it — and, for a point at infinity, out past the arrow's
+        tip rather than on top of it.
         """
+        if self.is_at_infinity():
+            direction = self.infinity_direction()
+            if direction is not None:
+                reach = self.INFINITY_TIP + 1.0
+                return QPointF(direction.x() * reach, direction.y() * reach)
         return QPointF(self._drawn_radius() - self.RADIUS, 0)
 
     def contextMenuEvent(self, event):
@@ -202,8 +249,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # depend on them yet and no cycle is possible — a crossing is as good a
         # centre for a pencil as any other point.
         if scene is not None and not joining:
-            one_line_action = menu.addAction("Add Line Through Point")
-            pencil_action = menu.addAction("Add Lines Through Point…")
+            if self.is_at_infinity():
+                # Every line through it runs its one way, so they differ by
+                # position rather than angle: an angle fan means nothing here.
+                unavailable = menu.addAction(
+                    "Add Line Through Point — a point at infinity has no "
+                    "pencil of angles"
+                )
+                unavailable.setEnabled(False)
+            else:
+                one_line_action = menu.addAction("Add Line Through Point")
+                pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()
 
         # Anchor a point to a line when the selection is one line + point(s).
@@ -567,8 +623,9 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         painter.save()
 
         # Glow: a filled disc behind the dot but over the lines, so geometry
-        # is cut away around the point.
-        if self._glow_radius > 0:
+        # is cut away around the point. Not for an arrowhead, which the line
+        # should run cleanly into rather than stop short of.
+        if self._glow_radius > 0 and not self.is_at_infinity():
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(self._glow_color))
             painter.drawEllipse(origin, self._glow_radius, self._glow_radius)
@@ -581,11 +638,10 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
             painter.drawEllipse(origin, halo, halo)
 
         if self.is_at_infinity():
-            # A hollow ring: the point has no location, and a filled dot out
-            # at the frame edge would claim it had one.
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(self.brush().color(), 1.5))
-            painter.drawEllipse(origin, self.INFINITY_RING, self.INFINITY_RING)
+            # Nothing of its own: the arrowhead belongs to each line running
+            # to this point, and LineItem draws it there — on every one of
+            # them, not just the one this marker happens to sit on. What is
+            # left here is the selection halo above, and the label.
             painter.restore()
             return
 

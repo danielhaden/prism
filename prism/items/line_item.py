@@ -8,6 +8,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPainterPathStroker,
     QPen,
+    QPolygonF,
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem, QMenu
 
@@ -1094,8 +1095,97 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
                 painter.setPen(pen)
                 painter.drawLine(seg[0], seg[1])
 
+        arrow = self._ideal_arrow()
+        if arrow is not None:
+            self._paint_ideal_arrow(painter, *arrow)
+
         if self.isSelected() or self._hover_end is not None:
             self._paint_handles(painter)
+
+    def _ideal_arrow(self) -> tuple | None:
+        """Where to draw this line's arrowhead, if it runs to an ideal point.
+
+        **Every** line running to a point at infinity gets one, not just the
+        one the point is drawn at: the arrow says where *this* line goes, and
+        a figure of parallels should show that on each of them. The point they
+        share is the one that carries the label.
+
+        Returns:
+            A ``(position, direction)`` pair in scene coordinates, or None if
+                this line has no point at infinity, it is hidden, or the spot
+                falls outside the part of the line actually drawn.
+        """
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "point_at_infinity_of"):
+            return None
+        point = scene.point_at_infinity_of(self)
+        if point is None or not point.anchor().references_line(self):
+            return None
+        if not point.is_shown() or point.position_undefined():
+            return None
+        where = self.frame_exit()
+        direction = self.ideal_direction()
+        if where is None or direction is None:
+            return None
+        seg = self._display_segment()
+        if seg is None:
+            return None
+        # A line cut down to a visible range may not reach the frame edge; an
+        # arrowhead floating off the end of the drawn segment would be a
+        # claim about a line that isn't there.
+        local = self.mapFromScene(where)
+        span = QLineF(seg[0], seg[1])
+        along = QPointF(local) - seg[0]
+        if span.length() < 1e-9:
+            return None
+        unit = QPointF(span.dx() / span.length(), span.dy() / span.length())
+        t = along.x() * unit.x() + along.y() * unit.y()
+        if not -1e-6 <= t <= span.length() + 1e-6:
+            return None
+        return self.mapFromScene(where), self.mapFromScene(
+            self.mapToScene(QPointF(0, 0)) + direction
+        )
+
+    def _paint_ideal_arrow(
+        self, painter, where: QPointF, direction: QPointF
+    ) -> None:
+        """Draw the arrowhead marking where this line runs off to infinity.
+
+        Sized in screen pixels, like the endpoint handles, so it stays the
+        same size whatever the zoom.
+
+        Args:
+            painter: The painter, in the item's local coordinates.
+            where: The arrow's anchor point, in local coordinates.
+            direction: A unit vector along the line, in local coordinates.
+        """
+        colour = self._ideal_arrow_colour()
+        tip_reach = self._px(PointItem.INFINITY_TIP)
+        back_reach = self._px(PointItem.INFINITY_BACK)
+        half_width = self._px(PointItem.INFINITY_HALF_WIDTH)
+        across = QPointF(-direction.y(), direction.x())
+        tip = where + direction * tip_reach
+        base = where - direction * back_reach
+        wing = across * half_width
+        painter.save()
+        painter.setBrush(QBrush(colour))
+        pen = QPen(colour, 1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawPolygon(QPolygonF([tip, base + wing, base - wing]))
+        painter.restore()
+
+    def _ideal_arrow_colour(self) -> QColor:
+        """The arrowhead's colour: the point's, so a pencil of them matches."""
+        scene = self.scene()
+        point = (
+            scene.point_at_infinity_of(self)
+            if scene is not None and hasattr(scene, "point_at_infinity_of")
+            else None
+        )
+        if point is not None:
+            return QColor(point.brush().color())
+        return QColor(self.pen().color())
 
     def _paint_handles(self, painter) -> None:
         radius = self._px(self.HANDLE_PX)

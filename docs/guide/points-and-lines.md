@@ -209,19 +209,48 @@ Once the point is there, those parallels genuinely **meet** at it:
 [Elements panel](tools.md) lists it as `at infinity of L1, L2`, and it takes a
 [label](#labels) like any other point.
 
-It is drawn as a **hollow ring**, out where the line leaves the reference frame:
+It is drawn as an **arrowhead** where the line leaves the reference frame,
+pointing the way the line runs — one on **each** line that runs to the point,
+since the arrow says where that line goes. The point itself is named once:
 
-- **Hollow**, and wider than an ordinary dot, because the point has no location
-  — a filled dot out at the frame edge would claim it had one. The ring marks
-  the *direction* the line runs in.
+- **An arrow, not a dot**, because the point has no location. A dot at the
+  frame edge would claim it had one; the arrow marks the *direction* instead.
+- **It arrives labelled.** A new point at infinity is called `Ω`, the next
+  `Ω2`, and so on — an arrow alone says which way but not which point, and a
+  figure usually has more than one direction in it. Rename it like any other
+  point. [Auto-label](#labels) leaves these names alone and letters the finite
+  points around them.
 - **It can't be dragged.** A point at infinity *is* its direction; there is
   nowhere to drag it to.
-- **It follows its line.** Move or rotate the line and the ring moves with it.
-  Rotate the line and the ring travels round the frame.
+- **It follows its lines.** Move or rotate a line and its arrow moves with it.
 
 Removing one of the parallels leaves the point where it is, carried by the
 others. Removing the **last** of them takes the point away too: there is no
-direction left for it to be the ideal point of.
+direction left for it to be the ideal point of. Rotate a line out of the
+pencil and it simply stops running to that point — it has a direction, and an
+ideal point, of its own now.
+
+### Drawing a parallel
+
+Joining a point to a point at infinity is how you draw a **parallel**: the
+line through that point in that direction.
+
+Select a point and a point at infinity, right-click either → **Add Line
+Through Points**, or run
+[`(add-line (list A) (list Ω))`](console.md#add-line-points-points). The new
+line is pinned to the point and
+[orientation-locked](#locked-orientation) — the join of two points is a
+determined line, with no freedom left to be dragged out of — so dragging it
+slides it rather than tilting it. [Unlock](#locked-orientation) it if you want
+it to turn; it then leaves the pencil as soon as it does.
+
+It joins the ideal point too, so it draws its own arrowhead and shows up in
+`(ls)` alongside the parallels it belongs with.
+
+Two points at infinity can't be joined: they both lie on the line at infinity,
+which isn't a line Prism can draw. Nor does a point at infinity have a
+[pencil of angles](projectivities.md) — every line through it runs the same
+way, so **Add Line Through Point** stands down on one.
 
 !!! tip "Parallels on purpose"
     Two [horizons](#lines), two [verticals](#lines), or any two
@@ -303,9 +332,12 @@ same menu, or [`(add vertical <fraction>)`](console.md#add-vertical-fraction),
 which measures across the frame rather than down it. Nothing else about it
 differs.
 
-These two are the only locked lines you can make. The lock itself doesn't care
-about direction — it freezes whatever angle the line already has — but there is
-no way yet to freeze a line you drew at some other angle.
+A **parallel** drawn through a [point at infinity](#drawing-a-parallel) is
+locked for a different reason: its direction is what defines it.
+
+Those are the locked lines you can make. The lock itself doesn't care about
+direction — it freezes whatever angle the line already has — but there is no
+way yet to freeze a line you drew at some other angle by hand.
 
 ### Line properties
 
