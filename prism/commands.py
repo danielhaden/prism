@@ -1583,9 +1583,16 @@ class CommandInterpreter:
         except OSError as exc:
             raise CommandError(f"Couldn't read that style: {exc}") from exc
         self.scene.commit_undo()
+        skipped = self.scene.style_refusals()
+        note = ""
+        if skipped:
+            note = "\n" + "\n".join(f"  skipped {line}" for line in skipped)
         if not count:
-            return f"Style {path} attached, but it holds no commands."
-        return f"Style {path} attached ({count} command(s))."
+            return (
+                f"Style {path} attached, but nothing in it says how "
+                f"something is drawn.{note}"
+            )
+        return f"Style {path} attached ({count} command(s)).{note}"
 
     def _as_style_path(self, argument) -> str:
         """Find a style script: a path as given, or a name in the scripts folder.

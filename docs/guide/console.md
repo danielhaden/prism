@@ -306,9 +306,11 @@ A style is an ordinary `.prism` script that happens to hold only formatting:
 (format (lines) 0.5 #cccccc)
 ```
 
-So there is nothing new to learn and nothing new to manage. You edit a style
-in the Scripts panel, open it from the **File** menu, keep it beside your
-drawings or in a repository, and send it to someone.
+So there is nothing new to learn and nothing new to manage. To write one:
+**File → New Script**, type the `(format …)` lines, **Save Script As…** into
+your scripts folder, then `(style <name>)` or **File → Attach Style…**. Or
+write the file in any editor — it is plain text. You can keep a style beside
+your drawings or in a repository, and send it to someone.
 
 **The canvas stores the path, not the contents.** Several drawings can take
 their look from one script, and editing that script reaches all of them. The
@@ -345,6 +347,28 @@ To hand an element back, give it the plain look again:
 
 Detaching a style leaves what is drawn as it is — a style is how things are
 dressed, not a costume whipped away. Only what comes next is left plain.
+
+#### What a style may say
+
+`(format …)`, and `(define …)` to name a value you use more than once.
+Nothing else: **a style runs every time you draw**, so a command that
+*builds* would add another copy of whatever it makes on every action. Those
+lines are skipped, and attaching says which and why.
+
+```
+(define hair 0.4)
+(format (lines) hair grey)
+(add horizon 1/2)     ; skipped — that builds, and a style only dresses
+```
+
+A line Prism can't read is skipped the same way, and the rest of the style
+still runs.
+
+!!! warning "`(define …)` takes numbers, not colours"
+    `(define hair 0.4)` works. `(define pale #bbbbbb)` does not — `(define
+    …)` reads its value as an element or a number, and a colour is neither.
+    This is older than styles and shows up in the console too; write colours
+    out in each `(format …)` for now.
 
 !!! note "Points and lines today; planes when they arrive"
     A style is whatever `(format …)` accepts, so it governs exactly the kinds

@@ -152,6 +152,8 @@ class CanvasScene(QGraphicsScene):
         # so several drawings can share one and editing it reaches them all.
         self._style_path: str | None = None
         self._style_commands: list = []
+        # Lines the style holds that a style may not say; see STYLE_FORMS.
+        self._style_refused: list = []
         # How many style passes are running. A count rather than a flag, so a
         # nested pass (a default applied to a new point inside one) can't
         # clear it on the way out.
@@ -1142,6 +1144,10 @@ class CanvasScene(QGraphicsScene):
         """The script this canvas takes its look from, or None."""
         return self._style_path
 
+    def style_refusals(self) -> list:
+        """Notes about lines in the style that a style may not say."""
+        return list(self._style_refused)
+
     def style_commands(self) -> list:
         """The style's commands as last read, for reporting and persistence."""
         return list(self._style_commands)
@@ -1162,9 +1168,10 @@ class CanvasScene(QGraphicsScene):
         Raises:
             OSError: If the script can't be read.
         """
-        commands = self._read_style(path)
+        commands, refused = self._read_style(path)
         self._style_path = os.path.abspath(path)
         self._style_commands = commands
+        self._style_refused = []
         self._styled_mark = -1
         self.apply_style()
         return len(commands)
@@ -1182,6 +1189,7 @@ class CanvasScene(QGraphicsScene):
         had = self._style_path is not None
         self._style_path = None
         self._style_commands = []
+        self._style_refused = []
         self._styled_mark = -1
         return had
 
@@ -1199,25 +1207,57 @@ class CanvasScene(QGraphicsScene):
         """
         self._style_path = path or None
         self._style_commands = []  # re-read whenever it is next asserted
+        self._style_refused = []
         self._styled_mark = self._seq_counter
 
-    @staticmethod
-    def _read_style(path: str) -> list:
-        """The (format …) lines of a style script, remarks and blanks dropped.
+    #: What a style is allowed to say. A style describes how things are
+    #: *drawn*; a command that **builds** would run again on every pass,
+    #: adding another copy of whatever it makes each time anything was drawn
+    #: — measured, before this was shut: one (add point …) in a style turned
+    #: a single action into two new points.
+    STYLE_FORMS = ("format", "define")
+
+    @classmethod
+    def _read_style(cls, path: str) -> tuple:
+        """Read a style script, keeping only what a style may say.
 
         Args:
             path: The script to read.
 
         Returns:
-            The commands, in order.
+            ``(commands, refused)`` — the lines that will run, in order, and
+                a plain-English note about each line that won't.
         """
+        from prism.sexpr import SexprError, parse
+
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-        return [
-            line.strip()
-            for line in text.splitlines()
-            if line.strip() and not line.strip().startswith(";")
-        ]
+        commands, refused = [], []
+        for number, raw in enumerate(text.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith(";"):
+                continue
+            try:
+                forms = parse(line)
+            except SexprError as exc:
+                refused.append(f"line {number}: {exc}")
+                continue
+            names = [
+                form[0].lower()
+                for form in forms
+                if isinstance(form, list) and form and isinstance(form[0], str)
+            ]
+            stray = [name for name in names if name not in cls.STYLE_FORMS]
+            if not names:
+                refused.append(f"line {number}: not a command")
+            elif stray:
+                refused.append(
+                    f"line {number}: ({stray[0]} …) doesn't say how "
+                    "something is drawn, and a style runs every time you draw"
+                )
+            else:
+                commands.append(line)
+        return commands, refused
 
     def apply_style(self) -> bool:
         """Run the style over the canvas, dressing anything not spoken for.
@@ -1236,12 +1276,18 @@ class CanvasScene(QGraphicsScene):
         if self._style_path is None:
             return False
         try:
-            self._style_commands = self._read_style(self._style_path)
+            self._style_commands, refused = self._read_style(self._style_path)
         except OSError as exc:
             self.statusMessage.emit(
                 f"Couldn't read the style {self._style_path}: {exc}"
             )
             return False
+        # Said when it starts being true and not again, since a style is
+        # asserted on every action and a standing complaint would be noise.
+        if refused != self._style_refused:
+            self._style_refused = refused
+            for note in refused:
+                self.statusMessage.emit(f"Style: {note}")
         if self._style_interpreter is None:
             from prism.commands import CommandInterpreter
 

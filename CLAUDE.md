@@ -562,6 +562,20 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   anything a style covers: markers are recomputed and then dressed afresh
   every time. A crossing formatted *by hand* still doesn't survive a reload —
   `capture()` stores only points with no anchor — which is unchanged.
+- **A style may only say how things are drawn** (`STYLE_FORMS` = `format`,
+  `define`). `_read_style` parses each line and drops anything else,
+  returning `(commands, refused)`. This is not tidiness: **a style runs on
+  every action**, so a building command in one adds another copy of what it
+  makes each time — measured before it was shut, one `(add point …)` in a
+  style turned a single action into two new points. Attaching names what it
+  skipped and why; a later change to the file is reported only when the set
+  of refusals *changes*, since a standing complaint on every action is noise.
+  An unparseable line is skipped the same way and the rest still runs.
+- Known wart, older than styles and now more visible: `(define <name>
+  <colour>)` fails — `_form_define` reads its value as an element or a
+  number, and `#bbbbbb` is neither, so it reports "No element named". Numbers
+  bind fine. Fixing it means letting `_form_define` bind a literal that
+  `QColor` accepts, which would make palettes-in-a-style work.
 - **Planes come free.** A style is whatever `(format …)` accepts, so it
   governs exactly the kinds that command knows. When planes land, extending
   `_form_format` (and adding a `(planes)` enumerator) reaches styles with no
