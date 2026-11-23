@@ -483,6 +483,8 @@ class CommandInterpreter:
             "  (point <line> <fraction>)   a point along a line, 0 = its left\n"
             "                              end, 1 = its right; anchored to it\n"
             "  (point <line> <line>)       the point where two lines meet\n"
+            "  (point <line> infinity)     the point at infinity it runs to;\n"
+            "                              parallel lines all share one\n"
             "  (rm <element>)              remove a point or line; lines left\n"
             "                              behind simply come free\n"
             "  (clear)                     empty the canvas; defined names and\n"
@@ -729,10 +731,13 @@ class CommandInterpreter:
             raise CommandError(
                 "Usage: (point <line> <fraction>)  a point along a line\n"
                 "   or: (point <line> <line>)      where two lines meet\n"
+                "   or: (point <line> infinity)    the point it runs to\n"
                 "  0 = the line's left-hand end, 1 = its right-hand end"
             )
         line = self._as_line(args[0])
         second = self._value(args[1])
+        if isinstance(second, str) and second.lower() in ("infinity", "inf"):
+            return self._point_at_infinity(line)
         if isinstance(second, LineItem) or (
             isinstance(second, str) and parse_fraction(second) is None
         ):
@@ -741,6 +746,31 @@ class CommandInterpreter:
         point = self.scene.add_point_on_line(line, fraction)
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
+        return point
+
+    def _point_at_infinity(self, line: LineItem) -> PointItem:
+        """``(point L1 infinity)`` — the ideal point a line runs to.
+
+        Parallel lines share one, so asking a second line in the same
+        direction gives back the same point, now carrying both. Shown again if
+        it had been hidden.
+
+        Args:
+            line: The line to read the direction from.
+
+        Returns:
+            The point at infinity.
+        """
+        if line.ideal_direction() is None:
+            raise CommandError(
+                f"{self._line_name(line)} has no direction to run in."
+            )
+        point = self.scene.add_point_at_infinity(line)
+        if point is None:
+            raise CommandError(
+                f"{self._line_name(line)} doesn't cross the canvas, so there "
+                "is no edge to draw its point at infinity on."
+            )
         return point
 
     def _meet_of(self, a: LineItem, b: LineItem) -> PointItem:
@@ -753,9 +783,15 @@ class CommandInterpreter:
             raise CommandError("A line meets itself everywhere.")
         point = self.scene.meet_of(a, b)
         if point is None:
+            if a.is_parallel_to(b):
+                raise CommandError(
+                    f"{self._line_name(a)} and {self._line_name(b)} are "
+                    "parallel: they meet at infinity. Try "
+                    f"(point {self._line_name(a)} infinity)."
+                )
             raise CommandError(
                 f"{self._line_name(a)} and {self._line_name(b)} don't meet on "
-                "the canvas — they may be parallel, or cross off it."
+                "the canvas — they cross off it."
             )
         if point.set_shown(True):
             self.scene.commit_undo()
@@ -1696,6 +1732,11 @@ class CommandInterpreter:
                 sorted(self._line_name(ln) for ln in point.meeting_lines())
             )
             tag = f"  [meet of {names}]"
+        elif point.is_at_infinity():
+            names = ", ".join(
+                sorted(self._line_name(ln) for ln in point.infinity_lines())
+            )
+            tag = f"  [at infinity of {names}]"
         elif point.has_anchor():
             tag = "  [on-line]"
         else:

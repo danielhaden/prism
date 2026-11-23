@@ -185,6 +185,50 @@ its **defining handles**.
   endpoint then follows that point when it moves.
 - **Select it, then right-click → Add Point to Line** puts a new point on the
   line where you clicked, [anchored](#anchoring-a-point-to-a-line) to it.
+- **Right-click → Add Point at Infinity** surfaces the
+  [ideal point](#the-point-at-infinity) the line runs to.
+
+### The point at infinity
+
+In the projective plane every line has one more point on it than you can draw:
+its **point at infinity**, or *ideal point*. Parallel lines meet there, and
+nowhere else.
+
+**Right-click a line → Add Point at Infinity**, or run
+[`(point L1 infinity)`](console.md#point-line-infinity). Select a line and the
+item appears on the canvas menu too, beside **Add Point to Line**.
+
+**Parallel lines share one point.** Ask a second line in the same direction and
+you get the point that is already there, now carrying both lines — not a second
+point for the same direction. The menu item says as much before you pick it:
+it reads **Add Point at Infinity — shared with L1** when another line already
+has it, and **Show Point at Infinity** on a line that has it already.
+
+Once the point is there, those parallels genuinely **meet** at it:
+`(point L1 L2)` finds it, the
+[Elements panel](tools.md) lists it as `at infinity of L1, L2`, and it takes a
+[label](#labels) like any other point.
+
+It is drawn as a **hollow ring**, out where the line leaves the reference frame:
+
+- **Hollow**, and wider than an ordinary dot, because the point has no location
+  — a filled dot out at the frame edge would claim it had one. The ring marks
+  the *direction* the line runs in.
+- **It can't be dragged.** A point at infinity *is* its direction; there is
+  nowhere to drag it to.
+- **It follows its line.** Move or rotate the line and the ring moves with it.
+  Rotate the line and the ring travels round the frame.
+
+Removing one of the parallels leaves the point where it is, carried by the
+others. Removing the **last** of them takes the point away too: there is no
+direction left for it to be the ideal point of.
+
+!!! tip "Parallels on purpose"
+    Two [horizons](#lines), two [verticals](#lines), or any two
+    [orientation-locked](#locked-orientation) lines of the same kind are
+    parallel to the bit, so they always share their ideal point. Lines that
+    merely *look* parallel do cross somewhere off the canvas, and Prism treats
+    them as the distinct lines they are.
 
 ### Visible range
 

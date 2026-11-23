@@ -271,11 +271,13 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
       `GroupItem` and `LabelItem` route their `mouseMoveEvent` through it;
       lines were never in that loop (`ItemIsMovable` is off) and handle their
       own drags.
-    * `_retire_meet` only *hides* a marker while `_mid_gesture()` — any event
+    * `_retire_point` only *hides* a point while `_mid_gesture()` — any event
       being delivered, or a drag between press and release — and keeps a
       reference to it. `_sweep_retired_meets` removes them once the gesture
       is over. Before this, a drag over a busy figure destroyed markers
-      between one move event and the next, dozens of times a gesture.
+      between one move event and the next, dozens of times a gesture. Every
+      removal of computed geometry goes through it: intersection markers, and
+      a point at infinity whose last line has gone.
   Adding items mid-gesture is fine; freeing them is not. Anything new that
   deletes geometry from a signal or an `itemChange` has to go the same way.
 - Testing gotcha: `QMenu.exec` **can't be monkeypatched** (it's a C++ method —

@@ -122,11 +122,18 @@ def capture(scene) -> dict:
             and pt_anchor.kind == "line"
             and id(pt_anchor.line) in l_index
         ):
+            # No "kind" on this one: it is the original shape, and snapshots
+            # written before any other kind existed have to keep loading.
             anchor = {
                 "line": l_index[id(pt_anchor.line)],
                 "t": pt_anchor.t,
                 "locked": getattr(pt_anchor, "locked", False),
             }
+        elif pt_anchor is not None and pt_anchor.kind == "infinity":
+            indices = [l_index.get(id(line)) for line in pt_anchor.lines]
+            indices = [index for index in indices if index is not None]
+            if indices:
+                anchor = {"kind": "infinity", "lines": sorted(indices)}
         point_data.append(
             {
                 "xy": [point.center().x(), point.center().y()],
@@ -252,18 +259,25 @@ def restore(scene, state: dict) -> None:
     # Wire relationships once both sides exist.
     _wire_lines(lines, points, state["lines"], meets_ready=False)
 
-    from prism.anchors import LineAnchor
+    from prism.anchors import InfinityAnchor, LineAnchor
 
     for point, data in zip(points, state["points"]):
-        if data["anchor"] is not None:
-            line = lines[data["anchor"]["line"]]
+        stored_anchor = data["anchor"]
+        if stored_anchor is None:
+            continue
+        if stored_anchor.get("kind") == "infinity":
             point.set_anchor(
-                LineAnchor(
-                    line,
-                    data["anchor"]["t"],
-                    data["anchor"].get("locked", False),
-                )
+                InfinityAnchor([lines[index] for index in stored_anchor["lines"]])
             )
+            continue
+        line = lines[stored_anchor["line"]]
+        point.set_anchor(
+            LineAnchor(
+                line,
+                stored_anchor["t"],
+                stored_anchor.get("locked", False),
+            )
+        )
 
     for members in state.get("groups", []):
         group = GroupItem()

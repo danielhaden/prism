@@ -80,6 +80,15 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
     #: below a pixel at any zoom.
     MEET_EPS = 1e-6
 
+    #: How nearly two lines must be parallel to share a point at infinity,
+    #: as the cross product of their unit directions (so, the sine of the
+    #: angle between them). Deliberately tight — about two ten-thousandths of
+    #: a degree. Lines that merely *look* parallel do meet, somewhere off the
+    #: canvas, and saying otherwise would hide a real crossing behind a
+    #: convenience. Lines built to be parallel — two horizons, two uprights, a
+    #: line translated from another — are parallel to the bit.
+    PARALLEL_EPS = 1e-6
+
     def __init__(self, start: QPointF, end: QPointF):
         super().__init__(QLineF(start, end))
 
@@ -144,6 +153,29 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
             add_point_action = menu.addAction("Add Point to Line")
             menu.addSeparator()
 
+        # The ideal point this line runs to. Parallel lines share it, so the
+        # wording says when it is already there to be shown rather than made.
+        shared = (
+            scene.point_at_infinity_of(self)
+            if scene is not None and hasattr(scene, "point_at_infinity_of")
+            else None
+        )
+        if shared is not None and shared.anchor().references_line(self):
+            infinity_label = "Show Point at Infinity"
+        elif shared is not None:
+            others = ", ".join(
+                sorted(
+                    scene.line_id(line)
+                    for line in shared.anchor().live_lines()
+                )
+            )
+            infinity_label = f"Add Point at Infinity — shared with {others}"
+        else:
+            infinity_label = "Add Point at Infinity"
+        infinity_action = menu.addAction(infinity_label)
+        infinity_action.setEnabled(self.ideal_direction() is not None)
+        menu.addSeparator()
+
         # Two lines selected: the point where they meet.
         meet_action = None
         selected_lines = (
@@ -201,6 +233,8 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         if add_point_action is not None and chosen is add_point_action:
             if scene is not None:
                 scene.point_on_line_command(self, event.scenePos())
+        elif chosen is infinity_action:
+            self._add_point_at_infinity()
         elif meet_action is not None and chosen is meet_action:
             self._add_meet_point(selected_lines)
         elif chosen is line_props_action:
@@ -234,6 +268,19 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         first, second = (scene.line_id(line) for line in lines)
         if not scene.run_as_command(f"(point {first} {second})"):
             scene.meet_of(*lines)
+
+    def _add_point_at_infinity(self) -> None:
+        """Surface the point at infinity this line runs to.
+
+        Runs the console form, so clicking and typing stay the same thing and
+        the command is recorded into the next script saved — the same bargain
+        as :meth:`_add_meet_point`.
+        """
+        scene = self.scene()
+        if scene is None:
+            return
+        if not scene.run_as_command(f"(point {scene.line_id(self)} infinity)"):
+            scene.add_point_at_infinity(self)
 
     def _add_projectivity_at(self, local_pos: QPointF) -> None:
         """Add a pencil centered at the clicked point on this line."""
@@ -419,6 +466,71 @@ class LineItem(Definable, Labelable, QGraphicsLineItem):
         if (round(a.x(), 9), round(a.y(), 9)) > (round(b.x(), 9), round(b.y(), 9)):
             a, b = b, a
         return a, b
+
+    # -- Points at infinity ------------------------------------------------
+
+    def ideal_direction(self) -> QPointF | None:
+        """The line's direction, signed so that parallels agree.
+
+        A line runs both ways, but ``d`` and ``-d`` lead to the *same* point at
+        infinity — the ideal point is one point, not two far ends. So the sign
+        is settled here: rightward, or downward for an upright line. Two
+        parallel lines then read the same vector however each of them happened
+        to be drawn, which is what lets them share one ideal point.
+
+        Returns:
+            A unit vector, or None if the line is degenerate (zero length).
+        """
+        direction = self.scene_direction()
+        if direction is None:
+            return None
+        flat = abs(direction.x()) <= 1e-12
+        if direction.x() < 0 or (flat and direction.y() < 0):
+            return QPointF(-direction.x(), -direction.y())
+        return QPointF(direction.x(), direction.y())
+
+    def is_parallel_to(self, other: "LineItem") -> bool:
+        """Whether ``other`` runs in this line's direction.
+
+        Parallel lines meet at infinity and nowhere else, so this is the test
+        for whether the two share a point at infinity.
+
+        Args:
+            other: The line to compare with.
+
+        Returns:
+            Whether they are parallel to within :attr:`PARALLEL_EPS`.
+        """
+        mine = self.ideal_direction()
+        theirs = other.ideal_direction()
+        if mine is None or theirs is None:
+            return False
+        # Both are unit vectors, so the cross product is the sine of the angle
+        # between them: zero exactly when they are parallel.
+        cross = mine.x() * theirs.y() - mine.y() * theirs.x()
+        return abs(cross) <= self.PARALLEL_EPS
+
+    def frame_exit(self) -> QPointF | None:
+        """Where the line leaves the reference frame, in its ideal direction.
+
+        This is where a point at infinity on this line gets *drawn*. The point
+        itself has no location, so the marker goes out at the edge of the
+        frame, on the line, pointing the way it runs.
+
+        Returns:
+            A scene position, or None if the line misses the frame entirely
+                (or there is no scene to ask about the frame).
+        """
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "reference_rect"):
+            return None
+        span = self.span_in_rect(scene.reference_rect())
+        if span is None:
+            return None
+        # span_in_rect orders its pair left to right (top to bottom when
+        # upright), and ideal_direction points that same way, so the far end
+        # in the ideal direction is always the second of the two.
+        return span[1]
 
     # -- Orientation lock --------------------------------------------------
 

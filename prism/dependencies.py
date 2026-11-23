@@ -53,7 +53,9 @@ def dependencies_of(item: Geometry) -> list:
         if anchor is not None:
             if anchor.kind == "line":
                 add(anchor.line)
-            elif anchor.kind == "meet":
+            elif anchor.kind in ("meet", "infinity"):
+                # A point at infinity is computed from its lines too: move one
+                # and the edge of the frame it is drawn at moves with it.
                 for line in anchor.lines:
                     add(line)
     return found

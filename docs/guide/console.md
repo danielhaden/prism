@@ -235,12 +235,42 @@ Nothing is created: Prism already keeps a point wherever lines cross, so this
 *finds* it — and shows it if you had [hidden](points-and-lines.md#hiding-a-point)
 it. Making a second point there would be the same point twice.
 
-If the two don't cross on the canvas — parallel, or meeting off it — the
-command says so rather than inventing a point.
+If the two don't cross on the canvas the command says so rather than inventing
+a point. When they are **parallel** it points you at the form below: they do
+meet, at infinity.
 
 !!! tip "From the canvas"
     Select two lines and right-click either of them → **Add Point at
     Intersection** runs this command for you.
+
+### `(point <line> infinity)`
+
+The point at infinity the line runs to — its **ideal point**. `inf` is accepted
+as a short form.
+
+```
+(point L1 infinity)    # the ideal point of L1
+(point a inf)          # by label
+```
+
+**Parallel lines share it.** Ask a second line in the same direction and you
+get the *same* point back, now carrying both — which is the whole content of
+"parallel lines meet at infinity". Once it is there, `(point L1 L2)` on those
+two parallels finds it, and `(ls)` reports it as `[at infinity of L1, L2]`.
+
+The point has no location, so there is nothing to drag: it *is* its direction.
+What gets drawn is a **hollow ring** out where the line leaves the reference
+frame, marking the way the line runs rather than claiming the point sits there.
+Move the line and the ring moves with it.
+
+Remove one of the parallels and the point stays, carried by the rest. Remove
+the last of them and it goes too — there is no direction left for it to be the
+ideal point of.
+
+!!! tip "From the canvas"
+    Right-click a line → **Add Point at Infinity**. The item names the lines
+    that already share the point when there are any, and reads **Show Point at
+    Infinity** once this line has it.
 
 ### `(label <element> <text>)`
 

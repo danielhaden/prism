@@ -44,6 +44,11 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: small to aim at; this is the target you actually get.
     HIT_PX = 6.0
 
+    #: Screen-pixel radius of the ring drawn for a point at infinity. Hollow,
+    #: and wider than an ordinary dot, so it never reads as a point sitting at
+    #: that spot on the frame edge — there is no such spot to sit at.
+    INFINITY_RING = 5.0
+
     def __init__(self, center: QPointF):
         # Initialise state before super()/setFlag/setPos, any of which can
         # trigger boundingRect()/itemChange() (which read these attributes).
@@ -101,7 +106,14 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     # -- Geometry ----------------------------------------------------------
 
     def boundingRect(self) -> QRectF:
-        r = max(self._radius + 4.0, self._glow_radius, self.HIT_PX) + 2.0
+        r = (
+            max(
+                self._drawn_radius() + 4.0,
+                self._glow_radius,
+                self.HIT_PX,
+            )
+            + 2.0
+        )
         return QRectF(-r, -r, 2 * r, 2 * r)
 
     def shape(self) -> QPainterPath:
@@ -118,6 +130,23 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     def center(self) -> QPointF:
         """Return the point's center in scene coordinates."""
         return self.scenePos()
+
+    def _drawn_radius(self) -> float:
+        """The radius the marker is actually drawn at, in screen pixels.
+
+        A point at infinity is a ring rather than a dot, and a wider one, so
+        the selection halo and the label both have to be measured from that
+        instead.
+        """
+        return self.INFINITY_RING if self.is_at_infinity() else self._radius
+
+    def _label_anchor(self) -> QPointF:
+        """Where a label hangs off this point, in item-local pixels.
+
+        Off the edge of what is actually drawn, so a ring's label clears it by
+        the same margin a dot's does rather than sitting against it.
+        """
+        return QPointF(self._drawn_radius() - self.RADIUS, 0)
 
     def contextMenuEvent(self, event):
         scene = self.scene()
@@ -380,6 +409,19 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         """
         return self._anchor is not None and self._anchor.kind == "meet"
 
+    def is_at_infinity(self) -> bool:
+        """Whether this is the point at infinity of a direction.
+
+        Like :meth:`is_meet`, a statement about what determines the point
+        rather than a kind of point. Ask :meth:`infinity_lines` for the
+        parallel lines that run to it.
+        """
+        return self._anchor is not None and self._anchor.kind == "infinity"
+
+    def infinity_lines(self) -> list:
+        """The parallel lines running to this ideal point, or an empty list."""
+        return list(self._anchor.lines) if self.is_at_infinity() else []
+
     def is_locked_to_line(self) -> bool:
         """Whether this point is held at a fixed place on its line."""
         anchor = self._anchor
@@ -445,7 +487,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         anchor = self._anchor
         if anchor is None:
             return False
-        if anchor.kind == "meet":
+        if anchor.kind in ("meet", "infinity"):
             return True
         # A point locked to its line has no freedom left either.
         return anchor.kind == "line" and getattr(anchor, "locked", False)
@@ -535,8 +577,17 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if self.isSelected():
             painter.setPen(QPen(QColor("#ff7f0e"), 2))
             painter.setBrush(Qt.NoBrush)
-            halo = self._radius + 3
+            halo = self._drawn_radius() + 3
             painter.drawEllipse(origin, halo, halo)
+
+        if self.is_at_infinity():
+            # A hollow ring: the point has no location, and a filled dot out
+            # at the frame edge would claim it had one.
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(self.brush().color(), 1.5))
+            painter.drawEllipse(origin, self.INFINITY_RING, self.INFINITY_RING)
+            painter.restore()
+            return
 
         painter.setBrush(self.brush())
         painter.setPen(self.pen())
