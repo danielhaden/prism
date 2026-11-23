@@ -40,6 +40,9 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: so dragging it rotates it to wherever you want.
     NEW_LINE_ANGLE = 45.0
 
+    #: Lines offered by default in **Add Pencil…**.
+    PENCIL_COUNT = 6
+
     #: Clickable radius, in screen pixels. The drawn dot is radius 1, far too
     #: small to aim at; this is the target you actually get.
     HIT_PX = 6.0
@@ -206,6 +209,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         # a stray selected point (a crossing caught by a rubber band, say)
         # used to make the command vanish with no explanation.
         line_action = one_line_action = pencil_action = None
+        even_pencil_action = None
         segment_action = segment_line = None
         two_points = (
             scene.selected_points()
@@ -259,6 +263,7 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
                 unavailable.setEnabled(False)
             else:
                 one_line_action = menu.addAction("Add Line Through Point")
+                even_pencil_action = menu.addAction("Add Pencil…")
                 pencil_action = menu.addAction("Add Lines Through Point…")
             menu.addSeparator()
 
@@ -322,6 +327,8 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
                 f"(add-line {angle:g} (list {scene.point_id(self)}))"
             ):
                 scene.add_line_through(self, angle)
+        elif even_pencil_action is not None and chosen is even_pencil_action:
+            self._add_pencil()
         elif pencil_action is not None and chosen is pencil_action:
             self._add_lines_through()
         elif snap_action is not None and chosen is snap_action:
@@ -382,6 +389,28 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         if count == 1 and self in selected:
             return "select one more point"
         return None
+
+    def _add_pencil(self) -> None:
+        """Draw a fan of evenly spaced lines through this point.
+
+        The count is all there is to choose. ``Add Lines Through Point…``
+        is the form with a start, an end and a splay to set; this one is the
+        common case — n lines, spread evenly — asked as one number.
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        scene = self.scene()
+        if scene is None:
+            return
+        parent = scene.views()[0] if scene.views() else None
+        count, ok = QInputDialog.getInt(
+            parent, "Add Pencil", "How many lines?", self.PENCIL_COUNT, 1, 360
+        )
+        if not ok:
+            return
+        name = scene.point_id(self)
+        if not scene.run_as_command(f"(add-pencil {name} {count})"):
+            scene.add_pencil(self, count)
 
     def _add_lines_through(self) -> None:
         """Draw a pencil of lines through this point, at angles you choose."""

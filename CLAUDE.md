@@ -211,9 +211,27 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`nearest_selected_line`, nearest wins). Without it the command is
   unreachable unless you hit the line's ~6px band, since a miss opens the
   canvas menu instead — which is what "the command doesn't appear" meant.
+- **`(add-pencil <point> <count>)`** draws `count` lines through a point,
+  evenly spaced, via `CanvasScene.add_pencil` → `add_projectivity`.
+  **The step is 180°/count, not 360°/count, and that is geometry rather than
+  a saving**: a line has no direction, so the line at 10° through a point and
+  the line at 190° through it are the same line. The directions through a
+  point fill half a turn. Dividing 360 would draw every line twice over for
+  an even count — ten asked for, five drawn, each with a twin stacked exactly
+  on it. The picture is unchanged: each line runs both ways, so n lines make
+  2n rays evenly spaced right round, which is what "evenly spaced around the
+  point" looks like. Verified with a pixel probe — a circle round the centre
+  of a 12-line pencil crosses 24 bands.
+  Hyphenated, not `(add pencil …)`, by the rule that split `add-line` off:
+  `add`'s own subforms take numbers and this takes an element. `(add pencil
+  …)` is kept as an error saying where it went, as `(add line …)` is.
+  `PENCIL_LIMIT` is 360; the count must be whole.
 - A point's menu offers **Add Line Through Point** (one line at
-  `PointItem.NEW_LINE_ANGLE`, 45°) and **Add Lines Through Point…** (the
-  `ProjectivityDialog` angles). Both go through `add_projectivity`, so the
+  `PointItem.NEW_LINE_ANGLE`, 45°), **Add Pencil…** (a count, defaulting to
+  `PointItem.PENCIL_COUNT`, written as one `(add-pencil …)`) and **Add Lines
+  Through Point…** (the `ProjectivityDialog` angles — the fuller form, with a
+  start, an end and a splay, written as one `(add-line <angle> …)` per ray).
+  All go through `add_projectivity`, so the
   lines are **pinned** to the point and it commits undo for them. Both are
   available on intersection points too: the lines are new, so nothing can
   depend on them yet and no cycle is possible. Note "Pin Lines Through Point" only pins *existing*
@@ -349,6 +367,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point <line> <fraction>)`, `(point <line> <line>)`, `(rm <element>)`,
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
+  `(add-pencil <point> <count>)`,
   `(move-snapped-point <point> <fraction>)`,
   `(segment <line> <point> <point>)`, `(segment <line> -full)`,
   `(draw-triangle <p> <p> <p>)`, `(ls [-points|-lines])`, `(range <from>

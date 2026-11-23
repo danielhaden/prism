@@ -95,6 +95,7 @@ class CommandInterpreter:
             "add-line": self._form_add_line,
             "point": self._form_point,
             "move-snapped-point": self._form_move_snapped_point,
+            "add-pencil": self._form_add_pencil,
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
@@ -486,6 +487,9 @@ class CommandInterpreter:
             "  (point <line> <line>)       the point where two lines meet\n"
             "  (point <line> infinity)     the point at infinity it runs to;\n"
             "                              parallel lines all share one\n"
+            "  (add-pencil <point> <count>)\n"
+            "                              count lines through the point,\n"
+            "                              evenly spaced and pinned to it\n"
             "  (move-snapped-point <point> <fraction>)\n"
             "                              slide a point along the line it is\n"
             "                              snapped to; what dragging it does\n"
@@ -565,6 +569,13 @@ class CommandInterpreter:
                 "(add line …) is now (add-line …), and it takes lists:\n"
                 "  (add-line (list P1) (list P2))   the line P1-P2\n"
                 "  (add-line 30 (list P1))          at 30 degrees through P1"
+            )
+        if what == "pencil":
+            raise CommandError(
+                "A pencil is (add-pencil …) — hyphenated, like (add-line …), "
+                "because it takes an element where add's own subforms take "
+                "numbers:\n"
+                "  (add-pencil P1 10)   ten lines through P1, evenly spaced"
             )
         raise CommandError(
             f"Don't know how to add {args[0]!r}. Try (add point <across> "
@@ -761,6 +772,68 @@ class CommandInterpreter:
         if point is None:
             raise CommandError("That line doesn't cross the canvas.")
         return point
+
+    def _form_add_pencil(self, args) -> list:
+        """``(add-pencil <point> <count>)`` — a fan of lines through a point.
+
+        The lines are evenly spaced and pinned to the point, so the whole
+        pencil turns about it.
+
+        Args:
+            args: The point, and how many lines to draw.
+
+        Returns:
+            The lines, so they compose — ``(format (add-pencil P1 12) 1
+                grey)``.
+        """
+        if len(args) != 2:
+            raise CommandError(
+                "Usage: (add-pencil <point> <count>)\n"
+                "  count lines through the point, evenly spaced and pinned\n"
+                "  e.g. (add-pencil P1 10)"
+            )
+        point = self._as_point(args[0])
+        if point.is_at_infinity():
+            raise CommandError(
+                f"{self._point_name(point)} is a point at infinity: every "
+                "line through it runs the same way, so there are no angles "
+                "to space out. Join it to a point instead — (add-line (list "
+                f"<point>) (list {self._point_name(point)})) — for the "
+                "parallel through that point."
+            )
+        count = self._as_count(args[1])
+        lines = self.scene.add_pencil(point, count)
+        if not lines:
+            raise CommandError(
+                f"Couldn't draw a pencil through {self._point_name(point)}."
+            )
+        return lines
+
+    def _as_count(self, argument) -> int:
+        """A whole number of lines, within :data:`PENCIL_LIMIT`.
+
+        Args:
+            argument: The count, or a form yielding one.
+
+        Returns:
+            The count.
+        """
+        value = self._value(argument)
+        number = parse_fraction(value)
+        if number is None:
+            raise CommandError(
+                f"Couldn't read {value!r} as a number of lines."
+            )
+        if number != int(number):
+            raise CommandError(
+                f"A pencil has a whole number of lines (got {number:g})."
+            )
+        count = int(number)
+        if count < 1 or count > self.PENCIL_LIMIT:
+            raise CommandError(
+                f"Draw between 1 and {self.PENCIL_LIMIT} lines (got {count})."
+            )
+        return count
 
     def _form_move_snapped_point(self, args) -> PointItem:
         """``(move-snapped-point <point> <fraction>)`` — slide it along its line.
@@ -1017,6 +1090,9 @@ class CommandInterpreter:
     #: Most sides one (join …) will draw before refusing. Joining n points
     #: pairwise is n(n-1)/2 lines, which runs away fast: 20 points is 190.
     JOIN_LIMIT = 300
+
+    #: Most lines one pencil may have. Past this the point is solid ink.
+    PENCIL_LIMIT = 360
 
     #: Most times (repeat …) will run a form.
     REPEAT_LIMIT = 100

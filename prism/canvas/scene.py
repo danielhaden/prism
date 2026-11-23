@@ -1507,6 +1507,37 @@ class CanvasScene(QGraphicsScene):
         self.commit_undo()
         return created
 
+    def add_pencil(self, point: PointItem, count: int) -> list:
+        """Draw ``count`` lines through a point, evenly spaced.
+
+        **The spacing is 180°/count, not 360°/count**, and that is geometry
+        rather than a saving. A line has no direction to it: the line at 10°
+        through a point and the line at 190° through it are *the same line*.
+        The directions through a point therefore fill half a turn, not a
+        whole one, and dividing 360 would draw every line twice over for an
+        even count — ten lines asked for, five drawn, each with a twin
+        stacked exactly on it.
+
+        What you see is still a fan filling the circle. Each line runs both
+        ways from the point, so ``count`` lines make ``2 × count`` rays,
+        evenly spaced right round — which is what "evenly spaced around the
+        point" looks like on the canvas.
+
+        The first line is horizontal; the rest follow clockwise from it.
+
+        Args:
+            point: The centre of the pencil.
+            count: How many lines; one or more.
+
+        Returns:
+            The lines created, empty for a point at infinity (which has no
+                pencil of angles — see :meth:`add_projectivity`).
+        """
+        if count < 1:
+            return []
+        step = 180.0 / count
+        return self.add_projectivity(point, [i * step for i in range(count)])
+
     def lines_through_both(self, first: PointItem, second: PointItem) -> list:
         """Every line both points lie on, in creation order.
 

@@ -286,6 +286,46 @@ ideal point of.
     that already share the point when there are any, and reads **Show Point at
     Infinity** once this line has it.
 
+### `(add-pencil <point> <count>)`
+
+Draw `count` lines through a point, evenly spaced, and return them.
+
+```
+(add-pencil P1 10)      # ten lines through P1
+(add-pencil A 24)       # a dense fan through A
+```
+
+Each line is pinned to the point, so the whole pencil turns about it, and the
+first is horizontal with the rest following clockwise.
+
+!!! note "Why the spacing is 180°/count"
+    A line has **no direction** to it: the line at 10° through a point and the
+    line at 190° through it are *the same line*. So the directions through a
+    point fill half a turn, not a whole one.
+
+    `(add-pencil P1 10)` therefore spaces its lines 18° apart, not 36°.
+    Dividing 360 would draw every line twice over for an even count — ten
+    asked for, five drawn, each with a twin stacked exactly on it.
+
+    What you see is still a fan filling the circle. Each line runs *both* ways
+    from the point, so ten lines make twenty rays, evenly spaced right round.
+
+Refused for a point at infinity: every line through one runs the same way, so
+there are no angles to space out.
+[Join it to a point](#point-line-infinity) instead, for the parallel.
+
+The lines come back as a list, so they compose:
+
+```
+(format (add-pencil P1 12) 1 grey)   # a pale fan
+```
+
+!!! tip "From the canvas"
+    Right-click a point → **Add Pencil…** and give it a number.
+    **Add Lines Through Point…** is the fuller form, with a start angle, an
+    end angle and a splay to set; this one is the common case asked as a
+    single number.
+
 ### `(move-snapped-point <point> <fraction>)`
 
 Slide a point along the line it is snapped to, and return it.
@@ -908,6 +948,7 @@ can work on the canvas and come away with the script for what you did.
 | Add Point to Line | `(point <line> <fraction>)` |
 | Add Point at Intersection | `(point <line> <line>)` |
 | Add Line Through Point | `(add-line 45 (list <point>))` |
+| Add Pencil… | `(add-pencil <point> <count>)` |
 | Add Lines Through Point… | one `(add-line <angle> (list <point>))` per ray |
 | Add Line Through Points | `(add-line (list <point>) (list <point>))` |
 | Add / Edit / Remove Label | `(label <element> "…")` |
