@@ -75,7 +75,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.book)
         self.tabifyDockWidget(self.scripts, self.book)
         self.scripts.raise_()
-        self.console.scriptSaved.connect(self._script_saved)
+        # The console's >> hands the session over to the editor.
+        self.console.set_append_handler(self._append_to_script)
 
         self._tool_actions: dict[Tool, QAction] = {}
         self._create_actions()
@@ -540,14 +541,19 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Saved {chosen}", 4000)
         return True
 
-    def _script_saved(self, path: str) -> None:
-        """Open what the console just saved, so it can be edited and re-run."""
-        remember_script(path)
-        if not self.scripts.confirm_discard():
-            self.scripts.refresh()
-            return
-        if self.scripts.open_path(path):
-            self._show_scripts()
+    def _append_to_script(self, commands: list) -> str | None:
+        """Put the console's session at the end of the open script.
+
+        Args:
+            commands: The command lines the console recorded.
+
+        Returns:
+            The script's name, or None if nothing was appended.
+        """
+        if not self.scripts.append_commands(commands):
+            return None
+        self._show_scripts()
+        return self.scripts.current_name()
 
     def _show_scripts(self) -> None:
         """Bring the Scripts panel out from behind whichever tab is raised."""

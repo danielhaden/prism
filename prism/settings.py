@@ -79,22 +79,12 @@ def ensure_scripts_dir() -> str:
     return path
 
 
-def safe_script_name(name: str) -> str:
-    """Reduce a user-supplied name to something usable as a filename."""
-    cleaned = re.sub(r"[^\w \-.]", "", name).strip().strip(".")
-    return cleaned or "untitled"
-
-
-def script_path(name: str) -> str:
-    return os.path.join(scripts_dir(), safe_script_name(name) + SCRIPT_SUFFIX)
-
-
 def write_script(path: str, text: str) -> None:
-    """Overwrite a script at an exact path.
+    """Write a script to an exact path.
 
-    Used when editing a script that is already on disk: the path comes from the
-    file itself rather than from its display name, which matters for a script
-    added by hand under a name :func:`safe_script_name` would alter.
+    Always an exact path: every script Prism writes comes either from the
+    file it was read from or from a Save As dialog, so there is no longer a
+    name to turn into a filename and nothing to mangle on the way.
 
     Args:
         path: The file to write.
@@ -102,14 +92,6 @@ def write_script(path: str, text: str) -> None:
     """
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text if text.endswith("\n") else text + "\n")
-
-
-def save_script(name: str, text: str) -> str:
-    """Write a script to the scripts folder; returns the path written."""
-    ensure_scripts_dir()
-    path = script_path(name)
-    write_script(path, text)
-    return path
 
 
 def load_script(path: str) -> str:

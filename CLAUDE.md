@@ -478,8 +478,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`P1`, `L1`). Fractions accept `1/3` or `0.5`. Angles are **degrees clockwise
   from horizontal**. Canvas fractions: 0 = top/left, 1 = bottom/right, of the
   *reference frame*.
-- **Scripts**: Console "Save Script…" records the session's *building*
-  commands and opens the result in the ScriptsPanel editor, which runs it.
+- **Scripts**: the console's **>>** button appends the session's *building*
+  commands to the ScriptsPanel editor, which runs them.
   Opening, saving and the default folder are the **File menu**'s (see **The
   File menu (scripts)**; `prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides;
   `.prism` text files).
@@ -498,8 +498,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   disk, none of which announces itself; reading those as the menu opens beats
   keeping four actions in step from afar. Open Recent is rebuilt there too.
 - **The default scripts folder is a starting point, not a fence.**
-  `settings.scripts_dir()` is where **Save Script** writes and where **Open**
-  starts looking; opening a script elsewhere changes nothing. Two ways to move
+  `settings.scripts_dir()` is where **Save Script As…** starts and where
+  **Open** looks first; opening a script elsewhere changes nothing. Two ways to move
   it, both under File: a folder dialog, or **Use Current Script's Folder**,
   enabled only when the open script is somewhere else. It moved out of the
   Settings menu — one setting in two menus is only ever a question of which
@@ -513,9 +513,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   is the bare name, qualified with the parent folder only when two entries
   share one (`_recent_label`) — once scripts come from anywhere, two called
   `net` is ordinary.
-- `ConsolePanel.scriptSaved` now carries **the path**. `MainWindow` remembers
-  it and opens it in the editor, so what you just recorded is there to read
-  and run again. It used to carry nothing and refresh the list.
+- **The console's button is `>>`, and it appends to the buffer** rather than
+  writing a file. `ConsolePanel.append_to_script()` hands `_recorded` to the
+  handler `MainWindow` set with `set_append_handler` (a callable, not a
+  signal, because the console needs the answer back — the script's name, or
+  None); `ScriptsPanel.append_commands` puts the lines at the end of the
+  editor, a blank line clear of what was there, and leaves the script
+  **modified rather than written**. So a session can be read, tidied and
+  thrown away before it reaches disk. `_recorded` is **cleared** on success,
+  which is what makes a second press append only what came since.
+  It replaced "Save Script…", which prompted for a name and wrote a file; the
+  File menu does that now, and it did it better. With it went
+  `ConsolePanel.scriptSaved` and `settings.save_script` / `script_path` /
+  `safe_script_name` — the whole name-to-filename chain, since every script
+  Prism writes now comes from the file it was read from or from a Save As
+  dialog, and there is no name left to mangle.
 - `settings.list_scripts()` is **gone** — nothing lists a folder any more.
 
 ## Canvas properties

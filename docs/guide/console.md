@@ -1139,14 +1139,29 @@ Point**. A script of a session that used those will be missing those steps.
 
 Anything you build from the console can be saved and replayed.
 
-### Saving
+### Handing a session to the editor
 
-Click **Save Script…** next to the input and give it a name. The session's
-**building** commands are written out in order — inspection commands
-(`(ls)`, `(help)`) are left out, so the script is just the construction.
+Click **>>** next to the input. The session's **building** commands go to the
+end of whatever script is open in the Scripts panel — inspection commands
+(`(ls)`, `(help)`) are left out, so what arrives is just the construction.
 
-It is written to your [default script folder](#where-scripts-live) and opens
-in the Scripts panel, ready to read, tidy and run again.
+```
+(add horizon 1/3)
+(point L1 1/3)
+
+(add-pencil P1 6)          ; a second press, a second paragraph
+```
+
+Two things follow from it going to the **buffer** rather than to a file.
+Nothing is written until you [save](#opening-a-script) — so you can look at
+what arrived, tidy it, cut the false starts, and throw it away if it was a
+dead end. And the session's record is **emptied** afterwards, so pressing
+**>>** again appends only what you have done since rather than a second copy
+of everything.
+
+That is the whole working rhythm: noodle on the canvas, press **>>**, noodle
+some more, press it again — and what you end up with is a script that
+rebuilds the figure.
 
 ### Opening a script
 
@@ -1209,9 +1224,8 @@ duplicate it into the next thing you save.
 Scripts are plain text files (`.prism`), so you can edit them in any editor as
 well as in the panel.
 
-One folder is the **default**: it is where the console's **Save Script…**
-writes, where **Save Script As…** starts, and where **Open Prism Script…**
-looks first. It defaults to a per-user application-data directory and is
+One folder is the **default**: it is where **Save Script As…** starts and
+where **Open Prism Script…** looks first. It defaults to a per-user application-data directory and is
 remembered between sessions. Two ways to change it, both under **File**:
 
 - **Set Default Script Folder…** picks one with a folder dialog.
