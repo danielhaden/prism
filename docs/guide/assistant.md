@@ -52,6 +52,14 @@ ids it writes are the ids you have.
 It is a conversation, so "now make it denser" follows on from what came
 before. The line under the buttons shows what each turn cost in tokens.
 
+## Reading it
+
+Prose is set in a book serif and scripts in a monospace face, because the
+panel holds two kinds of writing at once and one font cannot serve both —
+prose wants to be read, a script wants its columns. The faces are the first
+available of a short list at the top of `prism/agent_panel.py`, so changing
+them is a one-line edit.
+
 ## Choosing a model
 
 The **Model** box lists what you can actually use. It re-asks each time you

@@ -711,6 +711,18 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(point L1 (2/3))`), and worked examples of building from an empty canvas
   (it reaches for `(point …)` where it needs `(add point …)`). Each of those
   came from a real failure against llama3.2, not from guessing.
+- **The transcript is plain text in two faces.** Prose in a book serif
+  (`PROSE_FAMILIES`: Charter where it exists — Anthropic's own Tiempos Text
+  is licensed and on nobody's machine, and Charter is the closest thing that
+  ships with macOS), scripts in `CODE_FAMILIES`. A `QSyntaxHighlighter`
+  tracks the ``` fences with a block state and sets the face per line, so
+  the document never stops being plain text and `toPlainText()` is still
+  exactly what came back. Speaker lines are their own line and bold, because
+  the old column padding (`f"{who:<7}"`) only lined up in a monospace font.
+- **The speaker line names the provider**, not "Claude" — saying Claude over
+  a local model's reply is a plain lie about where the words came from.
+  `SPEAKERS` must list any name `_speaker_name()` can return, or the
+  highlighter won't bold it.
 - **The API key is never Prism's.** The SDK reads it from the environment
   (`ANTHROPIC_API_KEY`, or an `ant auth login` profile). QSettings is a
   plaintext plist — nothing of the user's goes in it. `looks_configured()`

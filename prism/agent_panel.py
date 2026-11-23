@@ -8,8 +8,14 @@ needs no approval dialogs and cannot wreck a drawing.
 
 from typing import Callable
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtCore import QRegularExpression, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
@@ -35,6 +41,98 @@ from prism.agent.prompt import (
 )
 from prism.agent.worker import AgentWorker
 from prism.settings import assistant_choice, set_assistant_choice
+
+
+#: Prose, in order of preference. Anthropic's own text face is Tiempos
+#: Text, which is licensed and not on anyone's machine by default; Charter
+#: is the closest thing that is — Matthew Carter drew it for screens, and it
+#: is a book serif of the same cast. The rest are fallbacks per platform.
+PROSE_FAMILIES = (
+    "Tiempos Text",
+    "Charter",
+    "Iowan Old Style",
+    "Palatino",
+    "Georgia",
+    "serif",
+)
+
+#: Lines that are a speaker's name and nothing else; set in bold so a turn
+#: can be found at a glance.
+SPEAKERS = ("You", "Claude", "Ollama", "Assistant")
+
+#: Scripts, which want the alignment and the unambiguous glyphs.
+CODE_FAMILIES = ("Menlo", "SF Mono", "Consolas", "DejaVu Sans Mono", "monospace")
+
+#: Prose is read; code is scanned. A point smaller keeps a long command on
+#: one line in a narrow dock.
+PROSE_POINT_SIZE = 14
+CODE_POINT_SIZE = 12
+
+
+def _font(families, point_size: int) -> QFont:
+    """A font from the first of ``families`` that exists.
+
+    Args:
+        families: Family names, most wanted first.
+        point_size: The size to set.
+
+    Returns:
+        The font.
+    """
+    font = QFont()
+    font.setFamilies(list(families))
+    font.setPointSize(point_size)
+    return font
+
+
+class _Transcript(QSyntaxHighlighter):
+    """Draws the parts of a reply in the faces they want.
+
+    The transcript holds two kinds of writing at once — prose to read and a
+    script to scan — and one font cannot serve both. A highlighter does it
+    without the document ceasing to be plain text, so what is on screen is
+    still exactly what came back.
+    """
+
+    #: What opens and closes a script in a reply.
+    FENCE = QRegularExpression(r"^\s*```")
+
+    #: Inside a fenced block, as a block state.
+    IN_SCRIPT = 1
+
+    def __init__(self, document):
+        super().__init__(document)
+        self._code = QTextCharFormat()
+        self._code.setFontFamilies(list(CODE_FAMILIES))
+        self._code.setFontPointSize(CODE_POINT_SIZE)
+
+        self._fence = QTextCharFormat()
+        self._fence.setFontFamilies(list(CODE_FAMILIES))
+        self._fence.setFontPointSize(CODE_POINT_SIZE)
+        self._fence.setForeground(QColor("#b0b0b0"))
+
+        self._speaker = QTextCharFormat()
+        self._speaker.setFontWeight(QFont.Bold)
+        self._speaker.setForeground(QColor("#777777"))
+
+        self._aside = QTextCharFormat()
+        self._aside.setForeground(QColor("#999999"))
+        self._aside.setFontItalic(True)
+
+    def highlightBlock(self, text: str) -> None:
+        was_script = self.previousBlockState() == self.IN_SCRIPT
+        if self.FENCE.match(text).hasMatch():
+            self.setFormat(0, len(text), self._fence)
+            self.setCurrentBlockState(0 if was_script else self.IN_SCRIPT)
+            return
+        self.setCurrentBlockState(self.IN_SCRIPT if was_script else 0)
+        if was_script:
+            self.setFormat(0, len(text), self._code)
+        elif text in SPEAKERS:
+            self.setFormat(0, len(text), self._speaker)
+        elif text.startswith("  — ") or text.startswith("      "):
+            # What Prism itself says about a reply, rather than the reply.
+            self.setFormat(0, len(text), self._aside)
 
 
 class _AskInput(QPlainTextEdit):
@@ -97,15 +195,16 @@ class AgentPanel(QDockWidget):
         self._script: str | None = None
         self._pending_prose = ""
 
-        mono = QFont("Menlo")
-        mono.setStyleHint(QFont.Monospace)
+        prose = _font(PROSE_FAMILIES, PROSE_POINT_SIZE)
 
         self._transcript = QPlainTextEdit()
         self._transcript.setReadOnly(True)
-        self._transcript.setFont(mono)
+        self._transcript.setFont(prose)
+        self._transcript.setViewportMargins(4, 4, 4, 4)
+        self._highlighter = _Transcript(self._transcript.document())
 
         self._input = _AskInput()
-        self._input.setFont(mono)
+        self._input.setFont(prose)
         self._input.submitted.connect(self.send)
 
         self._send_button = QPushButton("Send")
@@ -266,7 +365,7 @@ class AgentPanel(QDockWidget):
             )
             return False
         self._input.clear()
-        self._say("you", asked)
+        self._say("You", asked)
         context = canvas_context(self._interpreter())
         self._messages.append(
             {"role": "user", "content": f"{context}\n\n{asked}".strip()}
@@ -283,7 +382,7 @@ class AgentPanel(QDockWidget):
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._forget_worker)
-        self._append("\nclaude  ")
+        self._append(f"\n{self._speaker_name()}\n")
         self._worker.start()
         return True
 
@@ -381,10 +480,23 @@ class AgentPanel(QDockWidget):
 
     def _greet(self) -> None:
         self._append(
-            "Prism assistant. Ask for a construction and it writes a script;\n"
-            "read it, then send it to the Scripts panel to run.\n"
+            "Ask for a construction and the assistant writes a script. Read "
+            "it, then send it to the Scripts panel to run.\n"
         )
         self._greet_status()
+
+    def _speaker_name(self) -> str:
+        """What to call whatever is answering.
+
+        Returns:
+            The provider's name — saying "Claude" over a local model's reply
+                would be a plain lie about where the words came from.
+        """
+        if isinstance(self._backend, OllamaBackend):
+            return "Ollama"
+        if isinstance(self._backend, ClaudeBackend):
+            return "Claude"
+        return "Assistant"
 
     def _greet_status(self) -> None:
         """Say which model is answering, or why none is."""
@@ -405,7 +517,7 @@ class AgentPanel(QDockWidget):
         self._status.setText(self._models.currentText())
 
     def _say(self, who: str, text: str) -> None:
-        self._append(f"\n{who:<7} {text}\n")
+        self._append(f"\n{who}\n{text}\n")
 
     def _append(self, text: str) -> None:
         cursor = self._transcript.textCursor()
