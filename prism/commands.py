@@ -99,6 +99,8 @@ class CommandInterpreter:
             "move-snapped-point": self._form_move_snapped_point,
             "add-pencil": self._form_add_pencil,
             "style": self._form_style,
+            "canvas": self._form_canvas,
+            "canvas-auto-intersect": self._form_canvas_moved,
             "rm": self._form_rm,
             "hide": self._form_hide,
             "show": self._form_show,
@@ -490,6 +492,9 @@ class CommandInterpreter:
             "  (point <line> <line>)       the point where two lines meet\n"
             "  (point <line> infinity)     the point at infinity it runs to;\n"
             "                              parallel lines all share one\n"
+            "  (canvas <property> <value>) a property of the canvas itself;\n"
+            "                              (canvas) lists them. So far:\n"
+            "                              auto-intersect true/false\n"
             "  (style \"<script>\")         take the canvas's default look\n"
             "                              from a script of (format …);\n"
             "                              (style -none) to stop\n"
@@ -575,6 +580,12 @@ class CommandInterpreter:
                 "(add line …) is now (add-line …), and it takes lists:\n"
                 "  (add-line (list P1) (list P2))   the line P1-P2\n"
                 "  (add-line 30 (list P1))          at 30 degrees through P1"
+            )
+        if what == "auto-intersect":
+            raise CommandError(
+                "That is a property of the canvas, not something to add:\n"
+                "  (canvas auto-intersect false)   mark only the crossings "
+                "you ask for"
             )
         if what == "pencil":
             raise CommandError(
@@ -1536,6 +1547,119 @@ class CommandInterpreter:
         described = ", ".join(self._element_name(item) for item in elements)
         return f"Reset {described} to the default look"
 
+    #: Canvas properties ``(canvas …)`` can read, and which of them it can
+    #: set. The style is listed but not set here: it has its own form, and
+    #: one setting with two spellings is a question of which is stale.
+    CANVAS_PROPERTIES = ("auto-intersect", "style")
+
+    def _form_canvas(self, args) -> str:
+        """``(canvas auto-intersect false)`` — a property of the canvas itself.
+
+        With no arguments it lists them; with one it reports that one; with
+        two it sets it.
+
+        Args:
+            args: A property name, and a value to set it to.
+
+        Returns:
+            What the property is, or has become.
+        """
+        if not args:
+            return "\n".join(
+                f"  {name:<16} {self._canvas_property(name)}"
+                for name in self.CANVAS_PROPERTIES
+            )
+        name = str(self._value(args[0])).lower()
+        if name not in self.CANVAS_PROPERTIES:
+            known = ", ".join(self.CANVAS_PROPERTIES)
+            raise CommandError(
+                f"The canvas has no property {name!r}. It has: {known}."
+            )
+        if len(args) == 1:
+            return f"{name} {self._canvas_property(name)}"
+        if len(args) != 2:
+            raise CommandError(_CANVAS_USAGE)
+        if name == "style":
+            raise CommandError(
+                'The style is set with (style "<script>"), which reads the '
+                "script and applies it. (canvas) reports it."
+            )
+        wanted = self._as_flag(args[1])
+        if not self.scene.set_auto_intersect(wanted):
+            return f"auto-intersect was already {self._flag_text(wanted)}."
+        self.scene.commit_undo()
+        if wanted:
+            return (
+                "auto-intersect true — a point is kept wherever lines cross."
+            )
+        return (
+            "auto-intersect false — only the crossings you ask for are "
+            "marked. (point <line> <line>) marks one; the rest were cleared, "
+            "except any you had labelled, hidden, built on or asked for."
+        )
+
+    def _form_canvas_moved(self, args) -> str:
+        """Say where ``(canvas-auto-intersect …)`` went.
+
+        One form for every canvas property keeps the next one from costing a
+        new command name, as ``(add line …)`` became ``(add-line …)``.
+
+        Args:
+            args: Ignored.
+
+        Raises:
+            CommandError: Always; this form points at the other.
+        """
+        raise CommandError(
+            "Canvas properties share one form:\n"
+            "  (canvas auto-intersect false)   set it\n"
+            "  (canvas auto-intersect)         report it\n"
+            "  (canvas)                        list them all"
+        )
+
+    def _canvas_property(self, name: str) -> str:
+        """A canvas property as the user would read it.
+
+        Args:
+            name: One of :data:`CANVAS_PROPERTIES`.
+
+        Returns:
+            Its value, as text.
+        """
+        if name == "auto-intersect":
+            return self._flag_text(self.scene.auto_intersect())
+        path = self.scene.style_path()
+        return path if path else "(none)"
+
+    #: What counts as yes and no in a canvas property.
+    TRUE_WORDS = ("true", "yes", "on", "1")
+    FALSE_WORDS = ("false", "no", "off", "0")
+
+    def _as_flag(self, argument) -> bool:
+        """Read a yes-or-no value.
+
+        Args:
+            argument: ``true``/``false``, or ``yes``/``no``, ``on``/``off``,
+                ``1``/``0``.
+
+        Returns:
+            What it means.
+        """
+        value = str(self._value(argument)).strip().lower()
+        if value in self.TRUE_WORDS:
+            return True
+        if value in self.FALSE_WORDS:
+            return False
+        raise CommandError(
+            f"Couldn't read {value!r} as true or false. Use true or false "
+            "(yes/no and on/off work too)."
+        )
+
+    @staticmethod
+    def _flag_text(value: bool) -> str:
+        """A yes-or-no value as the commands spell it."""
+        return "true" if value else "false"
+
     def _form_style(self, args) -> str:
         """``(style "<script>")`` — take the canvas's default look from a script.
 
@@ -2083,6 +2207,14 @@ _FORMAT_USAGE = (
     "  A list works wherever one element does.\n"
     "   or: (format <element> -default)          back to the plain look,\n"
     "                                            and back under the style"
+)
+
+_CANVAS_USAGE = (
+    "Usage: (canvas <property> <value>)   set a property of the canvas\n"
+    "   or: (canvas <property>)           report one\n"
+    "   or: (canvas)                      list them all\n"
+    "  auto-intersect  true/false — whether a point is kept wherever\n"
+    "                  lines cross; false marks only the ones you ask for"
 )
 
 _STYLE_USAGE = (

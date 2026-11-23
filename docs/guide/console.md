@@ -286,6 +286,51 @@ ideal point of.
     that already share the point when there are any, and reads **Show Point at
     Infinity** once this line has it.
 
+### `(canvas <property> <value>)`
+
+A property of the canvas itself, rather than of anything on it.
+
+```
+(canvas)                           # list them all
+(canvas auto-intersect)            # report one
+(canvas auto-intersect false)      # set it
+```
+
+One form for all of them, so the next property costs a name in a list rather
+than a command of its own.
+
+#### `auto-intersect`
+
+Whether a point is kept **wherever lines cross**. True by default, which is
+what makes `(point L1 L2)` a matter of *finding* the crossing rather than
+making one.
+
+Set it false and the canvas marks only the crossings you ask for. In a
+[harmonic net](../concepts/projective-basics.md#construction-by-composition)
+every pair of lines crosses somewhere, and a figure of forty lines carries
+hundreds of dots that say nothing about the construction. Turning it off
+leaves the figure readable and the geometry untouched — the lines still meet
+where they meet.
+
+```
+(canvas auto-intersect false)
+(point L1 L2)                      # now this marks one, and keeps it
+```
+
+Switching it **off clears the markers nothing asks for**. It spares every one
+you have labelled, hidden, built on, bounded a segment with, or asked for by
+name — so nothing you have done is lost, and switching back **on** brings the
+rest back with their labels intact.
+
+A crossing you asked for stays for good: it follows its lines as they move,
+you can build on it, it survives further drawing and a reload, and a later
+sweep leaves it alone.
+
+!!! note "It changes what is drawn, not what is true"
+    Lines still meet where they meet. `(point L1 L2)` finds the crossing
+    either way — with `auto-intersect` off it marks it at the same moment,
+    which is the only difference.
+
 ### `(style "<script>")`
 
 Take the canvas's **default look** from a script of `(format …)` commands.

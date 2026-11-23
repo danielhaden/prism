@@ -34,6 +34,12 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
     #: Whether this point's look was chosen directly rather than by a style.
     #: A class attribute, so it is there however early Qt calls back in.
     _styled_by_hand = False
+
+    #: Whether a crossing was asked for by name rather than found by the
+    #: automatic sweep. Only meaningful on a meet, and only matters when the
+    #: canvas is **not** adding crossings automatically: it is what makes
+    #: this one yours, and keeps it.
+    _asked_for = False
     DEFAULT_GLOW_RADIUS = 7.0
     DEFAULT_GLOW_COLOR = "#fafafa"  # matches the canvas background
 
@@ -139,6 +145,19 @@ class PointItem(Definable, Labelable, QGraphicsEllipseItem):
         self._glow_radius = float(self.DEFAULT_GLOW_RADIUS)
         self._glow_color = QColor(self.DEFAULT_GLOW_COLOR)
         self.update()
+
+    def was_asked_for(self) -> bool:
+        """Whether this crossing was asked for rather than swept up.
+
+        With ``auto-intersect`` off the canvas marks no crossing of its own
+        accord, so the ones that are there are the ones you named. That has
+        to outlive a sweep, and a reload.
+        """
+        return self._asked_for
+
+    def set_asked_for(self, asked: bool) -> None:
+        """Say whether this crossing was asked for by name."""
+        self._asked_for = bool(asked)
 
     def is_styled_by_hand(self) -> bool:
         """Whether someone formatted this point directly.

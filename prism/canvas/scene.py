@@ -152,6 +152,10 @@ class CanvasScene(QGraphicsScene):
         # so several drawings can share one and editing it reaches them all.
         self._style_path: str | None = None
         self._style_commands: list = []
+        # Whether a point is kept wherever lines cross. Off, the canvas marks
+        # only the crossings you ask for — a dense net is unreadable with
+        # every one of them dotted in.
+        self._auto_intersect = True
         # Lines the style holds that a style may not say; see STYLE_FORMS.
         self._style_refused: list = []
         # How many style passes are running. A count rather than a flag, so a
@@ -1129,6 +1133,47 @@ class CanvasScene(QGraphicsScene):
         rect = self.reference_rect()
         return self._add_vertical_at_x(rect.left() + fraction * rect.width())
 
+    # -- Canvas properties -------------------------------------------------
+
+    def auto_intersect(self) -> bool:
+        """Whether a point is kept wherever lines cross."""
+        return self._auto_intersect
+
+    def set_auto_intersect(self, on: bool) -> bool:
+        """Turn automatic crossing points on or off.
+
+        Switching it **on** brings every crossing back on the next recompute.
+        Switching it **off** clears the markers nothing asks for — see
+        :meth:`_meet_is_spoken_for` for what that spares, which is everything
+        you have labelled, hidden, built on, bounded a segment with, or asked
+        for by name. So the clearing loses no work, and turning it on again
+        puts the rest back with their labels intact.
+
+        Args:
+            on: Whether to mark crossings automatically.
+
+        Returns:
+            Whether the setting changed.
+        """
+        on = bool(on)
+        if on == self._auto_intersect:
+            return False
+        self._auto_intersect = on
+        if on:
+            self.recompute_intersections()
+        else:
+            self._clear_unasked_meets()
+        self.settle_definitions()
+        return True
+
+    def _clear_unasked_meets(self) -> None:
+        """Take away the crossing markers nothing asks for."""
+        for point in list(self._meets):
+            if self._meet_is_spoken_for(point):
+                continue
+            self._meets.remove(point)
+            self._retire_point(point)
+
     # -- The canvas's style ------------------------------------------------
 
     def applying_default_style(self) -> bool:
@@ -1912,12 +1957,9 @@ class CanvasScene(QGraphicsScene):
         for where, lines in places:
             point = self._claim_meet(spare, lines)
             if point is None:
-                point = PointItem(where)
-                point.set_anchor(MeetAnchor(lines))
-                self._apply_default_point_style(point)
-                self._tag(point)
-                self.addItem(point)
-                self._meets.append(point)
+                if not self._auto_intersect:
+                    continue  # nobody asked for this crossing
+                self._new_meet(where, lines)
             else:
                 spare.remove(point)
                 point.anchor().set_lines(lines)
@@ -1929,12 +1971,7 @@ class CanvasScene(QGraphicsScene):
                 # not the scene's to manage.
                 self._meets.remove(point)
                 continue
-            if (
-                self._is_depended_on(point)
-                or self._bounds_a_segment(point)
-                or point.label_text()
-                or not point.is_shown()
-            ):
+            if self._meet_is_spoken_for(point):
                 # Something is built on this meet, or you have said something
                 # about it, so it outlives the crossing: undefined, ready to
                 # come back when the lines meet again.
@@ -1942,6 +1979,47 @@ class CanvasScene(QGraphicsScene):
             else:
                 self._meets.remove(point)
                 self._retire_point(point)
+
+    def _meet_is_spoken_for(self, point: PointItem) -> bool:
+        """Whether a crossing marker is wanted apart from the lines crossing.
+
+        The reasons a marker outlives its crossing, and the same reasons it
+        survives ``auto-intersect`` being switched off: something is built on
+        it, it bounds a drawn segment, you have named it, you have hidden it
+        (so the scene is remembering that choice), or you asked for it by
+        name in the first place.
+
+        Args:
+            point: The marker to judge.
+
+        Returns:
+            Whether to keep it.
+        """
+        return bool(
+            self._is_depended_on(point)
+            or self._bounds_a_segment(point)
+            or point.label_text()
+            or not point.is_shown()
+            or point.was_asked_for()
+        )
+
+    def _new_meet(self, where: QPointF, lines: list) -> PointItem:
+        """Put a marker at a crossing and take it into the scene's keeping.
+
+        Args:
+            where: The scene position.
+            lines: The lines meeting there.
+
+        Returns:
+            The new marker.
+        """
+        point = PointItem(where)
+        point.set_anchor(MeetAnchor(lines))
+        self._apply_default_point_style(point)
+        self._tag(point)
+        self.addItem(point)
+        self._meets.append(point)
+        return point
 
     @staticmethod
     def _claim_meet(candidates: list, lines: list):
@@ -2013,6 +2091,34 @@ class CanvasScene(QGraphicsScene):
         for point in self.ideal_points():
             anchor = point.anchor()
             if anchor.references_line(a) and anchor.references_line(b):
+                return point
+        if not self._auto_intersect:
+            # Nothing was swept up, because the canvas isn't sweeping. Asking
+            # for this one is what brings it into being — and marks it as
+            # asked for, so it stays.
+            return self._mark_meet_of(a, b)
+        return None
+
+    def _mark_meet_of(self, a: LineItem, b: LineItem) -> PointItem | None:
+        """Put a marker where two lines cross, whether or not they were swept.
+
+        For ``auto-intersect`` off, where the crossing is real but unmarked.
+        The place is found the same way the automatic sweep finds it, so a
+        third line already concurrent there joins the same point rather than
+        a second one appearing on top of it.
+
+        Args:
+            a: One line.
+            b: The other.
+
+        Returns:
+            The marker, or None if the two don't cross on the canvas.
+        """
+        for where, lines in self._gather_meeting_places():
+            if any(ln is a for ln in lines) and any(ln is b for ln in lines):
+                point = self._new_meet(where, lines)
+                point.set_asked_for(True)
+                self.settle_definitions()
                 return point
         return None
 

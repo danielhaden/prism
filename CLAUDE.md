@@ -368,6 +368,7 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   `(label <element> <text>)`, `(label -auto|-clear)`, `(hide …)`, `(show …)`,
   `(list <element> …)`, `(define <name> <value>)`, `(clear)`,
   `(add-pencil <point> <count>)`, `(style "<script>")`,
+  `(canvas <property> <value>)`,
   `(format <element> -default)`,
   `(move-snapped-point <point> <fraction>)`,
   `(segment <line> <point> <point>)`, `(segment <line> -full)`,
@@ -516,6 +517,41 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   it and opens it in the editor, so what you just recorded is there to read
   and run again. It used to carry nothing and refresh the list.
 - `settings.list_scripts()` is **gone** — nothing lists a folder any more.
+
+## Canvas properties
+
+- **`(canvas <property> <value>)`** is the one form for every property of the
+  canvas itself; `(canvas)` lists them, `(canvas <property>)` reports one.
+  One form rather than a `canvas-*` family, so the next property costs a name
+  in `CANVAS_PROPERTIES` instead of a command. `(canvas-auto-intersect …)`
+  and `(add auto-intersect …)` are both kept as errors saying where it went.
+  `style` is **listed but not settable** here — it has `(style …)`, which
+  reads the script and applies it.
+- **`auto-intersect`** (`scene._auto_intersect`, persisted) decides whether
+  `_apply_meets` **creates** a marker for a place no existing marker claims.
+  Off, it skips creation and nothing else: markers already there are still
+  claimed, updated and followed as their lines move, so what you asked for
+  stays live.
+- **`_meet_is_spoken_for()`** is the keep-rule, pulled out of `_apply_meets`
+  and now used by both it and the sweep: depended on, bounds a segment,
+  labelled, hidden, **or asked for by name**. Switching auto-intersect off
+  clears everything else (`_clear_unasked_meets`), so the clearing loses no
+  work and switching back on restores the rest with their labels.
+- **`PointItem._asked_for`** is the new reason, set by `_mark_meet_of()`,
+  which `meet_of` falls through to when auto-intersect is off. It finds the
+  place the same way the sweep does, so a third line already concurrent there
+  joins the same point rather than a second appearing on top of it.
+- **It is persisted on the crossing record, and restore has to *make* the
+  marker.** With auto-intersect off the recompute marks nothing, so
+  `_restore_crossing_labels` — which used to only decorate markers the
+  recompute had built — now calls `scene.meet_of(...)` for a recorded
+  crossing it can't find. Without that, reloading lost every crossing you had
+  named. `capture` keeps a crossing that is labelled, hidden **or asked for**.
+  `scene._auto_intersect` is restored *before* `recompute_intersections()`,
+  which is what reads it.
+- This is **"Next steps" item 3** (intersection-marker visibility control)
+  done, for the case that matters: a dense net can now be built without
+  hundreds of dots that say nothing about the construction.
 
 ## The canvas's style
 
@@ -869,6 +905,9 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
    (three collinear points → the fourth harmonic), which is what makes a net
    *disciplined* rather than merely dense.
 3. Intersection-marker **visibility control** (dense nets get busy).
+   **Done** as `(canvas auto-intersect false)` — see **Canvas
+   properties**. What is left is finer grain than all-or-nothing:
+   marking crossings of a chosen set of lines, say.
 4. Save/load a drawing to a file (scene_state is most of the way there).
 5. Possibly: promote/detach UX, snapping toggles, coordinate readout.
 
