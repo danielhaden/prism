@@ -109,6 +109,18 @@ class ConsolePanel(QDockWidget):
         if ok and self._recording and self._interpreter.is_recordable(line):
             self._recorded.append(line.strip())
 
+    def interpreter(self):
+        """The command interpreter, for panels that read the language off it.
+
+        The Assistant builds its reference from ``(help)`` and its canvas
+        context from ``(ls)``, so the two cannot drift from the forms that
+        actually exist.
+
+        Returns:
+            The :class:`~prism.commands.CommandInterpreter`.
+        """
+        return self._interpreter
+
     def variables(self) -> dict:
         """The names bound with ``(define …)``, for panels that show them."""
         return self._interpreter.variables()

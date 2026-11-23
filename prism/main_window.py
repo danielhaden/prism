@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMainWindow
 
+from prism.agent_panel import AgentPanel
 from prism.book_panel import BookPanel
 from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
@@ -39,7 +40,8 @@ class MainWindow(QMainWindow):
     #: 2: the Library dock went, and the right-hand tab group is anchored on
     #: Scripts instead — a layout saved against the old group would restore
     #: with a tab that no longer exists.
-    LAYOUT_VERSION = 2
+    #: 3: the Assistant dock joined that group.
+    LAYOUT_VERSION = 3
 
     #: Bumped when the saved-canvas format changes in a way that can't be
     #: read back; an older file is then ignored rather than half-restored.
@@ -70,6 +72,12 @@ class MainWindow(QMainWindow):
         # Saving an untitled script needs the File menu's dialog, so the
         # panel's own Save button goes the same way as the menu command.
         self.scripts.set_save_handler(self._save_script)
+
+        self.agent = AgentPanel(lambda: self.console.interpreter(), self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.agent)
+        self.tabifyDockWidget(self.scripts, self.agent)
+        # What the assistant writes goes where everything else written goes.
+        self.agent.set_script_sink(self._append_to_script)
 
         self.book = BookPanel(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.book)
@@ -162,6 +170,8 @@ class MainWindow(QMainWindow):
         if not self.scripts.confirm_discard():
             event.ignore()
             return
+        # A turn still in flight would outlive the window Qt is tearing down.
+        self.agent.shutdown()
         self._save_drawing()
         set_window_geometry(self.saveGeometry())
         set_window_state(self.saveState(self.LAYOUT_VERSION))
@@ -364,6 +374,9 @@ class MainWindow(QMainWindow):
         toggle_elements = self.elements.toggleViewAction()
         toggle_elements.setText("Show Elements")
         view_menu.addAction(toggle_elements)
+        toggle_agent = self.agent.toggleViewAction()
+        toggle_agent.setText("Show Assistant")
+        view_menu.addAction(toggle_agent)
         toggle_book = self.book.toggleViewAction()
         toggle_book.setText("Show Book")
         view_menu.addAction(toggle_book)

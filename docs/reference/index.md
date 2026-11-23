@@ -27,6 +27,8 @@ main.py  →  prism.app.run()  →  prism.main_window.MainWindow
 - **Items** (`prism.items`) are the drawable objects. `PointItem` and
   `LineItem` mix in `Labelable` for right-click labels.
 - **Commands** (`prism.commands`) back the console.
+- **Agent** (`prism.agent`) is the Assistant: the prompt it works from,
+  the backend it asks, and the thread it asks on.
 
 ## Contributing docstrings
 
@@ -40,4 +42,5 @@ clarity. mkdocstrings renders them here automatically.
 - [Dependencies](dependencies.md) — what is computed from what
 - [Canvas](canvas.md) — the scene and view
 - [Console Commands](commands.md) — the CLI interpreter
+- [Assistant](agent.md) — the script-writing chat
 - [Application](app.md) — entry point, main window, tools

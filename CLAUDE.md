@@ -633,6 +633,50 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   so it does not mark a new point as the user's own. A style asserted
   afterwards wins over it.
 
+## The Assistant (`prism/agent/`, `prism/agent_panel.py`)
+
+- **It writes scripts; it does not touch the canvas.** A reply's fenced
+  `prism` block goes to the **Scripts panel** through the same
+  `append_commands` path the console's `>>` uses, and the user reads it and
+  runs it. That is the whole safety story — no tools, no approval dialogs,
+  nothing happening to a drawing unreviewed — and it is why this was worth
+  building before a tool-using agent.
+- **The command reference is read off the interpreter** (`(help)`), not
+  written out in the prompt. A hand-copied reference goes stale the first
+  time a form is added, and a stale one is worse than none: the model writes
+  commands that don't exist, confidently. `ConsolePanel.interpreter()` exists
+  for this.
+- **Canvas state goes in the user turn, not the system prompt**
+  (`canvas_context` → `(ls)`). The system prompt carries one
+  `cache_control: ephemeral` breakpoint, and caching is a prefix match — put
+  the canvas in there and every turn throws the cache away.
+- **Threading**: `AgentWorker` is a `QThread` that owns the request and hands
+  text back through signals, which Qt delivers on the GUI thread. Nothing in
+  `prism/agent/` touches a widget or the scene. Mode A has no tools, so there
+  is no marshalling the other way — that is the thing to get right if tools
+  are ever added (a tool handler must hop to the GUI thread with
+  `BlockingQueuedConnection`, and the GUI thread must then never block on the
+  worker, or the two deadlock).
+- **A turn that fails or is stopped is taken back out of the history.**
+  Leaving the question in would send it again, unanswered, stacked on the
+  next one; a half-streamed reply would be sent back as though finished.
+- **The API key is never Prism's.** The SDK reads it from the environment
+  (`ANTHROPIC_API_KEY`, or an `ant auth login` profile). QSettings is a
+  plaintext plist — nothing of the user's goes in it. `looks_configured()`
+  only decides whether to show a hint; it never blocks a send, since a
+  profile works with no environment variable at all.
+- Model `claude-opus-5-5`, adaptive thinking with `display: "summarized"`
+  (without it a long think is a silent pause that reads as a hang — the
+  summary goes to the status line, not the transcript), `effort: medium`,
+  streaming.
+- `anthropic>=2.0` is the first dependency beyond PySide6. The panel degrades
+  to a message if it is missing; Prism still runs.
+- **This is "Mode A"** of the design we settled on: conversational, no tools.
+  Mode B — the model driving the canvas through `run_prism_command`, with a
+  `look_at_canvas` screenshot tool — is the next step, and `backends.py`'s
+  seam is the **turn**, so a local model slots in by implementing
+  `stream_turn` alone.
+
 ## Panels
 
 - **Console** (bottom).

@@ -61,6 +61,7 @@ nav:
       - Points & Lines: guide/points-and-lines.md
       - Projectivities & Pivots: guide/projectivities.md
       - The Console: guide/console.md
+      - The Assistant: guide/assistant.md
       - The Book: guide/book.md
   - Concepts:
       - Projective Basics: concepts/projective-basics.md
@@ -71,4 +72,5 @@ nav:
       - Dependencies: reference/dependencies.md
       - Canvas: reference/canvas.md
       - Console Commands: reference/commands.md
+      - Assistant: reference/agent.md
       - Application: reference/app.md
