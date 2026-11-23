@@ -633,6 +633,34 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   so it does not mark a new point as the user's own. A style asserted
   afterwards wins over it.
 
+## Exporting (`prism/svg_export.py`)
+
+- **File → Export as SVG…** (Ctrl+Shift+E) writes **what the view shows** —
+  same pan, same zoom, lines clipped at the same edges. Fit to Frame first
+  for the reference frame. `QSvgGenerator`, from PySide6's own QtSvg, so no
+  new dependency.
+- **It renders the scene, not the view.** `view.render()` would bring
+  `drawForeground` with it, and the off-screen point markers are a way of
+  finding points, not part of the drawing.
+- **It must paint the background itself.** `setBackgroundBrush` is on the
+  *view*, so `scene.render()` leaves it out — and a point's glow is a disc
+  **in the background colour**, drawn over the lines to cut them away behind
+  the dot. Without the fill those discs are grey blobs on transparency.
+  Checked by rendering the file back with `QSvgRenderer` and reading the
+  corner pixel.
+- **It lifts the selection** for the duration and puts it back in a
+  `finally`. Selected items paint highlighted, and nobody wants orange in an
+  exported figure.
+- `QSvgGenerator` writes `width`/`height` in **millimetres**; the `viewBox`
+  carries the pixel coordinate system. A test that pins the size should pin
+  the viewBox.
+- No console form, and that is the rule rather than an omission: exporting
+  does not *build* anything, so it belongs with `(ls)` rather than with the
+  commands a script replays. If one is ever added it goes in
+  `NON_RECORDING`.
+- The folder is remembered (`settings.export_dir`), since a drawing you
+  export is one you export again.
+
 ## The Assistant (`prism/agent/`, `prism/agent_panel.py`)
 
 - **It writes scripts; it does not touch the canvas.** A reply's fenced

@@ -30,6 +30,7 @@ SCRIPT_SUFFIX = ".prism"
 
 _SCRIPTS_DIR_KEY = "paths/scripts_dir"
 _RECENT_SCRIPTS_KEY = "scripts/recent"
+_EXPORT_DIR_KEY = "paths/export_dir"
 _BOOK_PATH_KEY = "paths/book_path"
 _WINDOW_GEOMETRY_KEY = "window/geometry"
 _WINDOW_STATE_KEY = "window/state"
@@ -97,6 +98,31 @@ def write_script(path: str, text: str) -> None:
 def load_script(path: str) -> str:
     with open(path, encoding="utf-8") as handle:
         return handle.read()
+
+
+# -- Exporting -----------------------------------------------------------
+
+
+def export_dir() -> str:
+    """The folder an export dialog opens in.
+
+    Remembered from the last one, because a drawing you export is a drawing
+    you export again, and the second time should not start from wherever the
+    app happened to be launched.
+
+    Returns:
+        A folder; the user's documents, or home, until one is used.
+    """
+    stored = QSettings().value(_EXPORT_DIR_KEY, "")
+    if stored and os.path.isdir(stored):
+        return stored
+    base = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    return base or os.path.expanduser("~")
+
+
+def set_export_dir(path: str) -> None:
+    """Remember the folder an export was written to."""
+    QSettings().setValue(_EXPORT_DIR_KEY, path)
 
 
 # -- Recently opened -----------------------------------------------------

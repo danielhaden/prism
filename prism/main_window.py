@@ -13,8 +13,10 @@ from prism.console_panel import ConsolePanel
 from prism.scripts_panel import ScriptsPanel
 from prism.elements_panel import ElementsPanel
 from prism.scene_state import capture, restore
+from prism.svg_export import export_svg
 from prism.settings import (
     SCRIPT_SUFFIX,
+    export_dir,
     clear_recent_scripts,
     clear_window_layout,
     ensure_scripts_dir,
@@ -26,6 +28,7 @@ from prism.settings import (
     scripts_dir,
     scripts_dir_is_fixed,
     set_scripts_dir,
+    set_export_dir,
     set_window_geometry,
     set_window_state,
     window_geometry,
@@ -285,6 +288,14 @@ class MainWindow(QMainWindow):
         self.save_script_as_action.triggered.connect(self._save_script_as)
         self.addAction(self.save_script_as_action)
 
+        self.export_svg_action = QAction("Export as SVG…", self)
+        self.export_svg_action.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self.export_svg_action.setToolTip(
+            "Write what the canvas is showing to an SVG file (Ctrl+Shift+E)"
+        )
+        self.export_svg_action.triggered.connect(self._export_svg)
+        self.addAction(self.export_svg_action)
+
         self.default_folder_action = QAction("Set Default Script Folder…", self)
         self.default_folder_action.setToolTip(
             "Where Save Script writes, and where Open starts looking"
@@ -340,6 +351,8 @@ class MainWindow(QMainWindow):
         self._file_menu.addSeparator()
         self._file_menu.addAction(self.save_script_action)
         self._file_menu.addAction(self.save_script_as_action)
+        self._file_menu.addSeparator()
+        self._file_menu.addAction(self.export_svg_action)
         self._file_menu.addSeparator()
         self._file_menu.addAction(self.default_folder_action)
         self._file_menu.addAction(self.adopt_folder_action)
@@ -595,6 +608,32 @@ class MainWindow(QMainWindow):
     def _detach_style(self) -> None:
         if not self.scene.run_as_command("(style -none)"):
             self.scene.detach_style()
+
+    def _export_svg(self) -> bool:
+        """Write what the canvas is showing to an SVG file.
+
+        Returns:
+            Whether it was written.
+        """
+        suggested = os.path.join(export_dir(), "prism-drawing.svg")
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Export as SVG", suggested, "SVG images (*.svg);;All files (*)"
+        )
+        if not chosen:
+            return False
+        if "." not in os.path.basename(chosen):
+            chosen += ".svg"
+        try:
+            written = export_svg(self.view, chosen)
+        except OSError as exc:
+            self.statusBar().showMessage(f"Couldn't write the SVG: {exc}", 8000)
+            return False
+        if not written:
+            self.statusBar().showMessage("There was nothing to export.", 5000)
+            return False
+        set_export_dir(os.path.dirname(chosen))
+        self.statusBar().showMessage(f"Exported {chosen}", 5000)
+        return True
 
     def _set_default_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
