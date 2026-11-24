@@ -5,6 +5,12 @@ here. A hand-copied reference goes stale the first time a form is added —
 ``(add-pencil …)`` was added this month — and a stale reference is worse than
 none, because the assistant writes commands that no longer exist with every
 sign of confidence.
+
+A system prompt is therefore in two parts: a **role**, which is prose and is
+the user's to rewrite, and the **reference**, which is read off the
+interpreter and is appended to whatever the role says. :data:`ROLE` below is
+the one Prism ships; others are kept in the settings and chosen in the
+Assistant panel.
 """
 
 import re
@@ -12,7 +18,15 @@ import re
 #: The fence the assistant is asked to put a construction in.
 SCRIPT_FENCE = "prism"
 
-_ROLE = """\
+#: What the instructions Prism ships are called in the panel's picker. Not a
+#: name a custom set may take, so that the built-in one is always there.
+BUILTIN_PROMPT_NAME = "Prism's own"
+
+#: The role Prism ships: what the assistant is for, how Prism sees geometry,
+#: how to write a script, and the mistakes that actually happen. Every line
+#: of it was earned against a real failure. The command reference is *not*
+#: here — :func:`system_prompt` appends that, to this role or to any other.
+ROLE = """\
 You are an assistant inside Prism, a desktop app for projective-geometry
 drawings. You help the person at the canvas build constructions.
 
@@ -112,13 +126,20 @@ Everything you may write is below. If a form is not here, it does not exist
 """
 
 
-def system_prompt(interpreter: object) -> str:
+def system_prompt(interpreter: object, role: str = None) -> str:
     """The assistant's standing instructions, with the language reference.
+
+    The reference is appended whatever the role says, and is not the user's
+    to remove: a model shown no reference invents forms, and one shown a
+    stale reference invents them with a citation. Rewriting the role is
+    rewriting *instructions*; the language itself is not up for discussion.
 
     Args:
         interpreter: The console's :class:`~prism.commands.CommandInterpreter`,
             asked for its own help text so the reference cannot drift from
             the forms that actually exist.
+        role: The instructions to put in front of the reference; :data:`ROLE`,
+            the ones Prism ships, when not given.
 
     Returns:
         The system prompt.
@@ -127,7 +148,10 @@ def system_prompt(interpreter: object) -> str:
         reference = interpreter.execute("(help)")
     except Exception:  # a broken help is no reason to have no assistant
         reference = "(The command reference could not be read.)"
-    return _ROLE + reference
+    role = ROLE if role is None else role
+    if role and not role.endswith("\n"):
+        role += "\n\n"
+    return role + reference
 
 
 def canvas_context(interpreter: object) -> str:

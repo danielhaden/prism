@@ -762,6 +762,40 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   streaming.
 - `anthropic>=2.0` is the first dependency beyond PySide6. The panel degrades
   to a message if it is missing; Prism still runs.
+- **A system prompt is a role plus the reference, and only the role is the
+  user's.** `system_prompt(interpreter, role=None)` puts whichever role is
+  in force in front of the help text; `ROLE` in `prism/agent/prompt.py` is
+  the one Prism ships. The reference is not offered for editing at all — a
+  model shown none invents forms, and one shown a stale copy invents them
+  with a citation, which is the whole reason it is read off `(help)`.
+- **The built-in role is never stored.** `assistant_prompts()` holds only
+  what the user wrote, and `assistant_prompt_text()` returns **None** for
+  the built-in rather than a copy of it, so a stored prompt cannot drift
+  from the code it was copied out of. The choice is kept **by name**, and a
+  name that is no longer there reads back as `""` — the built-in — so
+  deleting the prompt in force needs no repair pass anywhere.
+  An **empty** role is a legitimate thing to write (the reference alone), so
+  the None/`""` distinction has to survive the whole path.
+- **`PromptDialog`'s New copies what is shown, rather than opening blank.**
+  The panel needs a reply in a particular shape — prose, then at most one
+  fenced `prism` block, which is what `extract_script` looks for — and the
+  surest way to keep that is to start from text that already says so. The
+  dialog writes nothing: it hands back the whole set and the choice, so
+  Cancel means what it says.
+- **Changing instructions applies from the next turn, and says so in the
+  transcript** when there is a conversation to say it about. The replies
+  already there were given under the old ones; that is a fact of the
+  conversation, not a fault in it. It also throws away Claude's prompt
+  cache — the system prompt *is* the cached prefix — so switching mid-chat
+  costs a full uncached turn.
+- **Measured, worth remembering**: llama3.2 is sensitive to prompt edits out
+  of all proportion. Prism's own role plus **one** inserted bullet (write
+  remarks in Latin) made it invent a form on three runs in four —
+  `(add-horizon …)` twice, `(add-point …)` once — where the role as shipped
+  wrote a runnable script; and it ignored the Latin anyway. `check_script`
+  caught every one and the canvas stayed empty. This is the
+  evidence for "said, never blocked" and for the dialog's note about
+  keeping the fenced-block ask.
 - **This is "Mode A"** of the design we settled on: conversational, no tools.
   Mode B — the model driving the canvas through `run_prism_command`, with a
   `look_at_canvas` screenshot tool — is the next step, and `backends.py`'s

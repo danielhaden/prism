@@ -19,3 +19,7 @@ answers on. It never touches the canvas — see
 ## The panel
 
 ::: prism.agent_panel
+
+## Writing its instructions
+
+::: prism.prompt_dialog

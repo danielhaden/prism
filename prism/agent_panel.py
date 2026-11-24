@@ -22,6 +22,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -39,13 +40,23 @@ from prism.agent.backends import (
     ollama_models,
 )
 from prism.agent.prompt import (
+    BUILTIN_PROMPT_NAME,
     canvas_context,
     check_script,
     extract_script,
     system_prompt,
 )
 from prism.agent.worker import AgentWorker
-from prism.settings import assistant_choice, set_assistant_choice
+from prism.prompt_dialog import PromptDialog
+from prism.settings import (
+    assistant_choice,
+    assistant_prompt_name,
+    assistant_prompt_text,
+    assistant_prompts,
+    set_assistant_choice,
+    set_assistant_prompt_name,
+    set_assistant_prompts,
+)
 
 
 #: Prose, in order of preference. Anthropic's own text face is Tiempos
@@ -610,6 +621,20 @@ class AgentPanel(QDockWidget):
         self._clear_button.setToolTip("Forget the conversation and start again")
         self._clear_button.clicked.connect(self.clear_chat)
 
+        self._prompts = QComboBox()
+        self._prompts.setToolTip(
+            "Which standing instructions the model is given — its system "
+            "prompt. Prism's command reference is added to them every turn, "
+            "whichever is chosen."
+        )
+        self._prompts.activated.connect(self._prompt_chosen)
+
+        self._edit_prompts_button = QPushButton("Edit…")
+        self._edit_prompts_button.setToolTip(
+            "Write, rename or delete sets of instructions"
+        )
+        self._edit_prompts_button.clicked.connect(self.edit_prompts)
+
         self._models = _ModelBox()
         self._models.setToolTip(
             "Which model answers. Ollama runs on this machine and needs no "
@@ -622,9 +647,16 @@ class AgentPanel(QDockWidget):
         self._status.setWordWrap(True)
         self._status.setStyleSheet("color: gray; font-size: 11px;")
 
-        picker = QHBoxLayout()
-        picker.addWidget(QLabel("Model"))
-        picker.addWidget(self._models, 1)
+        instructions = QHBoxLayout()
+        instructions.setContentsMargins(0, 0, 0, 0)
+        instructions.addWidget(self._prompts, 1)
+        instructions.addWidget(self._edit_prompts_button)
+
+        picker = QFormLayout()
+        picker.setContentsMargins(0, 0, 0, 0)
+        picker.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        picker.addRow("Model", self._models)
+        picker.addRow("Instructions", instructions)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self._send_button)
@@ -643,6 +675,7 @@ class AgentPanel(QDockWidget):
         self.setWidget(container)
 
         self._refresh_models()
+        self._refresh_prompts()
         self._greet()
 
     # -- Which model answers -----------------------------------------------
@@ -713,6 +746,69 @@ class AgentPanel(QDockWidget):
             OllamaBackend(model) if provider == "ollama" else ClaudeBackend(model)
         )
 
+    # -- What it is told ---------------------------------------------------
+
+    def _refresh_prompts(self) -> None:
+        """Rebuild the instructions picker from what is stored.
+
+        Prism's own are always the first row and are never stored, so there
+        is always something to fall back to and the shipped text can never
+        be shadowed by a stale copy of itself.
+        """
+        chosen = assistant_prompt_name()
+        self._prompts.blockSignals(True)
+        self._prompts.clear()
+        self._prompts.addItem(BUILTIN_PROMPT_NAME, "")
+        for entry in assistant_prompts():
+            self._prompts.addItem(entry["name"], entry["name"])
+        row = max(0, self._prompts.findData(chosen))
+        self._prompts.setCurrentIndex(row)
+        self._prompts.blockSignals(False)
+
+    def _prompt_chosen(self, index: int) -> None:
+        """Adopt the instructions the picker now names.
+
+        They come into force on the **next** question, and the replies
+        already in the transcript were given under the old ones. That is a
+        fact of the conversation rather than a fault in it, so mid-chat the
+        change is said in the transcript instead of being silent.
+
+        Args:
+            index: The row chosen.
+        """
+        name = self._prompts.itemData(index) or ""
+        if name == assistant_prompt_name():
+            return
+        set_assistant_prompt_name(name)
+        if self._messages:
+            self._transcript.start_turn(NOTE)
+            self._append(
+                f"Instructions: {self._prompts.itemText(index)} — from "
+                "the next question on."
+            )
+        self._status.setText(f"Instructions: {self._prompts.itemText(index)}")
+
+    def edit_prompts(self) -> bool:
+        """Write, rename or delete sets of instructions.
+
+        Returns:
+            Whether anything was changed.
+        """
+        outcome = PromptDialog.edit(assistant_prompts(), assistant_prompt_name(), self)
+        if outcome is None:
+            return False
+        prompts, chosen = outcome
+        set_assistant_prompts(prompts)
+        self._refresh_prompts()
+        row = max(0, self._prompts.findData(chosen))
+        self._prompts.setCurrentIndex(row)
+        self._prompt_chosen(row)
+        return True
+
+    def _role(self) -> str | None:
+        """The instructions in force, or None for the ones Prism ships."""
+        return assistant_prompt_text()
+
     # -- Wiring ------------------------------------------------------------
 
     def set_script_sink(self, handler: Callable) -> None:
@@ -758,7 +854,9 @@ class AgentPanel(QDockWidget):
         self._pending_prose = ""
         self._begin("Thinking…")
         self._worker = AgentWorker(
-            self._backend, system_prompt(self._interpreter()), list(self._messages)
+            self._backend,
+            system_prompt(self._interpreter(), self._role()),
+            list(self._messages),
         )
         self._worker.chunk.connect(self._on_chunk)
         self._worker.thinking.connect(self._on_thinking)

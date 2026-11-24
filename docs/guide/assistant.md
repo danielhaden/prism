@@ -116,6 +116,37 @@ price. The status line shows the token counts either way.
 With neither available the assistant says so, and the rest of Prism is
 unaffected — it is a panel, not a dependency.
 
+## Its instructions
+
+The **Instructions** box under the model is the system prompt — what the
+assistant is told before your question. Prism's own are first and read-only;
+anything else is yours.
+
+**Edit…** opens the list. **New** starts a set by *copying* whatever is
+shown, so the way to instructions of your own is to select Prism's, press
+New, and change what you want changed — rather than face an empty box and
+have to remember what the panel needs from a reply. Rename and Delete do
+what they say, and Cancel throws away everything typed since the dialog
+opened.
+
+!!! note "The command reference is not yours to remove"
+
+    Whatever the instructions say, Prism's command reference is read off the
+    console and added to them on every turn. A prompt written here can
+    therefore never go stale against the language — and there is no point
+    describing the language in it.
+
+What *is* worth keeping is the shape of a reply: prose, then at most one
+fenced block tagged `prism`. **Send Script to Editor** finds a script by
+that block, so instructions that stop asking for one leave it with nothing
+to find.
+
+A change takes effect on the **next** question. The replies already in the
+transcript were given under the old instructions, which is a fact of the
+conversation rather than a fault in it, so the change is noted in the
+transcript rather than applied silently backwards. **New Chat** starts clean
+if you would rather it were.
+
 ## It checks its own work
 
 Prism knows exactly which commands exist, so before a script is offered it

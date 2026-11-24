@@ -12,6 +12,11 @@ offer them by name wherever on disk they live.
 The window's size and its dock layout are remembered the same way, so the
 canvas comes back the shape you left it.
 
+The Assistant's *system prompts* are kept here too — the instructions it is
+given, by name, with the one in force. The command reference is not among
+them: that is read off the interpreter every turn and appended to whichever
+role is chosen, so no stored prompt can go stale against the language.
+
 The *shelf* is the PDFs the Book panel can read — Olive Whicher's *Projective
 Geometry*, Coxeter's, whatever else you add from **Settings > Add Book…**.
 Each carries a display name and the page it was last left at, so switching
@@ -32,6 +37,8 @@ _SCRIPTS_DIR_KEY = "paths/scripts_dir"
 _RECENT_SCRIPTS_KEY = "scripts/recent"
 _EXPORT_DIR_KEY = "paths/export_dir"
 _ASSISTANT_KEY = "assistant/model"
+_PROMPTS_KEY = "assistant/prompts"
+_PROMPT_NAME_KEY = "assistant/prompt"
 _BOOK_PATH_KEY = "paths/book_path"
 _WINDOW_GEOMETRY_KEY = "window/geometry"
 _WINDOW_STATE_KEY = "window/state"
@@ -121,6 +128,116 @@ def set_assistant_choice(choice: str) -> None:
             colon, as Ollama's do, so only the first one separates them.
     """
     QSettings().setValue(_ASSISTANT_KEY, choice)
+
+
+def assistant_prompts() -> list:
+    """The system prompts the user has written, in the order they were made.
+
+    Prism's own instructions are **not** in here. They live in the code
+    (:data:`prism.agent.prompt.ROLE`), cannot be edited away, and are what
+    the panel offers when nothing else is chosen — so this list is only ever
+    what somebody added.
+
+    Returns:
+        ``[{"name": …, "text": …}, …]``, a fresh list; write it back with
+            :func:`set_assistant_prompts`.
+    """
+    stored = QSettings().value(_PROMPTS_KEY, "")
+    try:
+        raw = json.loads(stored) if stored else []
+    except ValueError:
+        raw = []
+    prompts = []
+    for entry in raw if isinstance(raw, list) else []:
+        if isinstance(entry, dict) and str(entry.get("name", "")).strip():
+            prompts.append({
+                "name": str(entry["name"]).strip(),
+                "text": str(entry.get("text") or ""),
+            })
+    return prompts
+
+
+def set_assistant_prompts(prompts: list) -> None:
+    """Write the whole set of system prompts back.
+
+    The one in force is left pointing at whatever it pointed at. A name that
+    is no longer there simply reads back as Prism's own, which is the right
+    thing to fall back to and needs no repair pass here.
+
+    Args:
+        prompts: Prompts as :func:`assistant_prompts` returns them. Entries
+            without a name are dropped on the way back in.
+    """
+    QSettings().setValue(_PROMPTS_KEY, json.dumps([
+        {"name": str(entry["name"]).strip(), "text": str(entry.get("text") or "")}
+        for entry in prompts
+        if isinstance(entry, dict) and str(entry.get("name", "")).strip()
+    ]))
+
+
+def save_assistant_prompt(name: str, text: str) -> str:
+    """Add a system prompt, or replace the one of that name.
+
+    Args:
+        name: What to call it. Surrounding space is trimmed.
+        text: The instructions.
+
+    Returns:
+        The name it was stored under.
+    """
+    name = name.strip()
+    prompts = assistant_prompts()
+    for entry in prompts:
+        if entry["name"] == name:
+            entry["text"] = text
+            break
+    else:
+        prompts.append({"name": name, "text": text})
+    set_assistant_prompts(prompts)
+    return name
+
+
+def remove_assistant_prompt(name: str) -> None:
+    """Forget a system prompt, whether or not it is the one in force."""
+    set_assistant_prompts(
+        [entry for entry in assistant_prompts() if entry["name"] != name.strip()]
+    )
+
+
+def assistant_prompt_name() -> str:
+    """Which system prompt the Assistant is using, by name.
+
+    Returns:
+        The name, or ``""`` for the instructions Prism ships — which is also
+            what a name that has since been deleted comes back as.
+    """
+    name = str(QSettings().value(_PROMPT_NAME_KEY, "") or "")
+    return name if any(e["name"] == name for e in assistant_prompts()) else ""
+
+
+def set_assistant_prompt_name(name: str) -> None:
+    """Remember which system prompt is in force.
+
+    Args:
+        name: The prompt's name, or ``""`` for Prism's own.
+    """
+    QSettings().setValue(_PROMPT_NAME_KEY, name or "")
+
+
+def assistant_prompt_text() -> str | None:
+    """The instructions in force, or None for the ones Prism ships.
+
+    None rather than the built-in text, so that the built-in is only ever
+    written in one place and a stored copy of it cannot drift from the code.
+
+    Returns:
+        The chosen prompt's text, or None.
+    """
+    name = assistant_prompt_name()
+    for entry in assistant_prompts():
+        if entry["name"] == name:
+            return entry["text"]
+    return None
 
 
 # -- Exporting -----------------------------------------------------------
