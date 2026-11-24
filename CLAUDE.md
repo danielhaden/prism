@@ -25,6 +25,14 @@ is imposed *projectively* using the app's own elements.
   fresh branch. (The user raises and merges PRs themselves.)
 - Commit messages end with the `Co-Authored-By: Claude` trailer.
 - **`STATUS.md` is gitignored** — never commit it.
+- **`BACKLOG.md` is the work queue, and it is committed.** Daniel logs
+  issues into it from the Assistant panel while using Prism; a session asked
+  to "take the next thing in the backlog" takes the **first `open` entry
+  from the top** (oldest first). Closing one means setting its status to
+  `fixed` and adding a `- **Fixed**:` line with the commit — in the same
+  commit as the fix, so the entry and its repair travel together. Never
+  renumber or delete entries: an id that has been written in a commit
+  message must not come back meaning something else.
 - **Docs must stay green**: after any docstring/API change run
   `mkdocs build --strict` (exit 0). Recurring gotcha: a Google-style `Returns:`
   or `Args:` block that documents something **without a type annotation** fails
@@ -796,6 +804,39 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   caught every one and the canvas stayed empty. This is the
   evidence for "said, never blocked" and for the dialog's note about
   keeping the fenced-block ask.
+- **The backlog is the second thing a reply can carry.** A fenced block
+  tagged `issue` is a report of something wrong with Prism itself;
+  `extract_issue` finds it and **Log to Backlog** writes it to
+  `BACKLOG.md`. Same bargain as a script: the model writes words, Prism
+  writes files, the person reads them in between. A reply carries a script
+  or a report, never both, and unlike a script there is **no untagged
+  fallback** — a script that lost its tag is still recognisably a script,
+  but a paragraph in a fence is just a paragraph, and filing one as a bug
+  report would be making things up.
+- **Three things the button can log, in order**: the drafted report, what
+  is typed in the box, or `_last_asked` — the last question, word for word.
+  The third is not a nicety. Sending empties the box, so a model that
+  answers a bug report in prose leaves nothing to log, and retyping a bug
+  you have just described is how a backlog stops being kept. After a
+  successful log all three are cleared, so a second press cannot file the
+  same words twice.
+- **A drafted entry also carries `> Reported as:` — the words actually
+  said.** Measured against llama3.2: of two live runs, one wrote no fenced
+  block at all and one wrote a block whose title named the wrong panel
+  entirely (it had blended the report with the example in the prompt). The
+  plumbing was right both times; the prose was not. A 3B model drafts a
+  report about as well as it writes a script, which is to say read it
+  before you press the button — and whatever it writes, the sentence you
+  actually typed is in the file underneath it.
+- **The example in the prompt must not be a bug that actually exists**, or
+  a small model's parroting is indistinguishable from its understanding.
+  That is how the first version of this was mis-measured.
+- `prism/backlog.py` is plain file handling, no Qt: appended to and never
+  rewritten, because the file is one a coding session is likely to have
+  open and be editing statuses in, and an append is the one write that
+  cannot lose somebody else's. `head_commit()` reads `.git` **directly**
+  rather than shelling out to git — an app that runs a subprocess on a
+  button press is an app that hangs when the subprocess does.
 - **This is "Mode A"** of the design we settled on: conversational, no tools.
   Mode B — the model driving the canvas through `run_prism_command`, with a
   `look_at_canvas` screenshot tool — is the next step, and `backends.py`'s

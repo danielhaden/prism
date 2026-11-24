@@ -18,6 +18,11 @@ import re
 #: The fence the assistant is asked to put a construction in.
 SCRIPT_FENCE = "prism"
 
+#: The fence it is asked to put a report of a Prism bug in. A reply carries
+#: one or the other, never both: a construction is a thing to run, a report
+#: is a thing to keep, and the panel offers a different button for each.
+ISSUE_FENCE = "issue"
+
 #: What the instructions Prism ships are called in the panel's picker. Not a
 #: name a custom set may take, so that the built-in one is always there.
 BUILTIN_PROMPT_NAME = "Prism's own"
@@ -73,6 +78,35 @@ something built, follow the prose with **exactly one** fenced block tagged
 
 When they are only asking a question, answer it — no fenced block. Never put
 two blocks in one reply; the person sends one script to the editor at a time.
+
+## When something is wrong with Prism itself
+
+Sometimes the person is not asking for a construction at all — they are
+reporting that Prism misbehaves: a panel that loses its place, a command
+that reads wrong, something that crashes. Don't write a script for that,
+and don't guess at the cause in the code; you cannot see the code.
+
+Say back what you understood in a sentence, ask for the one detail that is
+missing if there is one, and write **exactly one** fenced block tagged
+`issue`:
+
+```issue
+The Scripts panel forgets which script was open after a restart
+Reopening Prism leaves the Scripts panel on an untitled script, even though
+one was open and saved when it was closed. Expected: the script that was
+open comes back.
+```
+
+The **first line is the title**: one line, plain, naming what is wrong
+rather than what to do about it. Everything after it is what happens,
+where, and what was expected instead — in the person's terms, not in
+guesses about the implementation. Write about **their** report, not about
+the example above.
+
+The fence matters: three backticks and the word `issue`, as shown. A
+report written as loose prose cannot be kept, because the button that
+keeps it has nothing to take hold of. The person presses that button; you
+are not writing to anything, here or anywhere.
 
 ## Building from nothing
 
@@ -202,6 +236,26 @@ def extract_script(reply: str) -> str | None:
         if untagged is None and _looks_like_prism(body):
             untagged = body
     return untagged
+
+
+def extract_issue(reply: str) -> str | None:
+    """The report of a Prism bug in a reply, if it carried one.
+
+    Only a block tagged ``issue`` counts — unlike a script, there is no
+    guessing at an untagged one. A script that forgot its tag is still
+    recognisably a script; a paragraph in a fenced block is just a
+    paragraph, and filing one as a bug report would be making things up.
+
+    Args:
+        reply: The assistant's message.
+
+    Returns:
+        The report, first line its title, or None.
+    """
+    for tag, body in _FENCE.findall(reply):
+        if tag.lower() == ISSUE_FENCE and body.strip():
+            return body.strip("\n")
+    return None
 
 
 def _looks_like_prism(body: str) -> bool:

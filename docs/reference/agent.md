@@ -20,6 +20,10 @@ answers on. It never touches the canvas — see
 
 ::: prism.agent_panel
 
+## The backlog
+
+::: prism.backlog
+
 ## Writing its instructions
 
 ::: prism.prompt_dialog

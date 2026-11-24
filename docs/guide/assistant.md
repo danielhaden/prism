@@ -47,6 +47,7 @@ ids it writes are the ids you have.
 | **Shift+Enter** | A new line in the question |
 | **Stop** | Give up on a reply being written; the turn is dropped rather than half-kept |
 | **Send Script to Editor** | Append the last reply's script to the Scripts panel |
+| **Log to Backlog** | Write an issue into `BACKLOG.md` |
 | **New Chat** | Forget the conversation. The canvas is untouched |
 
 It is a conversation, so "now make it denser" follows on from what came
@@ -74,6 +75,38 @@ the top of `prism/agent_panel.py`, so changing them is a one-line edit.
 The transcript is plain text throughout: select it, copy it, and you get
 exactly what was said, bubbles and cards included — they are drawn behind the
 words rather than written into them.
+
+## Noting what is wrong with Prism
+
+Things you notice while drawing are worth writing down where they will be
+found again. Tell the assistant — *"when I resize the Book tab the page
+changes"* — and it drafts a report: a one-line title and what happens,
+where, and what you expected instead. **Log to Backlog** writes it to
+`BACKLOG.md` in the repository, and the transcript says which number it
+got.
+
+It never writes the file itself. It drafts; you read; you press the
+button — the same bargain as a script going to the editor.
+
+The button logs the best thing it has, in this order:
+
+1. the report the assistant drafted,
+2. what is typed in the box,
+3. your last question, word for word.
+
+The third matters more than it looks. Sending empties the box, so a model
+that answers a bug report in prose instead of a block would otherwise
+leave you retyping what you just said. And because a small local model
+drafts loosely — one blended the report with the example in its
+instructions and named the wrong panel — a drafted entry also carries the
+sentence you actually typed, under `Reported as:`.
+
+The file is plain Markdown and yours to edit. Entries are appended, oldest
+first, each with an id like `PB-4`, a status, the date, and the commit
+Prism was running from when you saw it. Nothing is ever renumbered. Later,
+in a coding session with the repository open, *"take the first open thing
+in the backlog, fix it, and commit"* is a sentence that works, because
+"first open thing" is unambiguous on the page.
 
 ## Choosing a model
 

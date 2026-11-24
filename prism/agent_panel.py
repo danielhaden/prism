@@ -4,8 +4,14 @@ It never touches the canvas. What it produces is a **script**, which goes to
 the Scripts panel for you to read and run — the same thing you would have
 written yourself, and reviewable before anything happens. That is why this
 needs no approval dialogs and cannot wreck a drawing.
+
+The other thing it produces is a **report**: when something about Prism
+itself is wrong, it drafts the issue and a button writes it to the backlog.
+Same bargain — the model writes words, Prism writes files, and you read
+them in between.
 """
 
+import os
 from typing import Callable
 
 from PySide6.QtCore import QRectF, QRegularExpression, Qt, Signal
@@ -43,9 +49,11 @@ from prism.agent.prompt import (
     BUILTIN_PROMPT_NAME,
     canvas_context,
     check_script,
+    extract_issue,
     extract_script,
     system_prompt,
 )
+from prism.backlog import backlog_path, log_issue
 from prism.agent.worker import AgentWorker
 from prism.prompt_dialog import PromptDialog
 from prism.settings import (
@@ -588,6 +596,12 @@ class AgentPanel(QDockWidget):
         self._messages: list = []
         #: The script in the last reply, if it carried one.
         self._script: str | None = None
+        #: The report of a Prism bug in the last reply, if it carried one.
+        self._issue: str | None = None
+        #: The last question asked, kept for the backlog: a model that
+        #: replies to a bug report in prose leaves nothing to log, and by
+        #: then the box has been emptied by sending.
+        self._last_asked = ""
         self._pending_prose = ""
 
         prose = _font(PROSE_FAMILIES, PROSE_POINT_SIZE)
@@ -600,6 +614,7 @@ class AgentPanel(QDockWidget):
         self._input = _AskInput()
         self._input.setFont(prose)
         self._input.submitted.connect(self.send)
+        self._input.textChanged.connect(self._sync_log_button)
 
         self._send_button = QPushButton("Send")
         self._send_button.clicked.connect(self.send)
@@ -616,6 +631,16 @@ class AgentPanel(QDockWidget):
         )
         self._keep_button.clicked.connect(self.keep_script)
         self._keep_button.setEnabled(False)
+
+        self._log_button = QPushButton("Log to Backlog")
+        self._log_button.setToolTip(
+            "Write an issue into the backlog: the report the assistant "
+            "drafted, or what is typed in the box, or failing both your "
+            "last question, word for word — so noticing something wrong "
+            "never depends on a model being up, or on having said it twice."
+        )
+        self._log_button.clicked.connect(self.log_issue)
+        self._log_button.setEnabled(False)
 
         self._clear_button = QPushButton("New Chat")
         self._clear_button.setToolTip("Forget the conversation and start again")
@@ -658,11 +683,17 @@ class AgentPanel(QDockWidget):
         picker.addRow("Model", self._models)
         picker.addRow("Instructions", instructions)
 
+        # Two rows: what to do with the conversation, then what to keep out
+        # of it. Four of these across a docked panel is already tight, and
+        # the labels are worth more than the row.
         buttons = QHBoxLayout()
         buttons.addWidget(self._send_button)
         buttons.addWidget(self._stop_button)
-        buttons.addWidget(self._keep_button)
         buttons.addWidget(self._clear_button)
+
+        keeping = QHBoxLayout()
+        keeping.addWidget(self._keep_button)
+        keeping.addWidget(self._log_button)
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -671,6 +702,7 @@ class AgentPanel(QDockWidget):
         layout.addLayout(picker)
         layout.addWidget(self._input)
         layout.addLayout(buttons)
+        layout.addLayout(keeping)
         layout.addWidget(self._status)
         self.setWidget(container)
 
@@ -844,13 +876,16 @@ class AgentPanel(QDockWidget):
             )
             return False
         self._input.clear()
+        self._last_asked = asked
         self._asked(asked)
         context = canvas_context(self._interpreter())
         self._messages.append(
             {"role": "user", "content": f"{context}\n\n{asked}".strip()}
         )
         self._script = None
+        self._issue = None
         self._keep_button.setEnabled(False)
+        self._sync_log_button()
         self._pending_prose = ""
         self._begin("Thinking…")
         self._worker = AgentWorker(
@@ -886,7 +921,10 @@ class AgentPanel(QDockWidget):
             self.stop()
         self._messages.clear()
         self._script = None
+        self._issue = None
+        self._last_asked = ""
         self._keep_button.setEnabled(False)
+        self._sync_log_button()
         self._transcript.clear()
         self._greet()
 
@@ -904,6 +942,76 @@ class AgentPanel(QDockWidget):
             return False
         self._status.setText(f"{len(lines)} line(s) added to {name}.")
         return True
+
+    def log_issue(self) -> bool:
+        """Write an issue into the backlog.
+
+        Three things it could be, in this order: the report the assistant
+        drafted, what is typed in the box, or the last question asked. The
+        last of those is what saves a report from a model that answered in
+        prose — by then sending has emptied the box, and retyping a bug
+        you have just described is how a backlog stops being kept.
+
+        Prism writes the file; the assistant only ever drafts the words,
+        which is the same bargain as a script going to the editor.
+
+        Returns:
+            Whether anything was written.
+        """
+        drafted = self._issue is not None
+        text = (
+            self._issue or self._input.toPlainText() or self._last_asked
+        ).strip()
+        if not text:
+            return False
+        typed = not drafted and bool(self._input.toPlainText().strip())
+        title, _, body = text.partition("\n")
+        source = "the Assistant panel"
+        if drafted:
+            source += f", drafted by {self._models.currentText()}"
+            # The drafted words are the model's reading of what was said,
+            # and a small model's reading can be wide of it — one wrote a
+            # title about the wrong panel entirely. So the words that were
+            # actually said go in underneath, and whoever picks the entry
+            # up can see which is which.
+            if self._last_asked:
+                body = (body.rstrip() + "\n\n> Reported as: "
+                        + " ".join(self._last_asked.split()))
+        try:
+            entry = log_issue(title, body, source=source)
+        except (OSError, ValueError) as exc:
+            self._status.setText(f"The backlog could not be written: {exc}")
+            return False
+        if typed:
+            self._input.clear()
+        # Everything this press could have logged, it has logged. Pressing
+        # again would otherwise file the same words a second time, and the
+        # button would never go dark to say there is nothing left to say.
+        self._issue = None
+        self._last_asked = ""
+        self._sync_log_button()
+        self._transcript.start_turn(NOTE)
+        self._append(f"{entry['id']} \u2014 {entry['title']} \u2014 logged.")
+        self._status.setText(
+            f"{entry['id']} logged in {os.path.basename(entry['path'])}."
+        )
+        return True
+
+    def _sync_log_button(self) -> None:
+        """Light the button when there is something to log.
+
+        Either the assistant drafted a report, or there are words in the
+        box; with neither, there is nothing a press could mean.
+        """
+        self._log_button.setEnabled(bool(
+            self._issue is not None
+            or self._input.toPlainText().strip()
+            or self._last_asked
+        ))
+
+    def backlog(self) -> str:
+        """Where issues logged from here are written."""
+        return backlog_path()
 
     def shutdown(self) -> None:
         """Stop a turn in flight, so the app can close without a warning."""
@@ -928,6 +1036,8 @@ class AgentPanel(QDockWidget):
         self._keep_button.setEnabled(
             self._script is not None and self._script_sink is not None
         )
+        self._issue = extract_issue(text)
+        self._sync_log_button()
         self._append("\n")
         note = self._cost(usage)
         if self._script is not None:
