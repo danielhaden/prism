@@ -47,7 +47,7 @@ ids it writes are the ids you have.
 | **Shift+Enter** | A new line in the question |
 | **Stop** | Give up on a reply being written; the turn is dropped rather than half-kept |
 | **Send Script to Editor** | Append the last reply's script to the Scripts panel |
-| **Log to Backlog** | Write an issue into `BACKLOG.md` |
+| **Log to Backlog** | Write what is typed — or your last question — into `BACKLOG.md`. A drafted report is filed with the **→** beside it instead |
 | **New Chat** | Forget the conversation. The canvas is untouched |
 
 It is a conversation, so "now make it denser" follows on from what came
@@ -81,25 +81,27 @@ words rather than written into them.
 Things you notice while drawing are worth writing down where they will be
 found again. Tell the assistant — *"when I resize the Book tab the page
 changes"* — and it drafts a report: a one-line title and what happens,
-where, and what you expected instead. **Log to Backlog** writes it to
-`BACKLOG.md` in the repository, and the transcript says which number it
-got.
+where, and what you expected instead. The report arrives on a card of its
+own with a **→** in its corner. Press that and it is written to
+`BACKLOG.md`, and the transcript says which number it got.
 
 It never writes the file itself. It drafts; you read; you press the
-button — the same bargain as a script going to the editor.
+arrow — the same bargain as a script going to the editor.
 
-The button logs the best thing it has, in this order:
+The arrow is on the card because that is what it is about. A button at
+the bottom of the panel is a button about the panel, and the first report
+drafted in anger went unlogged for exactly that reason.
 
-1. the report the assistant drafted,
-2. what is typed in the box,
-3. your last question, word for word.
+When a reply comes back with no report in it — prose instead of a block,
+which a small local model does often enough — there is no card to put an
+arrow on, and the **Log to Backlog** button at the bottom takes over. It
+files what is typed in the box, or, if sending has already emptied it,
+your last question word for word. So a bug noticed is a bug written down
+even when the model is unhelpful, or not running at all.
 
-The third matters more than it looks. Sending empties the box, so a model
-that answers a bug report in prose instead of a block would otherwise
-leave you retyping what you just said. And because a small local model
-drafts loosely — one blended the report with the example in its
-instructions and named the wrong panel — a drafted entry also carries the
-sentence you actually typed, under `Reported as:`.
+Because a small model drafts loosely — one blended the report with the
+example in its instructions and named the wrong panel — a drafted entry
+also carries the sentence you actually typed, under `Reported as:`.
 
 The file is plain Markdown and yours to edit. Entries are appended, oldest
 first, each with an id like `PB-4`, a status, the date, and the commit

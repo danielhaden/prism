@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -112,6 +113,10 @@ ROLE_PROPERTY = QTextFormat.UserProperty + 1
 ASKED = 1       # the question: right, in a bubble
 ANSWERED = 2    # the reply: left, on the page itself
 NOTE = 3        # Prism's own words, neither side's
+#: Not a role — a kind of card. A reply's script and a reply's report are
+#: both the reply, but one is a thing to run and the other a thing to keep,
+#: and only the second has an offer hanging off it.
+REPORTED = 4
 
 #: The bubble's padding, corner, and how much of the width it leaves alone
 #: before a question wraps — a question that ran the full width would read
@@ -128,6 +133,9 @@ CARD_PAD_X = 9
 CARD_PAD_Y = 5
 #: Room down each side of the page, which is also what a card is padded into.
 PAGE_MARGIN = 12
+#: The → that files a report, and how far in from the card's corner it sits.
+MARK_SIZE = 22
+MARK_INSET = 4
 
 
 def _font(families, point_size: int) -> QFont:
@@ -155,8 +163,12 @@ class _Transcript(QSyntaxHighlighter):
     still exactly what came back.
     """
 
-    #: What opens and closes a script in a reply.
+    #: What opens and closes a fenced block in a reply.
     FENCE = QRegularExpression(r"^\s*```")
+    #: The one that opens a **report** rather than a script. The two look
+    #: the same and are not: a script is a thing to run, and a report is a
+    #: thing to keep, so the view hangs a different offer off each.
+    ISSUE_FENCE = QRegularExpression(r"^\s*```\s*issue\b")
 
     #: Inside a fenced block, as a block state.
     IN_SCRIPT = 1
@@ -164,6 +176,9 @@ class _Transcript(QSyntaxHighlighter):
     #: drawn behind a script can include it, while the line after it still
     #: reads the state before it as "not in a script".
     END_SCRIPT = 2
+    #: The same two, for a report.
+    IN_ISSUE = 3
+    END_ISSUE = 4
 
     def __init__(self, document):
         super().__init__(document)
@@ -200,21 +215,54 @@ class _Transcript(QSyntaxHighlighter):
             self.setFormat(0, len(text), self._aside)
             self.setCurrentBlockState(0)
             return
-        was_script = self.previousBlockState() == self.IN_SCRIPT
+        opened = self.previousBlockState()
+        inside = opened in (self.IN_SCRIPT, self.IN_ISSUE)
         if self.FENCE.match(text).hasMatch():
             self.setFormat(0, len(text), self._fence)
-            self.setCurrentBlockState(
-                self.END_SCRIPT if was_script else self.IN_SCRIPT
-            )
+            if inside:
+                closing = self.END_ISSUE if opened == self.IN_ISSUE else self.END_SCRIPT
+            elif self.ISSUE_FENCE.match(text).hasMatch():
+                closing = self.IN_ISSUE
+            else:
+                closing = self.IN_SCRIPT
+            self.setCurrentBlockState(closing)
             return
-        self.setCurrentBlockState(self.IN_SCRIPT if was_script else 0)
-        if was_script:
+        self.setCurrentBlockState(opened if inside else 0)
+        if inside:
             self.setFormat(0, len(text), self._code)
         elif text in SPEAKERS:
             self.setFormat(0, len(text), self._speaker)
         elif text.startswith("  — ") or text.startswith("      "):
             # What Prism itself says about a reply, rather than the reply.
             self.setFormat(0, len(text), self._aside)
+
+
+class _LogMark(QToolButton):
+    """The → on a report's card: press it and the report is filed.
+
+    On the card rather than down with the other buttons, because a button
+    at the bottom of the panel is a button about the panel, and this one is
+    about the paragraph it is sitting next to. The first report drafted in
+    anger went unlogged for exactly that reason.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setText("\u2192")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(MARK_SIZE, MARK_SIZE)
+        self.setToolTip("Write this issue to the backlog")
+        # It reads as a button at rest, not only under the pointer: the
+        # whole reason it moved up here is that an offer nobody notices is
+        # not an offer, and a grey glyph on a grey card is not noticed.
+        self.setStyleSheet(
+            f"QToolButton {{ border: 1px solid {QUIET}; "
+            f"border-radius: {MARK_SIZE // 2}px; background: {PAPER}; "
+            f"color: {INK}; font-size: 14px; font-weight: bold; }}"
+            f"QToolButton:hover {{ background: {BUBBLE}; "
+            f"border-color: {INK}; }}"
+        )
+        self.hide()
 
 
 class _TranscriptView(QTextEdit):
@@ -234,6 +282,8 @@ class _TranscriptView(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._fitting = False
+        #: The card the → is offered on, as a card kind, or None for none.
+        self._marked = None
         self.setReadOnly(True)
         self.setFrameShape(QFrame.NoFrame)
         # The page's own margin, and it has to be wide enough for a card to
@@ -245,6 +295,11 @@ class _TranscriptView(QTextEdit):
             f"selection-background-color: #e3ded0; "
             f"selection-color: {INK}; }}"
         )
+        #: Parented to the viewport, so it scrolls out of sight with the
+        #: card it belongs to rather than floating over the panel.
+        self.mark = _LogMark(self.viewport())
+        self.verticalScrollBar().valueChanged.connect(self._place_mark)
+        self.horizontalScrollBar().valueChanged.connect(self._place_mark)
 
     # -- Writing it --------------------------------------------------------
 
@@ -283,6 +338,7 @@ class _TranscriptView(QTextEdit):
         self.setTextCursor(cursor)
         if role == ASKED:
             self._fit_bubbles()
+        self._place_mark()
         self.ensureCursorVisible()
 
     def _shape(self, role: int, opening: bool) -> QTextBlockFormat:
@@ -313,6 +369,7 @@ class _TranscriptView(QTextEdit):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._fit_bubbles()
+        self._place_mark()
 
     def _fit_bubbles(self) -> None:
         """Pull each question's bubble in to the width of its own text.
@@ -399,6 +456,52 @@ class _TranscriptView(QTextEdit):
         shape.setLeftMargin(margin)
         cursor.mergeBlockFormat(shape)
 
+    # -- The offer on a card -----------------------------------------------
+
+    def offer_mark_on(self, kind: object) -> None:
+        """Put the → on the last card of this kind, or take it away.
+
+        Args:
+            kind: :data:`REPORTED`, or None to withdraw the offer.
+        """
+        self._marked = kind
+        self._place_mark()
+
+    def mark_rect(self, kind: object):
+        """Where the last card of a kind is, in viewport pixels.
+
+        Args:
+            kind: The card kind to look for.
+
+        Returns:
+            Its rect, or None if the transcript holds no such card.
+        """
+        for rect, found in reversed(self._cards()):
+            if found == kind:
+                return rect
+        return None
+
+    def _place_mark(self) -> None:
+        """Keep the → in the corner of the card it belongs to.
+
+        Called on every scroll, resize and line added, since all three move
+        the card out from under it. It is hidden when the card it belongs
+        to is not on screen: an offer to file *this* report has to be
+        beside the report.
+        """
+        rect = None if self._marked is None else self.mark_rect(self._marked)
+        if rect is None:
+            self.mark.hide()
+            return
+        self.mark.move(
+            int(rect.right() - MARK_SIZE - MARK_INSET),
+            int(rect.top() + MARK_INSET),
+        )
+        self.mark.setVisible(
+            self.viewport().rect().intersects(self.mark.geometry())
+        )
+        self.mark.raise_()
+
     # -- Drawing it --------------------------------------------------------
 
     def paintEvent(self, event) -> None:
@@ -450,13 +553,16 @@ class _TranscriptView(QTextEdit):
             block: The text block.
 
         Returns:
-            ASKED, ANSWERED for a script of the reply's, or None.
+            ASKED, ANSWERED for a script, REPORTED for a report, or None.
         """
         role = block.blockFormat().intProperty(ROLE_PROPERTY)
         if role == ASKED:
             return ASKED
-        if block.userState() in (_Transcript.IN_SCRIPT, _Transcript.END_SCRIPT):
+        state = block.userState()
+        if state in (_Transcript.IN_SCRIPT, _Transcript.END_SCRIPT):
             return ANSWERED
+        if state in (_Transcript.IN_ISSUE, _Transcript.END_ISSUE):
+            return REPORTED
         return None
 
     def _shape_for(self, kind: object, run: list) -> list:
@@ -610,6 +716,7 @@ class AgentPanel(QDockWidget):
         self._transcript.setFont(prose)
         self._transcript.setViewportMargins(2, 4, 2, 4)
         self._highlighter = _Transcript(self._transcript.document())
+        self._transcript.mark.clicked.connect(self.log_issue)
 
         self._input = _AskInput()
         self._input.setFont(prose)
@@ -632,15 +739,21 @@ class AgentPanel(QDockWidget):
         self._keep_button.clicked.connect(self.keep_script)
         self._keep_button.setEnabled(False)
 
+        # The offer on a drafted report is the → on the report itself; this
+        # is what is left for words with no card behind them — a reply that
+        # came back as prose, or no model running at all. It keeps its place
+        # in the row while hidden, so the row does not shuffle.
         self._log_button = QPushButton("Log to Backlog")
         self._log_button.setToolTip(
-            "Write an issue into the backlog: the report the assistant "
-            "drafted, or what is typed in the box, or failing both your "
-            "last question, word for word — so noticing something wrong "
-            "never depends on a model being up, or on having said it twice."
+            "Write what is typed in the box — or failing that your last "
+            "question, word for word — into the backlog as an issue. A "
+            "report the assistant drafted is filed with the \u2192 beside it."
         )
         self._log_button.clicked.connect(self.log_issue)
         self._log_button.setEnabled(False)
+        held = self._log_button.sizePolicy()
+        held.setRetainSizeWhenHidden(True)
+        self._log_button.setSizePolicy(held)
 
         self._clear_button = QPushButton("New Chat")
         self._clear_button.setToolTip("Forget the conversation and start again")
@@ -998,15 +1111,18 @@ class AgentPanel(QDockWidget):
         return True
 
     def _sync_log_button(self) -> None:
-        """Light the button when there is something to log.
+        """Put the offer to log wherever the thing to log is.
 
-        Either the assistant drafted a report, or there are words in the
-        box; with neither, there is nothing a press could mean.
+        A drafted report has a card of its own, so the offer goes there, as
+        a → in its corner, and the button at the bottom stands down. With
+        no card, the button is all there is: it files what is typed, or the
+        last question. With neither, there is nothing a press could mean.
         """
+        drafted = self._issue is not None
+        self._transcript.offer_mark_on(REPORTED if drafted else None)
+        self._log_button.setVisible(not drafted)
         self._log_button.setEnabled(bool(
-            self._issue is not None
-            or self._input.toPlainText().strip()
-            or self._last_asked
+            self._input.toPlainText().strip() or self._last_asked
         ))
 
     def backlog(self) -> str:
@@ -1040,6 +1156,10 @@ class AgentPanel(QDockWidget):
         self._sync_log_button()
         self._append("\n")
         note = self._cost(usage)
+        if self._issue is not None:
+            # Said once, where the eye already is after a reply: the → is
+            # small and new, and an offer nobody finds is no offer.
+            note = "Drafted an issue — the \u2192 beside it files it. " + note
         if self._script is not None:
             # Prism knows exactly which forms exist, so there is no reason to
             # let an invented one reach the editor unremarked. Said, not

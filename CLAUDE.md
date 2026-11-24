@@ -813,7 +813,18 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   fallback** — a script that lost its tag is still recognisably a script,
   but a paragraph in a fence is just a paragraph, and filing one as a bug
   report would be making things up.
-- **Three things the button can log, in order**: the drafted report, what
+- **The offer to log sits on the thing it would log.** A drafted report
+  gets a `→` (`_LogMark`, parented to the transcript's **viewport** so it
+  scrolls with its card) in the corner of its card, and the bottom button
+  hides — with `setRetainSizeWhenHidden(True)`, so the row does not
+  shuffle. This was not a preference: the very first report drafted in
+  anger went unlogged because the button was at the bottom of the panel,
+  where it read as being about the panel. The button at rest has a ring
+  and ink-dark glyph rather than a bare grey arrow, for the same reason.
+  Telling a report's card from a script's needs the **fence tag**, so the
+  highlighter carries `IN_ISSUE`/`END_ISSUE` beside `IN_SCRIPT`/
+  `END_SCRIPT` and `_kind_of` turns those into the `REPORTED` card kind.
+- **Three things the offer can log, in order**: the drafted report, what
   is typed in the box, or `_last_asked` — the last question, word for word.
   The third is not a nicety. Sending empties the box, so a model that
   answers a bug report in prose leaves nothing to log, and retyping a bug
