@@ -18,7 +18,8 @@ in a commit message must never come back meaning something else.
 
 ## PB-1 · The Book panel loses its place when the panel is resized
 
-- **Status**: open
+- **Status**: fixed
+- **Fixed**: e0d9908
 - **Logged**: 2026-11-24, from Claude Code, at Daniel's report
 - **Seen on**: 48330d0
 - **Also reported as**: PB-2, the reading position not surviving a restart —
@@ -45,12 +46,20 @@ the symptom past the end of the session.
 Reported in conversation rather than through the panel: the backlog was
 built in answer to it, so it is the first thing in it.
 
+Fixed by taking the reader's place in an event filter on the view and
+putting it back once the new layout exists. The capture has to be in the
+filter rather than the dock's `resizeEvent`: the reflow runs *inside*
+`QWidget::resize`, so a hold taken from `resizeEvent` saves the place the
+reflow has already moved to — it runs without error and fixes nothing. A
+zoom step turned out to move the page the same way (60 to 32) and is held
+too; scrolling is not, since that is the reader moving.
+
 ## PB-2 · The Book panel's page is lost on resize or restart
 
 - **Status**: duplicate
 - **Logged**: 2026-11-25, from the Assistant panel, drafted by Ollama · llama3.2:latest
 - **Seen on**: 16bb87b
-- **Duplicate of**: PB-1
+- **Duplicate of**: PB-1, fixed in e0d9908
 
 The page the Book panel is on is not kept across a window resize or an app
 restart. Expected: it keeps the page and the layout.
