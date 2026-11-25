@@ -23,14 +23,19 @@ is imposed *projectively* using the app's own elements.
   `feature/<description>` → commit → push → the user raises/merges the PR. Never
   commit feature work directly to `main`. After a merge, pull `main` and cut a
   fresh branch. (The user raises and merges PRs themselves.)
+  A repair taken from the backlog is branched `fix/pb-<n>-<slug>` instead and
+  follows **Taking an issue from the backlog** below — one issue, one branch,
+  one PR.
 - Commit messages end with the `Co-Authored-By: Claude` trailer.
 - **`STATUS.md` is gitignored** — never commit it.
 - **`BACKLOG.md` is the work queue, and it is committed.** Daniel logs
   issues into it from the Assistant panel while using Prism; a session asked
   to "take the next thing in the backlog" takes the **first `open` entry
   from the top** (oldest first). Closing one means setting its status to
-  `fixed` and adding a `- **Fixed**:` line with the commit — in the same
-  commit as the fix, so the entry and its repair travel together. Never
+  `fixed` and adding a `- **Fixed**:` line naming the commit that did it —
+  on the same branch, so the entry and its repair travel together in the
+  same PR. It cannot be the same *commit* as the fix: a commit cannot hold
+  its own hash. Never
   renumber or delete entries: an id that has been written in a commit
   message must not come back meaning something else. Two reports of one
   fault are **folded into the older entry**, which then carries both
@@ -50,6 +55,53 @@ is imposed *projectively* using the app's own elements.
   have hidden real rendering bugs — see below).
 - The shell's working directory sometimes drifts; prefer `cd
   /Users/dhaden/projects/prism && …` in one-off commands.
+
+## Taking an issue from the backlog
+
+**One issue, one branch, one PR.** This is the per-issue counterpart to the
+feature branch above, and for backlog work it replaces "unrelated commits
+share the active branch": a repair spread across a branch carrying four
+other things cannot be reviewed *as* the repair for that entry, which is
+most of the reason the entry was written down.
+
+1. **Start from a current `main`** — `git switch main && git pull` — with no
+   other branch in flight. A fix cut from a stale `main` is one the PR
+   cannot show cleanly.
+2. **Take the first `open` entry from the top** of `BACKLOG.md` (oldest
+   first; `fixed` and `duplicate` are out of the queue). One entry, not two
+   whose titles rhyme — folding two reports together is for the *same
+   fault*, established by reading the code, not by reading the headings.
+3. **Cut `fix/pb-<n>-<short-slug>`**, e.g. `fix/pb-1-book-panel-page`. The
+   id is in the branch name so the branch, the PR and the entry can be laid
+   side by side afterwards.
+4. **Reproduce it before changing anything.** A headless harness that
+   *fails*, printing numbers rather than a verdict — that measurement is
+   what later says the fix worked, and it is what goes in the commit
+   message and the entry. An issue that will not reproduce is said so in
+   the entry and left `open`; a repair for a fault nobody has seen is a
+   repair nobody can check.
+5. **Fix it**, then run the new harness (now passing), the harnesses around
+   whatever was touched, and `mkdocs build --strict` (exit 0). Where the
+   fault was a crash, keep a fault injection beside the harness — a harness
+   that always passes is indistinguishable from one that tests nothing.
+6. **Close the entry on the same branch**: status `fixed`, plus a
+   `- **Fixed**:` line naming the commit that did it. That is the last
+   commit on the branch, since a commit cannot contain its own hash.
+7. **Push and hand over the branch URL.** Daniel raises, reviews and merges
+   the PR. Pull `main` again before taking the next entry.
+
+**Nothing on a fix branch that the entry did not ask for.** A fault noticed
+on the way is logged as a new entry — from the Assistant panel, or by hand,
+since the file is appended to and never rewritten — and taken in its turn.
+A fix PR that also tidies three unrelated things is one nobody can review
+as a fix.
+
+Harnesses are written in the session scratchpad and are **not committed**,
+so the durable record of a repair is the measurement in the commit message
+and in the closed entry. (The references below to `scratchpad/horizon_point.py`
+and `scratchpad/inject_hidden.py` are to files that were never in the repo.
+If harnesses should start being kept, a tracked directory is the change to
+make, and this paragraph is what changes with it.)
 
 ## Architecture
 
