@@ -126,6 +126,29 @@ There is deliberately **no grid and no origin axes** — a metric has no place o
 a projective canvas. If you want a scale, construct one projectively from the
 elements themselves. See [Projective Basics](../concepts/projective-basics.md).
 
+## Exporting the drawing
+
+**File → Export as SVG…** (Ctrl+Shift+E) writes the canvas to an SVG file —
+vector, so it stays sharp at whatever size you print or embed it at, and the
+labels come out as real text rather than pixels.
+
+**What you see is what you get.** The export is framed exactly as the canvas
+is framed: the same pan, the same zoom, infinite lines clipped at the same
+edges. So press **Ctrl+0** ([Fit to Frame](#navigating-the-canvas)) first to
+export the whole reference frame, or zoom into a corner of a dense net to
+export just that.
+
+Two things are left out, both deliberately. The [markers for off-screen
+points](#points-off-the-edge) are a way of finding them, not part of the
+drawing. And the selection is lifted for the moment of writing, so a
+highlighted line doesn't come out orange in your figure — it is still
+selected afterwards.
+
+The background is written into the file. It has to be: a point's
+[surround](points-and-lines.md#display-properties) is a disc *in the
+background colour*, drawn over the lines to cut them away behind the dot, so
+on a transparent background those discs would be grey blobs.
+
 ## The window remembers itself
 
 Prism saves the window's size and position, and the whole dock layout, when you

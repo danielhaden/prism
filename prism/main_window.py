@@ -6,14 +6,17 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMainWindow
 
+from prism.agent_panel import AgentPanel
 from prism.book_panel import BookPanel
 from prism.canvas import CanvasScene, CanvasView
 from prism.console_panel import ConsolePanel
 from prism.scripts_panel import ScriptsPanel
 from prism.elements_panel import ElementsPanel
 from prism.scene_state import capture, restore
+from prism.svg_export import export_svg
 from prism.settings import (
     SCRIPT_SUFFIX,
+    export_dir,
     clear_recent_scripts,
     clear_window_layout,
     ensure_scripts_dir,
@@ -25,6 +28,7 @@ from prism.settings import (
     scripts_dir,
     scripts_dir_is_fixed,
     set_scripts_dir,
+    set_export_dir,
     set_window_geometry,
     set_window_state,
     window_geometry,
@@ -39,7 +43,8 @@ class MainWindow(QMainWindow):
     #: 2: the Library dock went, and the right-hand tab group is anchored on
     #: Scripts instead — a layout saved against the old group would restore
     #: with a tab that no longer exists.
-    LAYOUT_VERSION = 2
+    #: 3: the Assistant dock joined that group.
+    LAYOUT_VERSION = 3
 
     #: Bumped when the saved-canvas format changes in a way that can't be
     #: read back; an older file is then ignored rather than half-restored.
@@ -71,11 +76,18 @@ class MainWindow(QMainWindow):
         # panel's own Save button goes the same way as the menu command.
         self.scripts.set_save_handler(self._save_script)
 
+        self.agent = AgentPanel(lambda: self.console.interpreter(), self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.agent)
+        self.tabifyDockWidget(self.scripts, self.agent)
+        # What the assistant writes goes where everything else written goes.
+        self.agent.set_script_sink(self._append_to_script)
+
         self.book = BookPanel(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.book)
         self.tabifyDockWidget(self.scripts, self.book)
         self.scripts.raise_()
-        self.console.scriptSaved.connect(self._script_saved)
+        # The console's >> hands the session over to the editor.
+        self.console.set_append_handler(self._append_to_script)
 
         self._tool_actions: dict[Tool, QAction] = {}
         self._create_actions()
@@ -161,6 +173,8 @@ class MainWindow(QMainWindow):
         if not self.scripts.confirm_discard():
             event.ignore()
             return
+        # A turn still in flight would outlive the window Qt is tearing down.
+        self.agent.shutdown()
         self._save_drawing()
         set_window_geometry(self.saveGeometry())
         set_window_state(self.saveState(self.LAYOUT_VERSION))
@@ -274,6 +288,14 @@ class MainWindow(QMainWindow):
         self.save_script_as_action.triggered.connect(self._save_script_as)
         self.addAction(self.save_script_as_action)
 
+        self.export_svg_action = QAction("Export as SVG…", self)
+        self.export_svg_action.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self.export_svg_action.setToolTip(
+            "Write what the canvas is showing to an SVG file (Ctrl+Shift+E)"
+        )
+        self.export_svg_action.triggered.connect(self._export_svg)
+        self.addAction(self.export_svg_action)
+
         self.default_folder_action = QAction("Set Default Script Folder…", self)
         self.default_folder_action.setToolTip(
             "Where Save Script writes, and where Open starts looking"
@@ -330,6 +352,8 @@ class MainWindow(QMainWindow):
         self._file_menu.addAction(self.save_script_action)
         self._file_menu.addAction(self.save_script_as_action)
         self._file_menu.addSeparator()
+        self._file_menu.addAction(self.export_svg_action)
+        self._file_menu.addSeparator()
         self._file_menu.addAction(self.default_folder_action)
         self._file_menu.addAction(self.adopt_folder_action)
         self._file_menu.addSeparator()
@@ -363,6 +387,9 @@ class MainWindow(QMainWindow):
         toggle_elements = self.elements.toggleViewAction()
         toggle_elements.setText("Show Elements")
         view_menu.addAction(toggle_elements)
+        toggle_agent = self.agent.toggleViewAction()
+        toggle_agent.setText("Show Assistant")
+        view_menu.addAction(toggle_agent)
         toggle_book = self.book.toggleViewAction()
         toggle_book.setText("Show Book")
         view_menu.addAction(toggle_book)
@@ -540,14 +567,19 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Saved {chosen}", 4000)
         return True
 
-    def _script_saved(self, path: str) -> None:
-        """Open what the console just saved, so it can be edited and re-run."""
-        remember_script(path)
-        if not self.scripts.confirm_discard():
-            self.scripts.refresh()
-            return
-        if self.scripts.open_path(path):
-            self._show_scripts()
+    def _append_to_script(self, commands: list) -> str | None:
+        """Put the console's session at the end of the open script.
+
+        Args:
+            commands: The command lines the console recorded.
+
+        Returns:
+            The script's name, or None if nothing was appended.
+        """
+        if not self.scripts.append_commands(commands):
+            return None
+        self._show_scripts()
+        return self.scripts.current_name()
 
     def _show_scripts(self) -> None:
         """Bring the Scripts panel out from behind whichever tab is raised."""
@@ -576,6 +608,32 @@ class MainWindow(QMainWindow):
     def _detach_style(self) -> None:
         if not self.scene.run_as_command("(style -none)"):
             self.scene.detach_style()
+
+    def _export_svg(self) -> bool:
+        """Write what the canvas is showing to an SVG file.
+
+        Returns:
+            Whether it was written.
+        """
+        suggested = os.path.join(export_dir(), "prism-drawing.svg")
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Export as SVG", suggested, "SVG images (*.svg);;All files (*)"
+        )
+        if not chosen:
+            return False
+        if "." not in os.path.basename(chosen):
+            chosen += ".svg"
+        try:
+            written = export_svg(self.view, chosen)
+        except OSError as exc:
+            self.statusBar().showMessage(f"Couldn't write the SVG: {exc}", 8000)
+            return False
+        if not written:
+            self.statusBar().showMessage("There was nothing to export.", 5000)
+            return False
+        set_export_dir(os.path.dirname(chosen))
+        self.statusBar().showMessage(f"Exported {chosen}", 5000)
+        return True
 
     def _set_default_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(

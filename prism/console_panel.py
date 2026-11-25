@@ -1,11 +1,10 @@
 """The dockable console: a CLI for inspecting and manipulating the canvas."""
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDockWidget,
     QHBoxLayout,
-    QInputDialog,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -15,7 +14,6 @@ from PySide6.QtWidgets import (
 )
 
 from prism.commands import CommandInterpreter
-from prism.settings import save_script
 
 
 class _CommandInput(QLineEdit):
@@ -55,10 +53,6 @@ class _CommandInput(QLineEdit):
 class ConsolePanel(QDockWidget):
     """A command line over the canvas, with the session recordable as a script."""
 
-    #: Emitted with the path after a script is saved, so the window can open
-    #: it in the editor and list it under Open Recent.
-    scriptSaved = Signal(str)
-
     def __init__(self, scene, parent=None):
         super().__init__("Console", parent)
         self.setObjectName("ConsolePanel")
@@ -66,6 +60,9 @@ class ConsolePanel(QDockWidget):
         #: Successful, building commands from this session, in order.
         self._recorded: list[str] = []
         self._recording = True
+        #: Set by MainWindow: where >> sends them. Callable taking the list
+        #: and returning the name of the script it went into, or None.
+        self._append_handler = None
 
         mono = QFont("Menlo")
         mono.setStyleHint(QFont.Monospace)
@@ -77,15 +74,17 @@ class ConsolePanel(QDockWidget):
         self._input = _CommandInput(self.run_command)
         self._input.setFont(mono)
 
-        self._save_button = QPushButton("Save Script…")
-        self._save_button.setToolTip(
-            "Save this session's commands to the scripts folder"
+        self._append_button = QPushButton(">>")
+        self._append_button.setFixedWidth(36)
+        self._append_button.setToolTip(
+            "Append this session's commands to the script in the Scripts "
+            "panel, and start a fresh session"
         )
-        self._save_button.clicked.connect(self._save_script)
+        self._append_button.clicked.connect(self.append_to_script)
 
         entry = QHBoxLayout()
         entry.addWidget(self._input)
-        entry.addWidget(self._save_button)
+        entry.addWidget(self._append_button)
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -109,6 +108,18 @@ class ConsolePanel(QDockWidget):
             self._echo(output)
         if ok and self._recording and self._interpreter.is_recordable(line):
             self._recorded.append(line.strip())
+
+    def interpreter(self):
+        """The command interpreter, for panels that read the language off it.
+
+        The Assistant builds its reference from ``(help)`` and its canvas
+        context from ``(ls)``, so the two cannot drift from the forms that
+        actually exist.
+
+        Returns:
+            The :class:`~prism.commands.CommandInterpreter`.
+        """
+        return self._interpreter
 
     def variables(self) -> dict:
         """The names bound with ``(define …)``, for panels that show them."""
@@ -135,28 +146,50 @@ class ConsolePanel(QDockWidget):
     def recorded_commands(self) -> list:
         return list(self._recorded)
 
-    # -- Saving ------------------------------------------------------------
+    # -- Handing the session on ---------------------------------------------
 
-    def _save_script(self) -> None:
+    def set_append_handler(self, handler) -> None:
+        """Say where **>>** sends the session's commands.
+
+        Args:
+            handler: Callable taking the list of commands and returning the
+                name of the script they went into, or None if they didn't.
+        """
+        self._append_handler = handler
+
+    def append_to_script(self) -> bool:
+        """Put the session's commands at the end of the open script.
+
+        What you did by clicking and typing becomes text you can edit, run
+        and keep. The session's record is **emptied** afterwards, so pressing
+        it again appends only what you have done since rather than a second
+        copy of everything.
+
+        Returns:
+            Whether anything was appended.
+        """
         if not self._recorded:
             QMessageBox.information(
                 self,
-                "Save Script",
-                "Nothing to save yet — run some commands that build "
+                "Append to Script",
+                "Nothing to append yet — run some commands that build "
                 "something first.",
             )
-            return
-        name, ok = QInputDialog.getText(self, "Save Script", "Script name:")
-        if not (ok and name.strip()):
-            return
-        body = "\n".join(self._recorded)
-        try:
-            path = save_script(name.strip(), body)
-        except OSError as exc:
-            QMessageBox.warning(self, "Save Script", f"Couldn't save it: {exc}")
-            return
-        self._echo(f"Saved {len(self._recorded)} command(s) to {path}")
-        self.scriptSaved.emit(path)
+            return False
+        if self._append_handler is None:
+            QMessageBox.information(
+                self,
+                "Append to Script",
+                "There is nowhere to put them: the Scripts panel isn't here.",
+            )
+            return False
+        count = len(self._recorded)
+        name = self._append_handler(list(self._recorded))
+        if name is None:
+            return False
+        self._recorded.clear()
+        self._echo(f"Appended {count} command(s) to {name}.")
+        return True
 
     # -- Internal ----------------------------------------------------------
 

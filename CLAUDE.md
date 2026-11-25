@@ -23,8 +23,26 @@ is imposed *projectively* using the app's own elements.
   `feature/<description>` → commit → push → the user raises/merges the PR. Never
   commit feature work directly to `main`. After a merge, pull `main` and cut a
   fresh branch. (The user raises and merges PRs themselves.)
+  A repair taken from the backlog is branched `fix/pb-<n>-<slug>` instead and
+  follows **Taking an issue from the backlog** below — one issue, one branch,
+  one PR.
 - Commit messages end with the `Co-Authored-By: Claude` trailer.
 - **`STATUS.md` is gitignored** — never commit it.
+- **`BACKLOG.md` is the work queue, and it is committed.** Daniel logs
+  issues into it from the Assistant panel while using Prism; a session asked
+  to "take the next thing in the backlog" takes the **first `open` entry
+  from the top** (oldest first). Closing one means setting its status to
+  `fixed` and adding a `- **Fixed**:` line naming the commit that did it —
+  on the same branch, so the entry and its repair travel together in the
+  same PR. It cannot be the same *commit* as the fix: a commit cannot hold
+  its own hash. Never
+  renumber or delete entries: an id that has been written in a commit
+  message must not come back meaning something else. Two reports of one
+  fault are **folded into the older entry**, which then carries both
+  symptoms; the newer one keeps its id and its own words, takes the status
+  `duplicate`, and gains a `- **Duplicate of**:` line. `open` is the only
+  status in the queue, so `fixed` and `duplicate` both take an entry out of
+  it without anything being deleted.
 - **Docs must stay green**: after any docstring/API change run
   `mkdocs build --strict` (exit 0). Recurring gotcha: a Google-style `Returns:`
   or `Args:` block that documents something **without a type annotation** fails
@@ -37,6 +55,53 @@ is imposed *projectively* using the app's own elements.
   have hidden real rendering bugs — see below).
 - The shell's working directory sometimes drifts; prefer `cd
   /Users/dhaden/projects/prism && …` in one-off commands.
+
+## Taking an issue from the backlog
+
+**One issue, one branch, one PR.** This is the per-issue counterpart to the
+feature branch above, and for backlog work it replaces "unrelated commits
+share the active branch": a repair spread across a branch carrying four
+other things cannot be reviewed *as* the repair for that entry, which is
+most of the reason the entry was written down.
+
+1. **Start from a current `main`** — `git switch main && git pull` — with no
+   other branch in flight. A fix cut from a stale `main` is one the PR
+   cannot show cleanly.
+2. **Take the first `open` entry from the top** of `BACKLOG.md` (oldest
+   first; `fixed` and `duplicate` are out of the queue). One entry, not two
+   whose titles rhyme — folding two reports together is for the *same
+   fault*, established by reading the code, not by reading the headings.
+3. **Cut `fix/pb-<n>-<short-slug>`**, e.g. `fix/pb-1-book-panel-page`. The
+   id is in the branch name so the branch, the PR and the entry can be laid
+   side by side afterwards.
+4. **Reproduce it before changing anything.** A headless harness that
+   *fails*, printing numbers rather than a verdict — that measurement is
+   what later says the fix worked, and it is what goes in the commit
+   message and the entry. An issue that will not reproduce is said so in
+   the entry and left `open`; a repair for a fault nobody has seen is a
+   repair nobody can check.
+5. **Fix it**, then run the new harness (now passing), the harnesses around
+   whatever was touched, and `mkdocs build --strict` (exit 0). Where the
+   fault was a crash, keep a fault injection beside the harness — a harness
+   that always passes is indistinguishable from one that tests nothing.
+6. **Close the entry on the same branch**: status `fixed`, plus a
+   `- **Fixed**:` line naming the commit that did it. That is the last
+   commit on the branch, since a commit cannot contain its own hash.
+7. **Push and hand over the branch URL.** Daniel raises, reviews and merges
+   the PR. Pull `main` again before taking the next entry.
+
+**Nothing on a fix branch that the entry did not ask for.** A fault noticed
+on the way is logged as a new entry — from the Assistant panel, or by hand,
+since the file is appended to and never rewritten — and taken in its turn.
+A fix PR that also tidies three unrelated things is one nobody can review
+as a fix.
+
+Harnesses are written in the session scratchpad and are **not committed**,
+so the durable record of a repair is the measurement in the commit message
+and in the closed entry. (The references below to `scratchpad/horizon_point.py`
+and `scratchpad/inject_hidden.py` are to files that were never in the repo.
+If harnesses should start being kept, a tracked directory is the change to
+make, and this paragraph is what changes with it.)
 
 ## Architecture
 
@@ -478,8 +543,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   (`P1`, `L1`). Fractions accept `1/3` or `0.5`. Angles are **degrees clockwise
   from horizontal**. Canvas fractions: 0 = top/left, 1 = bottom/right, of the
   *reference frame*.
-- **Scripts**: Console "Save Script…" records the session's *building*
-  commands and opens the result in the ScriptsPanel editor, which runs it.
+- **Scripts**: the console's **>>** button appends the session's *building*
+  commands to the ScriptsPanel editor, which runs them.
   Opening, saving and the default folder are the **File menu**'s (see **The
   File menu (scripts)**; `prism/settings.py`, `PRISM_SCRIPTS_DIR` overrides;
   `.prism` text files).
@@ -498,8 +563,8 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   disk, none of which announces itself; reading those as the menu opens beats
   keeping four actions in step from afar. Open Recent is rebuilt there too.
 - **The default scripts folder is a starting point, not a fence.**
-  `settings.scripts_dir()` is where **Save Script** writes and where **Open**
-  starts looking; opening a script elsewhere changes nothing. Two ways to move
+  `settings.scripts_dir()` is where **Save Script As…** starts and where
+  **Open** looks first; opening a script elsewhere changes nothing. Two ways to move
   it, both under File: a folder dialog, or **Use Current Script's Folder**,
   enabled only when the open script is somewhere else. It moved out of the
   Settings menu — one setting in two menus is only ever a question of which
@@ -513,9 +578,21 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   is the bare name, qualified with the parent folder only when two entries
   share one (`_recent_label`) — once scripts come from anywhere, two called
   `net` is ordinary.
-- `ConsolePanel.scriptSaved` now carries **the path**. `MainWindow` remembers
-  it and opens it in the editor, so what you just recorded is there to read
-  and run again. It used to carry nothing and refresh the list.
+- **The console's button is `>>`, and it appends to the buffer** rather than
+  writing a file. `ConsolePanel.append_to_script()` hands `_recorded` to the
+  handler `MainWindow` set with `set_append_handler` (a callable, not a
+  signal, because the console needs the answer back — the script's name, or
+  None); `ScriptsPanel.append_commands` puts the lines at the end of the
+  editor, a blank line clear of what was there, and leaves the script
+  **modified rather than written**. So a session can be read, tidied and
+  thrown away before it reaches disk. `_recorded` is **cleared** on success,
+  which is what makes a second press append only what came since.
+  It replaced "Save Script…", which prompted for a name and wrote a file; the
+  File menu does that now, and it did it better. With it went
+  `ConsolePanel.scriptSaved` and `settings.save_script` / `script_path` /
+  `safe_script_name` — the whole name-to-filename chain, since every script
+  Prism writes now comes from the file it was read from or from a Save As
+  dialog, and there is no name left to mangle.
 - `settings.list_scripts()` is **gone** — nothing lists a folder any more.
 
 ## Canvas properties
@@ -620,6 +697,219 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   default for points made later) still works and is applied *as a default*,
   so it does not mark a new point as the user's own. A style asserted
   afterwards wins over it.
+
+## Exporting (`prism/svg_export.py`)
+
+- **File → Export as SVG…** (Ctrl+Shift+E) writes **what the view shows** —
+  same pan, same zoom, lines clipped at the same edges. Fit to Frame first
+  for the reference frame. `QSvgGenerator`, from PySide6's own QtSvg, so no
+  new dependency.
+- **It renders the scene, not the view.** `view.render()` would bring
+  `drawForeground` with it, and the off-screen point markers are a way of
+  finding points, not part of the drawing.
+- **It must paint the background itself.** `setBackgroundBrush` is on the
+  *view*, so `scene.render()` leaves it out — and a point's glow is a disc
+  **in the background colour**, drawn over the lines to cut them away behind
+  the dot. Without the fill those discs are grey blobs on transparency.
+  Checked by rendering the file back with `QSvgRenderer` and reading the
+  corner pixel.
+- **It lifts the selection** for the duration and puts it back in a
+  `finally`. Selected items paint highlighted, and nobody wants orange in an
+  exported figure.
+- `QSvgGenerator` writes `width`/`height` in **millimetres**; the `viewBox`
+  carries the pixel coordinate system. A test that pins the size should pin
+  the viewBox.
+- No console form, and that is the rule rather than an omission: exporting
+  does not *build* anything, so it belongs with `(ls)` rather than with the
+  commands a script replays. If one is ever added it goes in
+  `NON_RECORDING`.
+- The folder is remembered (`settings.export_dir`), since a drawing you
+  export is one you export again.
+
+## The Assistant (`prism/agent/`, `prism/agent_panel.py`)
+
+- **It writes scripts; it does not touch the canvas.** A reply's fenced
+  `prism` block goes to the **Scripts panel** through the same
+  `append_commands` path the console's `>>` uses, and the user reads it and
+  runs it. That is the whole safety story — no tools, no approval dialogs,
+  nothing happening to a drawing unreviewed — and it is why this was worth
+  building before a tool-using agent.
+- **The command reference is read off the interpreter** (`(help)`), not
+  written out in the prompt. A hand-copied reference goes stale the first
+  time a form is added, and a stale one is worse than none: the model writes
+  commands that don't exist, confidently. `ConsolePanel.interpreter()` exists
+  for this.
+- **Canvas state goes in the user turn, not the system prompt**
+  (`canvas_context` → `(ls)`). The system prompt carries one
+  `cache_control: ephemeral` breakpoint, and caching is a prefix match — put
+  the canvas in there and every turn throws the cache away.
+- **Threading**: `AgentWorker` is a `QThread` that owns the request and hands
+  text back through signals, which Qt delivers on the GUI thread. Nothing in
+  `prism/agent/` touches a widget or the scene. Mode A has no tools, so there
+  is no marshalling the other way — that is the thing to get right if tools
+  are ever added (a tool handler must hop to the GUI thread with
+  `BlockingQueuedConnection`, and the GUI thread must then never block on the
+  worker, or the two deadlock).
+- **A turn that fails or is stopped is taken back out of the history.**
+  Leaving the question in would send it again, unanswered, stacked on the
+  next one; a half-streamed reply would be sent back as though finished.
+- **Two backends, picked in the panel**: `OllamaBackend` (local, no account,
+  stdlib `urllib` so no dependency) and `ClaudeBackend`. The picker re-asks
+  Ollama's `/api/tags` **each time it is opened** — Ollama gets started and
+  pulled from while Prism runs, so a list built at launch is wrong as often
+  as not. Ollama is listed first and defaults, which is right for someone
+  with no API key. The choice is remembered as `provider:model` (split on
+  the *first* colon — Ollama names contain one).
+- **Ollama needs `num_ctx` set explicitly** (`CONTEXT_TOKENS`, 8192). Its
+  default context is small enough to cut off the command reference, which
+  leaves the model guessing at a language it was never shown. It takes the
+  system prompt as the first *message*, not a field.
+- **`check_script()` reads a script against the real command table before it
+  is offered**, and the panel says what won't run. This earns its keep: a 3B
+  model writes `(add-horizon 1/3)` and a confident paragraph explaining it,
+  and no amount of prompt text reliably stops it — measured over several
+  rounds of tuning. Only **top-level heads** and parse errors are checked;
+  nested heads would also flag a lambda's parameter list, and a check with
+  false positives is one people learn to ignore. Said, never blocked.
+- The prompt earns its length: the `add`-with-a-space versus hyphenated
+  split, "parentheses mean a command" (a small model writes
+  `(point L1 (2/3))`), and worked examples of building from an empty canvas
+  (it reaches for `(point …)` where it needs `(add point …)`). Each of those
+  came from a real failure against llama3.2, not from guessing.
+- **The transcript is plain text in two faces.** Prose in a book serif
+  (`PROSE_FAMILIES`: Charter where it exists — Anthropic's own Tiempos Text
+  is licensed and on nobody's machine, and Charter is the closest thing that
+  ships with macOS), scripts in `CODE_FAMILIES`. A `QSyntaxHighlighter`
+  tracks the ``` fences with a block state and sets the face per line, so
+  the document never stops being plain text and `toPlainText()` is still
+  exactly what came back. Speaker lines are their own line and bold, because
+  the old column padding (`f"{who:<7}"`) only lined up in a monospace font.
+- **The question is on the right in a bubble, the reply on the left**, as in
+  the Claude desktop app, in its warm palette (`PAPER`, `BUBBLE`, `CARD`,
+  `INK`, light only). Which side a line falls on is a **property of its
+  block format** (`ROLE_PROPERTY` → `ASKED` / `ANSWERED` / `NOTE`), so the
+  document is still plain text — the block *state* was already taken by the
+  highlighter's fences, and the two sit side by side without either knowing
+  about the other. The "You" label went with the bubble: the side it is on
+  says whose words they are, and a label as well says it twice. The reply
+  keeps its name, since it may have come from Claude or from a local model.
+- **A bubble is painted, not laid out.** No text block can have a corner
+  radius, so `_TranscriptView.paintEvent` draws the rounded rect behind the
+  glyphs, from runs gathered in `_cards()`. Only the **left** edge hugs the
+  text; the right is the column's own edge, so a question long enough to
+  wrap is a rectangle rather than a shape with a ragged right side. A script
+  gets the same treatment as a card, which is what `END_SCRIPT` is for — the
+  closing fence needs a state of its own so the card can include it while
+  the line after it still reads "not in a script".
+- **Flush left inside a bubble that is flush right** is the one thing a
+  single block alignment cannot give: `AlignRight` hugs the bubble but
+  leaves every line ragged down its left edge. So the lines are set
+  `AlignLeft` and the **left margin** puts the bubble on the right —
+  `_fit_bubbles()` measures each question at full bubble width and then
+  gives it the margin that leaves room for its widest line and no more.
+  Widening can't make a block wrap, so one pass settles it; it runs when a
+  question lands and on every resize, behind a `_fitting` guard.
+- `PAGE_MARGIN` is the document margin, and it is what a card is padded
+  *into*: a script's lines are laid out by the document, so the only room
+  its card has to breathe is the page's own margin.
+- **The speaker line names the provider**, not "Claude" — saying Claude over
+  a local model's reply is a plain lie about where the words came from.
+  `SPEAKERS` must list any name `_speaker_name()` can return, or the
+  highlighter won't bold it.
+- **The API key is never Prism's.** The SDK reads it from the environment
+  (`ANTHROPIC_API_KEY`, or an `ant auth login` profile). QSettings is a
+  plaintext plist — nothing of the user's goes in it. `looks_configured()`
+  only decides whether to show a hint; it never blocks a send, since a
+  profile works with no environment variable at all.
+- Model `claude-opus-5-5`, adaptive thinking with `display: "summarized"`
+  (without it a long think is a silent pause that reads as a hang — the
+  summary goes to the status line, not the transcript), `effort: medium`,
+  streaming.
+- `anthropic>=2.0` is the first dependency beyond PySide6. The panel degrades
+  to a message if it is missing; Prism still runs.
+- **A system prompt is a role plus the reference, and only the role is the
+  user's.** `system_prompt(interpreter, role=None)` puts whichever role is
+  in force in front of the help text; `ROLE` in `prism/agent/prompt.py` is
+  the one Prism ships. The reference is not offered for editing at all — a
+  model shown none invents forms, and one shown a stale copy invents them
+  with a citation, which is the whole reason it is read off `(help)`.
+- **The built-in role is never stored.** `assistant_prompts()` holds only
+  what the user wrote, and `assistant_prompt_text()` returns **None** for
+  the built-in rather than a copy of it, so a stored prompt cannot drift
+  from the code it was copied out of. The choice is kept **by name**, and a
+  name that is no longer there reads back as `""` — the built-in — so
+  deleting the prompt in force needs no repair pass anywhere.
+  An **empty** role is a legitimate thing to write (the reference alone), so
+  the None/`""` distinction has to survive the whole path.
+- **`PromptDialog`'s New copies what is shown, rather than opening blank.**
+  The panel needs a reply in a particular shape — prose, then at most one
+  fenced `prism` block, which is what `extract_script` looks for — and the
+  surest way to keep that is to start from text that already says so. The
+  dialog writes nothing: it hands back the whole set and the choice, so
+  Cancel means what it says.
+- **Changing instructions applies from the next turn, and says so in the
+  transcript** when there is a conversation to say it about. The replies
+  already there were given under the old ones; that is a fact of the
+  conversation, not a fault in it. It also throws away Claude's prompt
+  cache — the system prompt *is* the cached prefix — so switching mid-chat
+  costs a full uncached turn.
+- **Measured, worth remembering**: llama3.2 is sensitive to prompt edits out
+  of all proportion. Prism's own role plus **one** inserted bullet (write
+  remarks in Latin) made it invent a form on three runs in four —
+  `(add-horizon …)` twice, `(add-point …)` once — where the role as shipped
+  wrote a runnable script; and it ignored the Latin anyway. `check_script`
+  caught every one and the canvas stayed empty. This is the
+  evidence for "said, never blocked" and for the dialog's note about
+  keeping the fenced-block ask.
+- **The backlog is the second thing a reply can carry.** A fenced block
+  tagged `issue` is a report of something wrong with Prism itself;
+  `extract_issue` finds it and **Log to Backlog** writes it to
+  `BACKLOG.md`. Same bargain as a script: the model writes words, Prism
+  writes files, the person reads them in between. A reply carries a script
+  or a report, never both, and unlike a script there is **no untagged
+  fallback** — a script that lost its tag is still recognisably a script,
+  but a paragraph in a fence is just a paragraph, and filing one as a bug
+  report would be making things up.
+- **The offer to log sits on the thing it would log.** A drafted report
+  gets a `→` (`_LogMark`, parented to the transcript's **viewport** so it
+  scrolls with its card) in the corner of its card, and the bottom button
+  hides — with `setRetainSizeWhenHidden(True)`, so the row does not
+  shuffle. This was not a preference: the very first report drafted in
+  anger went unlogged because the button was at the bottom of the panel,
+  where it read as being about the panel. The button at rest has a ring
+  and ink-dark glyph rather than a bare grey arrow, for the same reason.
+  Telling a report's card from a script's needs the **fence tag**, so the
+  highlighter carries `IN_ISSUE`/`END_ISSUE` beside `IN_SCRIPT`/
+  `END_SCRIPT` and `_kind_of` turns those into the `REPORTED` card kind.
+- **Three things the offer can log, in order**: the drafted report, what
+  is typed in the box, or `_last_asked` — the last question, word for word.
+  The third is not a nicety. Sending empties the box, so a model that
+  answers a bug report in prose leaves nothing to log, and retyping a bug
+  you have just described is how a backlog stops being kept. After a
+  successful log all three are cleared, so a second press cannot file the
+  same words twice.
+- **A drafted entry also carries `> Reported as:` — the words actually
+  said.** Measured against llama3.2: of two live runs, one wrote no fenced
+  block at all and one wrote a block whose title named the wrong panel
+  entirely (it had blended the report with the example in the prompt). The
+  plumbing was right both times; the prose was not. A 3B model drafts a
+  report about as well as it writes a script, which is to say read it
+  before you press the button — and whatever it writes, the sentence you
+  actually typed is in the file underneath it.
+- **The example in the prompt must not be a bug that actually exists**, or
+  a small model's parroting is indistinguishable from its understanding.
+  That is how the first version of this was mis-measured.
+- `prism/backlog.py` is plain file handling, no Qt: appended to and never
+  rewritten, because the file is one a coding session is likely to have
+  open and be editing statuses in, and an append is the one write that
+  cannot lose somebody else's. `head_commit()` reads `.git` **directly**
+  rather than shelling out to git — an app that runs a subprocess on a
+  button press is an app that hangs when the subprocess does.
+- **This is "Mode A"** of the design we settled on: conversational, no tools.
+  Mode B — the model driving the canvas through `run_prism_command`, with a
+  `look_at_canvas` screenshot tool — is the next step, and `backends.py`'s
+  seam is the **turn**, so a local model slots in by implementing
+  `stream_turn` alone.
 
 ## Panels
 
@@ -821,6 +1111,36 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
 - QGraphicsItemGroup **clears/loses child registration** on ungroup — remove &
   re-add children so the scene re-registers them in its selection index.
 - Enum access differs by PySide version: `QLineF.IntersectionType.Bounded…`.
+- **A harness waits for a condition, never for a duration.** The drag
+  harness (`scratchpad/horizon_point.py`) used `qWait(30)` after `show()` and
+  `qWait(8)` between synthetic mouse moves, and failed twice in sweeps while
+  passing on either side — which reads as a regression in the one path that
+  has actually crashed the app, and isn't one. Its waits are conditions now:
+  `qWaitForWindowExposed`, then a predicate pumped to a ceiling that **exits
+  saying the harness couldn't set its scene up**, rather than failing a
+  behaviour check. The gesture is aimed from `centerOn(point)` instead of
+  from whatever scroll offset the view settled at, and every synthetic event
+  is flushed before the next is sent — which is also what makes the move
+  count exact, since Qt compresses mouse moves only while one is still
+  pending. With the slide pinned to the pixels dragged (108px across is
+  108/zoom scene units along a horizontal line), the whole outcome is a
+  number, so there is nothing left for the machine's mood to change.
+- **"The moves stopped arriving" means the grabber went invisible.** Qt
+  releases the mouse grab when the grabbing item stops being visible, so a
+  point that goes undefined or hidden mid-drag takes the rest of the gesture
+  with it: no further `drag_items`, no release, `_drag_items` left full and
+  nothing moved. That is exactly the signature the flaky sweeps recorded —
+  three checks failing but **not** "Qt's raw-pointer loop never ran", so
+  `returns` was empty rather than holding a `False` — and injecting
+  `set_shown(False)` part-way through a gesture reproduces it line for line.
+  The harness therefore watches `set_shown` / `set_position_undefined` on the
+  dragged point for the length of the gesture and prints the **stack that
+  made the change**. If it recurs with a stack inside Prism it is a real
+  defect — a drag that dies silently — not harness timing.
+- Keep a fault injection beside a harness that guards a crash
+  (`scratchpad/inject_hidden.py`, `inject_qt_loop.py`: the same file with the
+  bug put back). A harness that always passes is indistinguishable from one
+  that tests nothing, and these two are what prove the checks still bite.
 
 ## Next steps (deferred to future sessions)
 

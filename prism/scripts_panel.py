@@ -10,7 +10,7 @@ disk, so an edit can be tried before it is kept.
 
 import os
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QDockWidget,
     QHBoxLayout,
@@ -154,6 +154,36 @@ class ScriptsPanel(QDockWidget):
         self._editor.setPlainText(text)
         self._editor.blockSignals(False)
         self._set_dirty(False)
+        return True
+
+    def append_commands(self, commands: list) -> bool:
+        """Put commands at the end of the open script.
+
+        A blank line separates them from what was already there, so a
+        session handed over in two goes reads as two paragraphs rather than
+        one run-on block. The editor is left scrolled to them, and the
+        script is marked modified — appending does not write the file, so
+        you can still look at what arrived and throw it away.
+
+        Args:
+            commands: The command lines, in order.
+
+        Returns:
+            Whether anything was appended.
+        """
+        if not commands:
+            return False
+        block = "\n".join(commands)
+        existing = self._editor.toPlainText()
+        if existing.strip():
+            text = existing.rstrip("\n") + "\n\n" + block + "\n"
+        else:
+            text = block + "\n"
+        self._editor.setPlainText(text)
+        cursor = self._editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self._editor.setTextCursor(cursor)
+        self._editor.ensureCursorVisible()
         return True
 
     def new_script(self) -> None:
