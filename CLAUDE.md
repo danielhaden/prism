@@ -32,7 +32,12 @@ is imposed *projectively* using the app's own elements.
   `fixed` and adding a `- **Fixed**:` line with the commit — in the same
   commit as the fix, so the entry and its repair travel together. Never
   renumber or delete entries: an id that has been written in a commit
-  message must not come back meaning something else.
+  message must not come back meaning something else. Two reports of one
+  fault are **folded into the older entry**, which then carries both
+  symptoms; the newer one keeps its id and its own words, takes the status
+  `duplicate`, and gains a `- **Duplicate of**:` line. `open` is the only
+  status in the queue, so `fixed` and `duplicate` both take an entry out of
+  it without anything being deleted.
 - **Docs must stay green**: after any docstring/API change run
   `mkdocs build --strict` (exit 0). Recurring gotcha: a Google-style `Returns:`
   or `Args:` block that documents something **without a type annotation** fails

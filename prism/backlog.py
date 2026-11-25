@@ -22,6 +22,11 @@ Only the ``## PB-n ·`` heading and the ``Status`` line are read back; the
 rest is prose for whoever picks it up. Entries are appended at the end, so
 **the first open one from the top is the oldest open one** — which is what
 "take the first issue in the backlog" means.
+
+:data:`OPEN` is the only status in the queue. Anything else takes an entry
+out of it without deleting it — ``fixed`` once it is repaired, ``duplicate``
+once it has been folded into an older entry — so an id that has been written
+in a commit message always means what it meant.
 """
 
 import os
@@ -53,6 +58,12 @@ Each entry is a heading, a few fields, and prose. Nothing here is generated
 — edit it by hand whenever that is easier. To close one, set its status to
 `fixed` and add a `- **Fixed**:` line naming the commit; leave the entry
 itself where it is.
+
+Two reports of one fault are **folded into the older entry**: the newer one
+keeps its id and its own words, takes the status `duplicate`, and gains a
+`- **Duplicate of**:` line. Only `open` entries are in the queue, so a
+folded report leaves it without being deleted — an id that has been written
+in a commit message must never come back meaning something else.
 """
 
 
