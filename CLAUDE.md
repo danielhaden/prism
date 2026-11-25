@@ -978,6 +978,29 @@ main.py → prism/app.py → prism/main_window.py (QMainWindow)
   Display names come off the filename (`book_name_for`): drop `.pdf`, cut at
   the first ` -- ` (which is what tames an Anna's-Archive download), truncate
   to `BOOK_NAME_LIMIT`. The full path is the dropdown's tooltip.
+  **The reader's place is held across a rescale** (`_hold_page` /
+  `_release_page`, PB-1). Fit-to-width rescales on every width change and a
+  zoom step rescales on purpose; either way the continuous layout's total
+  height changes while the scroll bar keeps its **pixel** value, so the same
+  offset is now a different page. `QPdfPageNavigator` reports that as an
+  ordinary page change, so before the fix it was written to the settings as
+  the place to come back to — which is why the reading position was lost
+  across a restart as well, and why the two reports of it were one fault.
+  `_page` is authoritative, `_holding` makes the panel disbelieve the
+  navigator while a rescale settles, and a 0ms single-shot puts the reader
+  back once the new layout exists (`currentLocation()` is restored too, so
+  it is the place within the page and not merely the page number).
+  **The capture must happen in an event filter on the view, not in the
+  dock's `resizeEvent`.** Measured: the reflow runs *inside*
+  `QWidget::resize` — scroll-bar range, then `currentPageChanged`, then the
+  dock's own handler — so by the time the dock hears about the resize the
+  place is already the wrong one. A widget's event filter runs *before* the
+  widget handles the event, which is the last moment at which the current
+  page is still the page the reader was reading. That wrong version looks
+  right and fixes nothing, which is what `scratchpad/inject_late_hold.py`
+  puts back. Scrolling is deliberately **not** held — that is the reader
+  moving, and a fix that pinned the page by refusing to turn it would be no
+  fix.
   Gotchas: `QPdfView.zoomFactor()` stays at its last *custom* value while
   fit-to-width is on, so a zoom step reconstructs the fitted scale from the page
   width (`_fitted_zoom`); `QPdfPageNavigator.jump()` to the page it's already on

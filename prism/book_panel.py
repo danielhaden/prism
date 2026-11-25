@@ -12,7 +12,7 @@ than a file viewer.
 import html
 import os
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
@@ -64,6 +64,19 @@ class BookPanel(QDockWidget):
         #: True while a book is being swapped in, when the navigator reports
         #: pages belonging to neither book.
         self._loading = False
+        #: The page the reader is on. Authoritative, because the navigator's
+        #: idea of it is read off the scroll offset and so changes whenever
+        #: the layout is rescaled — see :meth:`_hold_page`.
+        self._page = 0
+        #: Where on that page, in points, so a rescale keeps the reader's
+        #: place within the page and not merely the page number.
+        self._held_at = QPointF(0, 0)
+        #: True while a rescale settles, when the navigator reports the page
+        #: the old scroll offset now lands on rather than a page turn.
+        self._holding = False
+        self._hold_timer = QTimer(self)
+        self._hold_timer.setSingleShot(True)
+        self._hold_timer.timeout.connect(self._release_page)
 
         self._stack = QStackedWidget()
         self._stack.addWidget(self._build_placeholder())
@@ -194,6 +207,10 @@ class BookPanel(QDockWidget):
         self._view.setDocument(self._document)
         self._view.setPageMode(QPdfView.PageMode.MultiPage)
         self._view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        # Filtered rather than subclassed, and on the *view* rather than on
+        # the dock, because the place has to be taken before Qt relays the
+        # document out — see :meth:`eventFilter`.
+        self._view.installEventFilter(self)
 
         self._navigator = self._view.pageNavigator()
         self._navigator.currentPageChanged.connect(self._on_page_changed)
@@ -331,23 +348,103 @@ class BookPanel(QDockWidget):
     def _on_page_changed(self, page: int) -> None:
         if self._loading:
             return  # between books: this page belongs to neither
+        if self._holding:
+            return  # a rescale moved the offset, not the reader
+        self._page = page
+        self._sync_page_controls(page)
+        settings.set_book_page(page)
+
+    def _sync_page_controls(self, page: int) -> None:
+        """Point the page box and the arrows at a page.
+
+        Args:
+            page: The zero-based page they should show.
+        """
         self._syncing = True
         self._page_box.setValue(page + 1)
         self._syncing = False
         self._prev_button.setEnabled(page > 0)
         self._next_button.setEnabled(page < self._document.pageCount() - 1)
+
+    # -- Keeping the reader's place through a rescale ----------------------
+
+    def _hold_page(self) -> None:
+        """Remember the place, for putting back once a rescale has settled.
+
+        Fit-to-width rescales the page whenever the panel changes width, and
+        a zoom step rescales it on purpose. Either way the continuous
+        layout's total height changes while the scroll bar keeps its
+        **pixel** value, so the same offset is now a different page —
+        measured on 16bb87b, Coxeter at page 60: narrowing the panel from
+        560px to 336px landed on page 106, and a single zoom step landed on
+        32. `QPdfPageNavigator` reports that as an ordinary page change, so
+        before this it was also written to the settings as the place to come
+        back to, and the reading position was lost across a restart as well.
+
+        The place is captured once per rescale, not once per resize event: a
+        drag of the dock's edge is a flood of them, and the second capture
+        would be reading a position the first rescale had already moved.
+        Putting it back waits for the event loop to be free, which is after
+        the rescale — the restore cannot be immediate, because the layout
+        the reader is being put back into does not exist yet.
+        """
+        if self._loading or self._document.status() != QPdfDocument.Status.Ready:
+            return
+        if not self._holding:
+            self._held_at = self._navigator.currentLocation()
+        self._holding = True
+        self._hold_timer.start(0)
+
+    def _release_page(self) -> None:
+        """Put the reader back, and start believing the navigator again."""
+        if self._document.status() != QPdfDocument.Status.Ready:
+            self._holding = False
+            return
+        page = max(0, min(self._page, self._document.pageCount() - 1))
+        # Still holding, so this jump's own page change isn't mistaken for a
+        # page turn; the controls are then synced by hand, as after a load.
+        self._navigator.jump(page, self._held_at)
+        self._holding = False
+        self._page = page
+        self._sync_page_controls(page)
         settings.set_book_page(page)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Take the reader's place before the view is relaid out.
+
+        The whole fix hangs on this being a filter on the view rather than
+        a ``resizeEvent`` on the dock. A widget's event filter runs *before*
+        the widget handles the event, and `QPdfView` relays the document out
+        inside its own resize handler — so the filter is the last moment at
+        which the current page is still the page the reader was reading.
+        Measured on the dock's ``resizeEvent`` instead: the scroll bar's
+        range had already changed, the navigator had already reported page
+        106, and the place being saved was the wrong one.
+
+        Args:
+            watched: The object the event is for.
+            event: The event.
+
+        Returns:
+            False always — the view still handles its own resize; this only
+                listens.
+        """
+        if watched is self._view and event.type() == QEvent.Type.Resize:
+            self._hold_page()
+        return super().eventFilter(watched, event)
 
     # -- Zoom --------------------------------------------------------------
 
     def fit_width(self) -> None:
         """Scale the page to the panel's width."""
+        self._hold_page()
         self._view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
 
     def _zoom_by(self, factor: float) -> None:
         # Stepping the zoom leaves fit-to-width behind, so start from what the
         # fitted page is actually showing — otherwise the first step snaps to
         # 100% and the reader loses their place.
+        self._hold_page()
         current = self._view.zoomFactor()
         if self._view.zoomMode() != QPdfView.ZoomMode.Custom:
             current = self._fitted_zoom() or current
